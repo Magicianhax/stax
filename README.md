@@ -14,7 +14,9 @@ An AI agent that turns plain-language goals into risk-managed, verifiable RWA po
 
 <img src="docs/demo.gif" alt="Stax demo" width="640" />
 
-[▶ Watch the full demo](web/public/stax.mp4) · [Contracts on Mantlescan ↓](#deployed-contracts-mantle-mainnet--chainid-5000--verified-on-mantlescan)
+### [▶ Live at stax.best](https://stax.best)
+
+[Watch the full demo](web/public/stax.mp4) · [Contracts on Mantlescan ↓](#deployed-contracts-mantle-mainnet--chainid-5000--verified-on-mantlescan)
 
 </div>
 
