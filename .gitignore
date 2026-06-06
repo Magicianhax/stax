@@ -1,0 +1,35 @@
+# Stax — repo root ignore (web/ and contracts/ also have their own)
+
+# dependencies
+**/node_modules/
+
+# secrets — NEVER commit real env. The .env.example templates ARE committed.
+.env
+.env.local
+**/.env
+**/.env.local
+**/.env.*.local
+
+# next.js / build output
+**/.next/
+**/out/
+**/build/
+**/*.tsbuildinfo
+**/next-env.d.ts
+
+# hardhat / solidity build artifacts
+**/artifacts/
+**/cache/
+**/typechain-types/
+**/coverage/
+**/coverage.json
+
+# internal planning notes — not for the public repo
+tasks/
+
+# os / editor / misc
+.DS_Store
+Thumbs.db
+*.pem
+*.log
+**/.vercel
