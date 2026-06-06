@@ -309,6 +309,8 @@
    Reusable atoms
    =========================================================================== */
 .stax .btn {
+  position: relative;
+  overflow: hidden;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -325,6 +327,28 @@
 }
 .stax .btn:active {
   transform: scale(0.97);
+}
+/* Liquid Glass: a specular highlight that tracks the pointer (--gx/--gy set in JS),
+   appearing on hover. Sits above the fill, below the label. */
+.stax .btn > * {
+  position: relative;
+  z-index: 1;
+}
+.stax .btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  background: radial-gradient(150px circle at var(--gx, 50%) var(--gy, 50%), rgba(255, 255, 255, 0.28), transparent 60%);
+  opacity: 0;
+  transition: opacity 0.25s var(--ease-out);
+  pointer-events: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  .stax .btn:hover::after {
+    opacity: 1;
+  }
 }
 .stax .btn-primary {
   background: var(--hero-grad);
@@ -367,6 +391,27 @@
 .stax .btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+/* frosted liquid-glass button — for actions sitting OVER content (sheets, cards),
+   where the backdrop blur actually reads. Inherits the pointer sheen above. */
+.stax .btn-glass {
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--glass-stroke), var(--glass-hi), 0 10px 26px -12px rgba(0, 0, 0, 0.3);
+}
+@media (hover: hover) and (pointer: fine) {
+  .stax .btn-glass:hover {
+    filter: brightness(1.05);
+  }
+}
+/* reusable liquid-glass surface for divs / cards / chrome that sit over content */
+.stax .glass {
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: inset 0 0 0 1px var(--glass-stroke), var(--glass-hi);
 }
 
 .stax .card {
@@ -593,9 +638,9 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.02em;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0;
   color: var(--accent);
 }
 
@@ -1650,6 +1695,19 @@ body {
   margin-top: 26px;
 }
 
+/* gentle 3D tilt + strong shadow on the playable demo phones — applies on mobile;
+   the desktop @media below overrides the transform with a stronger tilt. */
+.site .demo-split > .phone {
+  box-shadow:
+    0 40px 72px -26px rgba(0, 0, 0, 0.62),
+    0 16px 34px -20px rgba(0, 0, 0, 0.5),
+    inset 0 0 0 2px var(--s-line);
+  transition: transform 0.5s var(--s-ease);
+}
+.site .demo-split > .phone::before { display: none; }
+.site .demo-split.phone-left > .phone { transform: perspective(1400px) rotateY(9deg) rotateX(3deg) rotate(-2deg); }
+.site .demo-split.phone-right > .phone { transform: perspective(1400px) rotateY(-9deg) rotateX(3deg) rotate(2deg); }
+
 /* lead paragraph under a section display heading */
 .site .demo-lead {
   margin-top: 18px;
@@ -1751,6 +1809,7 @@ body {
   .site .demo-split.phone-left > .phone {
     order: 1;
     justify-self: center;
+    transform: perspective(1500px) rotateY(26deg) rotateX(7deg) rotate(-4deg);
   }
   .site .demo-split.phone-left > .demo-copy {
     order: 2;
@@ -1764,7 +1823,17 @@ body {
   .site .demo-split.phone-right > .phone {
     order: 2;
     justify-self: center;
+    transform: perspective(1500px) rotateY(-26deg) rotateX(7deg) rotate(4deg);
   }
+  /* strong shadow behind the tilted demo phones (replaces the soft glow) */
+  .site .demo-split > .phone {
+    box-shadow:
+      0 75px 120px -30px rgba(0, 0, 0, 0.75),
+      0 35px 60px -28px rgba(0, 0, 0, 0.55),
+      inset 0 0 0 2px var(--s-line);
+    transition: transform 0.55s var(--s-ease), box-shadow 0.55s var(--s-ease);
+  }
+  .site .demo-split > .phone::before { display: none; }
 }
 
 /* marquee */

@@ -539,6 +539,10 @@ export function SiteLanding() {
               <a href="https://www.mantle.xyz" target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><MantleLogo size={15} /> Mantle Network</a>
               <span style={{ display: "block", color: "var(--s-ink-3)", fontSize: 14.5 }}>Tokenized by Backed</span>
             </div>
+            <div>
+              <h4>Connect</h4>
+              <a href="https://x.com/stax_market" target="_blank" rel="noreferrer">@stax_market on X</a>
+            </div>
           </div>
           <div className="footer-bottom">
             <span>© 2026 Stax. Stocks can go down as well as up, only invest what you can leave for a while.</span>

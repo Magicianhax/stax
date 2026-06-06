@@ -26,13 +26,13 @@ export function TabBar({ active, onNav, pro = false }: TabBarProps) {
         { id: "market", icon: "grid", label: "Market" },
         { id: "invest", icon: "spark", label: "Invest", center: true },
         { id: "portfolio", icon: "trend", label: "Owned" },
-        { id: "vera", icon: "shieldPlain", label: "Vera" },
+        { id: "vera", icon: "orbit", label: "Vera" },
       ]
     : [
         { id: "home", icon: "home", label: "Home" },
         { id: "portfolio", icon: "trend", label: "Owned" },
         { id: "invest", icon: "spark", label: "Invest", center: true },
-        { id: "vera", icon: "shieldPlain", label: "Vera" },
+        { id: "vera", icon: "orbit", label: "Vera" },
       ];
 
   return (

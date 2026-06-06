@@ -276,8 +276,8 @@ export function TradeScreen({
 
           <div style={{ flex: 1 }} />
           <div style={{ padding: "12px 22px calc(18px + env(safe-area-inset-bottom))" }}>
-            <div className="verified" style={{ justifyContent: "center", marginBottom: 12 }}>
-              <Icon name="shield" size={13} stroke={2} /> Free · paid into your cash balance
+            <div style={{ textAlign: "center", marginBottom: 12, fontSize: 12.5, color: "var(--ink-3)" }}>
+              Free · paid into your cash balance
             </div>
             <button
               className="btn btn-primary btn-block btn-lg tap"
@@ -419,8 +419,8 @@ export function TradeScreen({
 
           <div style={{ flex: 1 }} />
           <div style={{ padding: "12px 22px calc(18px + env(safe-area-inset-bottom))" }}>
-            <div className="verified" style={{ justifyContent: "center", marginBottom: 12 }}>
-              <Icon name="shield" size={13} stroke={2} /> Gas-free · {STAX_FEE_LABEL} fee
+            <div style={{ textAlign: "center", marginBottom: 12, fontSize: 12.5, color: "var(--ink-3)" }}>
+              Gas-free · {STAX_FEE_LABEL} fee
             </div>
             <button
               className="btn btn-primary btn-block btn-lg tap"

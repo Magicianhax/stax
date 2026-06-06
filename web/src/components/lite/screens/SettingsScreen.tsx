@@ -277,6 +277,13 @@ export function SettingsScreen({
             onClick={() => go("help")}
             right={<Icon name="chevR" size={18} style={{ color: "var(--ink-3)" }} />}
           />
+          <Row
+            icon="link"
+            title="Follow @stax_market"
+            sub="Updates and support on X"
+            onClick={() => window.open("https://x.com/stax_market", "_blank", "noopener")}
+            right={<Icon name="arrowUR" size={16} style={{ color: "var(--ink-3)" }} />}
+          />
         </div>
       </div>
 

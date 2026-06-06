@@ -3,8 +3,8 @@
 // Receipt — Pro on-chain record (screens_pro.jsx · Receipt) framed in plain
 // words. For real buys/invests we receive a live txHash and link to Mantlescan;
 // for Vera's sample recorded recommendations we show the illustrative reference.
-import { Icon, VerifiedBadge } from "@/components/design";
-import { usd, txUrl, shortAddress } from "@/lib/format";
+import { Icon, Seal } from "@/components/design";
+import { usd, txUrl } from "@/lib/format";
 import { iconBtn } from "./primitives";
 
 export function ReceiptScreen({
@@ -24,7 +24,6 @@ export function ReceiptScreen({
 }) {
   // Live receipts have a real tx; sample records only have an illustrative ref.
   const explorerHref = txHash ? txUrl(txHash) : undefined;
-  const reference = txHash ? shortAddress(txHash) : (ref ?? "recorded on-chain");
   const showAmount = amount !== undefined;
 
   return (
@@ -92,56 +91,31 @@ export function ReceiptScreen({
 
       {/* on-chain record (plain words) */}
       <div style={{ padding: "18px 22px 0" }}>
-        <div className="card" style={{ padding: 16, background: "var(--accent-soft)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-            <Icon name="shield" size={20} style={{ color: "var(--accent)" }} />
-            <span style={{ fontWeight: 700, fontSize: 15 }}>Permanent record</span>
-            <VerifiedBadge label="verifiable" />
+        <div className="card" style={{ padding: 18, textAlign: "center" }}>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 11 }}>
+            <Seal size={30} />
           </div>
-          <p style={{ fontSize: 13.5, color: "var(--ink-2)", margin: "0 0 12px", lineHeight: 1.5 }}>
-            This can&apos;t be edited or deleted. Anyone can check it. It&apos;s how Vera&apos;s
+          <div style={{ fontWeight: 700, fontSize: 15.5, letterSpacing: "-.01em" }}>Permanent record</div>
+          <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 2 }}>Signed &amp; recorded on-chain</div>
+          <p style={{ fontSize: 13.5, color: "var(--ink-2)", margin: "12px auto 14px", lineHeight: 1.55, maxWidth: 330 }}>
+            This can&apos;t be edited or deleted, and anyone can check it. It&apos;s how Vera&apos;s
             track record stays honest.
           </p>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              background: "var(--surface)",
-              borderRadius: 12,
-              padding: "11px 13px",
-            }}
-          >
-            <span
-              className="mono"
-              style={{
-                flex: 1,
-                fontSize: 12.5,
-                color: "var(--ink-2)",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
+          {explorerHref ? (
+            <a
+              href={explorerHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-glass btn-block tap"
+              style={{ height: 46, fontSize: 14.5, textDecoration: "none" }}
             >
-              {reference}
-            </span>
-            {explorerHref ? (
-              <a
-                href={explorerHref}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="tap"
-                style={{ color: "var(--accent)", display: "grid", placeItems: "center" }}
-                aria-label="Open on Mantlescan"
-              >
-                <Icon name="link" size={18} />
-              </a>
-            ) : (
-              <span style={{ color: "var(--ink-3)", display: "grid", placeItems: "center" }}>
-                <Icon name="link" size={18} />
-              </span>
-            )}
-          </div>
+              View on Mantlescan <Icon name="arrowUR" size={16} />
+            </a>
+          ) : (
+            <div style={{ fontSize: 12.5, color: "var(--ink-3)", textAlign: "center" }}>
+              {ref ? `Reference ${ref}` : "Recorded on-chain"}
+            </div>
+          )}
         </div>
       </div>
     </div>

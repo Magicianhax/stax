@@ -3,7 +3,7 @@
 // Tiny shared primitives for the Lite screens — ported from the design handoff
 // (the inline Spinner / iconBtn / VeraTag used across onboarding + invest screens).
 import type { CSSProperties } from "react";
-import { Icon, VeraOrb } from "@/components/design";
+import { Icon, VeraOrb, Seal } from "@/components/design";
 
 export function Spinner({ small }: { small?: boolean }) {
   const s = small ? 18 : 22;
@@ -110,9 +110,8 @@ export function VeraTag({ verified = false }: { verified?: boolean }) {
       <VeraOrb size={26} />
       <span style={{ fontWeight: 700, fontSize: 16 }}>Vera</span>
       {verified && (
-        <span className="verified" style={{ marginLeft: 2 }}>
-          <Icon name="shield" size={12} stroke={2} />
-          verified
+        <span style={{ marginLeft: 2, display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600, color: "var(--ink-2)" }}>
+          <Seal size={16} /> Verified
         </span>
       )}
     </div>

@@ -231,6 +231,19 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
     };
   }, [demoPlay]);
 
+  // Liquid Glass: the specular sheen on buttons tracks the pointer.
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      const btn = (e.target as HTMLElement | null)?.closest<HTMLElement>(".btn");
+      if (!btn) return;
+      const r = btn.getBoundingClientRect();
+      btn.style.setProperty("--gx", `${(((e.clientX - r.left) / r.width) * 100).toFixed(1)}%`);
+      btn.style.setProperty("--gy", `${(((e.clientY - r.top) / r.height) * 100).toFixed(1)}%`);
+    };
+    window.addEventListener("pointermove", onMove, { passive: true });
+    return () => window.removeEventListener("pointermove", onMove);
+  }, []);
+
   // Drive screen from the real invest phase.
   useEffect(() => {
     if (invest.phase === "done" && invest.success) {

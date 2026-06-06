@@ -273,15 +273,39 @@ export interface VerifiedBadgeProps {
   onClick?: () => void;
 }
 
+// Stax verification seal — the sage gradient check we use as the "verified /
+// signed" mark everywhere (Vera's identity, trust badges, receipts). One shared
+// element keeps the trust language consistent across the app.
+export function Seal({ size = 22 }: { size?: number }) {
+  return (
+    <span
+      aria-hidden
+      style={{
+        width: size,
+        height: size,
+        borderRadius: "50%",
+        background: "var(--hero-grad)",
+        display: "grid",
+        placeItems: "center",
+        flex: "none",
+        boxShadow: `0 2px ${Math.round(size / 3)}px color-mix(in srgb, var(--primary) 36%, transparent)`,
+      }}
+    >
+      <Icon name="check" size={Math.round(size * 0.56)} stroke={3} style={{ color: "var(--primary-ink)" }} />
+    </span>
+  );
+}
+
 export function VerifiedBadge({ label = "Recorded & verifiable", onClick }: VerifiedBadgeProps) {
   return (
     <button
       onClick={onClick}
-      className="verified"
-      style={{ gap: 6, padding: "6px 11px", borderRadius: 99, background: "var(--accent-soft)" }}
+      className="tap"
+      style={{ display: "inline-flex", alignItems: "center", gap: 9, color: "var(--ink)" }}
     >
-      <Icon name="shield" size={13} stroke={2} style={{ color: "var(--accent)" }} />
-      <span style={{ fontWeight: 500 }}>{label}</span>
+      <Seal size={21} />
+      <span style={{ fontSize: 13, fontWeight: 600 }}>{label}</span>
+      {onClick && <Icon name="chevR" size={15} style={{ color: "var(--ink-3)", marginLeft: -2 }} />}
     </button>
   );
 }

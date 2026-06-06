@@ -29,7 +29,7 @@ const ConfigInput = z.object({
 export async function GET(req: NextRequest) {
   const user = await verifyRequest(req);
   if (!user) return unauthorized();
-  return Response.json({ autopilot: getAutopilot(user.userId) });
+  return Response.json({ autopilot: await getAutopilot(user.userId) });
 }
 
 export async function POST(req: NextRequest) {
@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
   try {
     // Clock at request time (allowed in a handler) — anchors the schedule.
     const now = Math.floor(Date.now() / 1000);
-    const existing = getAutopilot(user.userId);
+    const existing = await getAutopilot(user.userId);
     const cfg: AutopilotConfig = {
       id: existing?.id ?? `ap_${user.userId}`,
       userId: user.userId,
@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
       runs: existing?.runs ?? 0,
       spentThisPeriod: 0,
     };
-    return Response.json({ autopilot: upsertAutopilot(cfg), cadenceSeconds: CADENCE_SECONDS[body.cadence] });
+    return Response.json({ autopilot: await upsertAutopilot(cfg), cadenceSeconds: CADENCE_SECONDS[body.cadence] });
   } catch (err) {
     return serverError("autopilot", err);
   }
@@ -75,6 +75,6 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const user = await verifyRequest(req);
   if (!user) return unauthorized();
-  deleteAutopilot(user.userId);
+  await deleteAutopilot(user.userId);
   return Response.json({ ok: true });
 }

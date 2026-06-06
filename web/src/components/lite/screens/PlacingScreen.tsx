@@ -6,7 +6,7 @@
 //   approving -> "Buying each holding"
 //   investing -> "Securing it to your account" (batched, sponsored UserOp)
 // The ring + active step are derived from the real phase, not a fixed timer.
-import { Icon, VeraOrb } from "@/components/design";
+import { Icon, VeraOrb, Seal } from "@/components/design";
 import { Spinner } from "./primitives";
 
 const STEPS = ["Confirming your plan", "Buying each holding", "Securing it to your account"];
@@ -93,8 +93,8 @@ export function PlacingScreen({ phase }: { phase: string }) {
         ))}
       </div>
 
-      <div className="verified" style={{ marginTop: 28 }}>
-        <Icon name="shield" size={13} stroke={2} /> Gas-free · signed &amp; verified on-chain
+      <div style={{ marginTop: 28, display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 600, color: "var(--ink-2)" }}>
+        <Seal size={18} /> Gas-free · signed &amp; verified on-chain
       </div>
     </div>
   );

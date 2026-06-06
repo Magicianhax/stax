@@ -37,6 +37,7 @@ export {
   HoldingRow,
   Eyebrow,
   VerifiedBadge,
+  Seal,
   Stat,
   SectionTitle,
   Confetti,

@@ -8,7 +8,7 @@
 import { useAgentIdentity } from "@/hooks/useAgentIdentity";
 import { useVeraRecord } from "@/hooks/useVeraRecord";
 import { VERA } from "@/lib/veraData";
-import { Icon, VeraOrb, SectionTitle, type IconName } from "@/components/design";
+import { Icon, VeraOrb, SectionTitle, Seal, type IconName } from "@/components/design";
 import { addressUrl, shortAddress, usd, riskLabel } from "@/lib/format";
 
 export function VeraScreen({
@@ -42,33 +42,29 @@ export function VeraScreen({
         </h1>
         <div style={{ fontSize: 14.5, color: "var(--ink-2)", marginTop: 2 }}>{VERA.role}</div>
 
-        {/* verifiable on-chain identity (real) */}
-        <a
-          href={identity ? addressUrl(identity.registry) : undefined}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="tap"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 7,
-            marginTop: 12,
-            background: "var(--accent-soft)",
-            borderRadius: 99,
-            padding: "7px 13px",
-          }}
-        >
-          <Icon name="shield" size={15} stroke={2} style={{ color: "var(--accent)" }} />
-          <span className="mono" style={{ fontSize: 12, color: "var(--accent)" }}>
-            {identity ? `Verified agent #${identity.agentId.toString()}` : VERA.handle}
-          </span>
-          <Icon name="link" size={13} style={{ color: "var(--accent)" }} />
-        </a>
-        {identity && (
-          <div className="mono" style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 7 }}>
-            Identity registry · {shortAddress(identity.registry)}
+        {/* verifiable on-chain identity — a credential lockup (gradient seal +
+            brand-serif agent number), not a generic chip */}
+        <div style={{ marginTop: 15, display: "flex", flexDirection: "column", alignItems: "center", gap: 7 }}>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+            <Seal size={23} />
+            <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: "-.01em" }}>Verified agent</span>
+            <span className="serif" style={{ fontSize: 19, fontWeight: 600, color: "var(--primary)", lineHeight: 1 }}>
+              №{identity ? identity.agentId.toString() : "1"}
+            </span>
           </div>
-        )}
+          {identity && (
+            <a
+              href={addressUrl(identity.registry)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="tap"
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--ink-3)" }}
+            >
+              IdentityRegistry <span className="mono">{shortAddress(identity.registry)}</span>
+              <Icon name="arrowUR" size={12} />
+            </a>
+          )}
+        </div>
       </div>
 
       {/* stat band — REAL, from the on-chain executor log */}
@@ -111,6 +107,48 @@ export function VeraScreen({
             </div>
           </div>
         </div>
+      </div>
+
+      {/* primary actions — build a plan, or hand it to Autopilot. Matching cards:
+          same structure, Build is primary (green), Autopilot secondary (neutral). */}
+      <div className="anim-rise" style={{ animationDelay: ".06s", padding: "20px 22px 0", display: "flex", flexDirection: "column", gap: 12 }}>
+        <button
+          className="card tap"
+          onClick={() => go("goal")}
+          style={{ width: "100%", padding: 16, display: "flex", alignItems: "center", gap: 14, textAlign: "left", background: "var(--hero-grad)", color: "var(--primary-ink)", boxShadow: "var(--shadow-lg)" }}
+        >
+          <span
+            style={{ width: 44, height: 44, borderRadius: 13, flex: "none", display: "grid", placeItems: "center", background: "rgba(255,255,255,0.22)" }}
+          >
+            <VeraOrb size={28} />
+          </span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 700, fontSize: 15.5 }}>Build a plan with Vera</div>
+            <div style={{ fontSize: 13, marginTop: 2, lineHeight: 1.45, opacity: 0.85 }}>
+              Tell me a goal, I&apos;ll build it in seconds.
+            </div>
+          </div>
+          <Icon name="chevR" size={18} style={{ flex: "none", opacity: 0.85 }} />
+        </button>
+
+        <button
+          className="card tap"
+          onClick={() => go("autopilot")}
+          style={{ width: "100%", padding: 16, display: "flex", alignItems: "center", gap: 14, textAlign: "left" }}
+        >
+          <span
+            style={{ width: 44, height: 44, borderRadius: 13, flex: "none", display: "grid", placeItems: "center", background: "var(--primary-soft)", color: "var(--primary)" }}
+          >
+            <Icon name="spark" size={22} stroke={2} />
+          </span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 700, fontSize: 15.5 }}>Autopilot</div>
+            <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 2, lineHeight: 1.45 }}>
+              Let me invest for you on a schedule, within limits you set.
+            </div>
+          </div>
+          <Icon name="chevR" size={18} style={{ color: "var(--ink-3)", flex: "none" }} />
+        </button>
       </div>
 
       {/* why trust me */}
@@ -244,11 +282,11 @@ export function VeraScreen({
                     >
                       {risk.label} plan{placed ? ` · ${usd(r.usdcSpent as number)}` : ""}
                     </div>
-                    <div className="mono" style={{ fontSize: 11.5, color: "var(--ink-2)", marginTop: 2 }}>
-                      {placed ? "Placed" : "Recommended"} · {shortAddress(r.txHash)}
+                    <div style={{ fontSize: 11.5, color: "var(--ink-2)", marginTop: 2 }}>
+                      {placed ? "Placed on-chain" : "Recommended on-chain"}
                     </div>
                   </div>
-                  <Icon name="link" size={16} style={{ color: "var(--accent)" }} />
+                  <Icon name="chevR" size={16} style={{ color: "var(--ink-3)" }} />
                 </button>
               );
             })}
@@ -268,12 +306,6 @@ export function VeraScreen({
         </p>
       </div>
 
-      {/* CTA */}
-      <div style={{ padding: "22px 22px 0" }}>
-        <button className="btn btn-primary btn-block btn-lg tap" onClick={() => go("goal")}>
-          <VeraOrb size={24} /> Build a plan with Vera
-        </button>
-      </div>
     </div>
   );
 }

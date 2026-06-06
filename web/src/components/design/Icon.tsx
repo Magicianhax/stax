@@ -20,6 +20,7 @@ import {
   Check,
   ShieldCheck,
   Shield,
+  Orbit,
   CreditCard,
   Landmark,
   Mail,
@@ -59,6 +60,7 @@ export type IconName =
   | "check"
   | "shield"
   | "shieldPlain"
+  | "orbit"
   | "card"
   | "bank"
   | "mail"
@@ -106,6 +108,7 @@ const MAP: Record<IconName, LucideIcon> = {
   check: Check,
   shield: ShieldCheck,
   shieldPlain: Shield,
+  orbit: Orbit,
   card: CreditCard,
   bank: Landmark,
   mail: Mail,
