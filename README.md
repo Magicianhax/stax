@@ -10,7 +10,7 @@
 Buy fractional shares of real tokenized stocks on Mantle, guided by **Vera**, an AI agent
 whose every recommendation is **signed and verified on-chain before a cent moves**.
 
-Built for the **Mantle Turing Test Hackathon 2026** · targeting **AI × RWA** and **AI × Trading & Strategy (BGA)**
+An AI agent that turns plain-language goals into risk-managed, verifiable RWA portfolios — built for the **Mantle Turing Test Hackathon 2026**.
 
 <img src="docs/demo.gif" alt="Stax demo" width="640" />
 
