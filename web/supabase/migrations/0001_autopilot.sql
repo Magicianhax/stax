@@ -69,8 +69,16 @@ grant execute on function public.claim_due_autopilots(bigint) to service_role;
 
 -- 4) Scheduler — Supabase pg_cron fires the app's cron endpoint hourly via pg_net.
 --    EDIT the two placeholders, then run this block:
---      <APP_URL>  = your deployed origin, e.g. https://stax.vercel.app  (no trailing slash)
+--      <APP_URL>  = your CANONICAL deployed origin, no trailing slash.
+--                  IMPORTANT: use the domain that does NOT redirect. pg_net does not
+--                  follow redirects, so an apex->www (or www->apex) 308/301 makes the
+--                  call land on the redirect and never reach the app (you'll see 401).
+--                  e.g. https://www.stax.best  (NOT https://stax.best, which redirects)
 --      <SECRET>   = the value of AUTOPILOT_CRON_SECRET in your app env
+--    Tip: keep <SECRET> out of the job definition by storing it in Supabase Vault and
+--    reading it inline, e.g.:
+--      'Bearer ' || (select decrypted_secret from vault.decrypted_secrets
+--                    where name = 'autopilot_cron_secret')
 create extension if not exists pg_cron;
 create extension if not exists pg_net;
 

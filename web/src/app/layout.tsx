@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Hanken_Grotesk, Fraunces, JetBrains_Mono } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 import { Providers } from "./providers";
 
@@ -75,6 +76,7 @@ export default function RootLayout({
     >
       <body className="min-h-full antialiased">
         <Providers>{children}</Providers>
+        <Analytics />
       </body>
     </html>
   );
