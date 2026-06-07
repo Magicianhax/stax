@@ -27,6 +27,9 @@
 # internal planning notes — not for the public repo
 tasks/
 
+# demo / marketing video project — kept local only, never committed
+video/
+
 # os / editor / misc
 .DS_Store
 Thumbs.db
