@@ -21,6 +21,7 @@ import { useInvest } from "@/hooks/useInvest";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { haptic } from "@/lib/haptics";
 import { TabBar, type TabId, useToast } from "@/components/design";
+import { InstallPrompt } from "@/components/app/InstallPrompt";
 import { HomeScreen } from "./screens/HomeScreen";
 import { GoalScreen } from "./screens/GoalScreen";
 import { ThinkingScreen } from "./screens/ThinkingScreen";
@@ -471,6 +472,7 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
         </div>
       </div>
       {showTabs && <TabBar active={tabFor(screen)} onNav={onTab} pro />}
+      <InstallPrompt />
     </>
   );
 }

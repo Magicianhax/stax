@@ -8,12 +8,12 @@ export default function manifest(): MetadataRoute.Manifest {
     short_name: "Stax",
     description:
       "Invest in tokenized stocks on Mantle with an AI copilot. Email login, no seed phrase, gasless.",
-    start_url: "/",
+    start_url: "/app",
     scope: "/",
     display: "standalone",
     orientation: "portrait",
-    background_color: "#0a0f0d",
-    theme_color: "#0a0f0d",
+    background_color: "#15191a",
+    theme_color: "#15191a",
     categories: ["finance", "investing"],
     icons: [
       { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
