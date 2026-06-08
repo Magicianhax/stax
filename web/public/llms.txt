@@ -1,0 +1,25 @@
+# Stax
+
+> Stax is a mobile-first app for investing in real companies through tokenized stocks on the Mantle network, guided by Vera, an AI investing assistant. You describe a goal in plain words; Vera turns it into a portfolio of tokenized shares and places it in one tap.
+
+Stax is built for people who are new to investing and to crypto. There is no seed phrase and no gas: you sign in with email, and Stax covers the fees. Holdings are real tokenized shares (issued 1:1 by Backed), held in self-custody and recorded on-chain, with settlement in USDC. Because every action is signed on-chain, your track record can't be edited.
+
+## Key facts
+
+- Invest by describing a goal in plain language to Vera, an AI investing assistant.
+- Buy fractional, tokenized shares of well-known global companies (for example NVDA, AAPL, TSLA, GOOGL, META, and the S&P 500 via SPY).
+- Email login — no seed phrase, no browser extension, no manual wallet setup.
+- Gasless, with fees on us: no gas costs and no account fees.
+- Real shares: tokenized 1:1 by Backed, held in self-custody, recorded on-chain.
+- Autopilot: optional automated, recurring investing (dollar-cost averaging).
+- Built on Mantle. You can start from as little as $1.
+
+## Pages
+
+- [Home](https://www.stax.best): product overview and how it works.
+- [Live demo](https://www.stax.best/demo): try Stax with demo data, no login required.
+- [Open the app](https://www.stax.best/app): the live product.
+
+## More
+
+- [X / Twitter](https://x.com/stax_market): updates and announcements.

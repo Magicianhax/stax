@@ -1653,7 +1653,7 @@ body {
 }
 .site .video-copy { max-width: 640px; color: #fff; }
 .site .video-copy .eyebrow { color: rgba(255, 255, 255, 0.82); }
-.site .video-copy h2 { font-size: clamp(32px, 4.4vw, 62px); line-height: 1.04; letter-spacing: -0.03em; font-weight: 600; margin: 14px 0 0; color: #fff; text-wrap: balance; }
+.site .video-copy .video-title { font-size: clamp(32px, 4.4vw, 62px); line-height: 1.04; letter-spacing: -0.03em; font-weight: 600; margin: 14px 0 0; color: #fff; text-wrap: balance; }
 .site .video-copy p { margin: 16px auto 0; font-size: 17px; line-height: 1.55; max-width: 480px; color: rgba(255, 255, 255, 0.86); }
 .site .video-copy .btn { margin-top: 26px; }
 /* white-frosted glass button over the footage (matches the white overlay copy) */

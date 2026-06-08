@@ -300,7 +300,7 @@ export function SiteLanding() {
           <div className="video-overlay">
             <div className="video-copy">
               <span className="eyebrow"><Sparkles size={14} strokeWidth={1.9} /> Real shares, in plain words</span>
-              <h2 className="serif">Just say what you want.</h2>
+              <div className="serif video-title">Just say what you want.</div>
               <p>Vera turns your goal into a real mix of companies you know, then places it in one tap. Gas-free, and signed on-chain.</p>
               <Link className="btn btn-glass" href="/app">Open the app <Arrow size={16} /></Link>
             </div>
