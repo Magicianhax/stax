@@ -1,4 +1,18 @@
+import type { Metadata } from "next";
 import { DemoMount } from "@/components/demo/DemoMount";
+
+export const metadata: Metadata = {
+  title: "Live demo",
+  description:
+    "Try Stax with demo data — no login. See how Vera turns a sentence into a real portfolio of tokenized stocks.",
+  alternates: { canonical: "/demo" },
+  openGraph: {
+    title: "Stax · Live demo",
+    description:
+      "Try Stax with demo data — no login. See how Vera turns a sentence into a real portfolio.",
+    url: "/demo",
+  },
+};
 
 // Auth-free, demo-data preview of the real Stax app — embedded by the marketing
 // site phones and viewable directly at /demo. `?play=invest|vera` auto-plays a
