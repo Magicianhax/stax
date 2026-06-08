@@ -1,19 +1,32 @@
 import { ImageResponse } from "next/og";
-import { OG_SIZE, SITE_TAGLINE } from "@/lib/seo";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { OG_SIZE } from "@/lib/seo";
 
-// Dynamically generated 1200×630 share card (Open Graph + Twitter). Text-only by
-// design — no external fonts or asset fetches, so it can never fail at build or
-// request time. Brand "paper" palette: cream ground, ink type, sage accent.
-export const alt = "Stax — Invest in plain words. Real companies, no seed phrase.";
+// Brand share card (Open Graph + Twitter), 1200×630. Uses the real Stax type —
+// Fraunces (display serif) + Hanken Grotesk — on the "Soft" cream paper ground.
+// Deliberately minimal: one serif line does the work.
+export const alt = "Stax — Invest in plain words.";
 export const size = OG_SIZE;
 export const contentType = "image/png";
 
 const CREAM = "#eef1e8";
-const INK = "#15191a";
-const INK_SOFT = "#3b4440";
+const INK = "#1a1f1c";
 const SAGE = "#3f6b53";
 
-export default function Image() {
+// This route is statically prerendered at build time, where the source tree —
+// including the vendored fonts in ./_og — is present on disk.
+async function font(file: string) {
+  return readFile(join(process.cwd(), "src/app/_og", file));
+}
+
+export default async function Image() {
+  const [fraunces, hanken700, hanken500] = await Promise.all([
+    font("Fraunces-600.woff"),
+    font("Hanken-700.woff"),
+    font("Hanken-500.woff"),
+  ]);
+
   return new ImageResponse(
     (
       <div
@@ -23,71 +36,65 @@ export default function Image() {
           display: "flex",
           flexDirection: "column",
           justifyContent: "space-between",
-          padding: "72px 80px",
-          background: `linear-gradient(135deg, ${CREAM} 0%, #e6ebdd 100%)`,
+          padding: "84px 96px",
+          background: `radial-gradient(120% 120% at 0% 0%, #f3f5ee 0%, ${CREAM} 45%, #e4e9da 100%)`,
           color: INK,
-          fontFamily: "sans-serif",
+          fontFamily: "Hanken",
         }}
       >
-        {/* Brand row */}
-        <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+        {/* wordmark */}
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 76,
-              height: 76,
-              borderRadius: 20,
-              background: SAGE,
-              color: CREAM,
-              fontSize: 46,
-              fontWeight: 800,
-            }}
-          >
-            S
-          </div>
-          <div style={{ fontSize: 46, fontWeight: 800, letterSpacing: -1 }}>Stax</div>
-        </div>
-
-        {/* Headline */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-          <div
-            style={{
-              fontSize: 92,
-              fontWeight: 800,
-              lineHeight: 1.02,
-              letterSpacing: -2,
-              maxWidth: 1000,
-            }}
-          >
-            {`${SITE_TAGLINE}.`}
-          </div>
-          <div style={{ fontSize: 38, color: INK_SOFT, fontWeight: 500, maxWidth: 940 }}>
-            Buy real companies with Vera, your investing assistant. Email login,
-            no seed phrase, fees on us.
+            style={{ width: 13, height: 13, borderRadius: 99, background: SAGE }}
+          />
+          <div style={{ fontFamily: "Hanken", fontWeight: 700, fontSize: 38, letterSpacing: -0.5 }}>
+            Stax
           </div>
         </div>
 
-        {/* Footer row */}
+        {/* the line */}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            fontFamily: "Fraunces",
+            fontSize: 132,
+            lineHeight: 1.0,
+            letterSpacing: -2,
+          }}
+        >
+          <div style={{ display: "flex" }}>Invest in</div>
+          <div style={{ display: "flex" }}>
+            plain words<span style={{ color: SAGE }}>.</span>
+          </div>
+        </div>
+
+        {/* foot */}
         <div
           style={{
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
+            fontFamily: "Hanken",
+            fontWeight: 500,
             fontSize: 30,
-            color: INK_SOFT,
-            fontWeight: 600,
+            color: "#5c655e",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            <div style={{ width: 12, height: 12, borderRadius: 99, background: SAGE }} />
-            <div>Built on Mantle</div>
+          <div style={{ display: "flex" }}>stax.best</div>
+          <div style={{ display: "flex", color: SAGE, fontWeight: 700 }}>
+            Built on Mantle
           </div>
-          <div style={{ color: SAGE, fontWeight: 700 }}>stax.best</div>
         </div>
       </div>
     ),
-    { ...size }
+    {
+      ...size,
+      fonts: [
+        { name: "Fraunces", data: fraunces, weight: 600, style: "normal" },
+        { name: "Hanken", data: hanken700, weight: 700, style: "normal" },
+        { name: "Hanken", data: hanken500, weight: 500, style: "normal" },
+      ],
+    }
   );
 }
