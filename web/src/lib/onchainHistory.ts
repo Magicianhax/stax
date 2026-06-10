@@ -30,10 +30,10 @@ function deployBlock(): bigint {
   return DEPLOY_BLOCK;
 }
 
-const RECOMMENDATION_COMMITTED = parseAbiItem(
+export const RECOMMENDATION_COMMITTED = parseAbiItem(
   "event RecommendationCommitted(bytes32 indexed planId, address indexed user, bytes32 recHash, uint16 riskScore, uint256 agentId)",
 );
-const ALLOCATION_EXECUTED = parseAbiItem(
+export const ALLOCATION_EXECUTED = parseAbiItem(
   "event AllocationExecuted(bytes32 indexed planId, address indexed user, uint256 usdcSpent, uint256 legCount)",
 );
 
@@ -116,19 +116,11 @@ async function readExecutions(
   }));
 }
 
-/**
- * Vera's verifiable global track record (or scoped to `user` if provided).
- * Empty history yields a clean 0-state, never an error.
- */
-export async function getVeraRecord(
-  client: PublicClient,
-  user?: `0x${string}`,
-): Promise<VeraRecord> {
-  const [recs, execs] = await Promise.all([
-    readRecommendations(client, user),
-    readExecutions(client, user),
-  ]);
-
+/** Pure aggregation: rows -> the VeraRecord shape (shared by client + server). */
+export function aggregateVeraRecord(
+  recs: RecommendationRow[],
+  execs: ExecutionRow[],
+): VeraRecord {
   // Map executed USDC by planId (a plan can be committed once and executed once
   // in the same call, sharing planId).
   const spentByPlan = new Map<string, number>();
@@ -157,6 +149,38 @@ export async function getVeraRecord(
   };
 }
 
+/** Pure mapping: executions -> activity rows, newest first (shared client/server). */
+export function toActivityRows(execs: ExecutionRow[]): ActivityRow[] {
+  return execs
+    .sort((a, b) => Number(b.blockNumber - a.blockNumber))
+    .map((e) => ({
+      kind: "invest" as const,
+      usdc: e.usdcSpent,
+      legCount: e.legCount,
+      txHash: e.txHash,
+      blockNumber: e.blockNumber,
+    }));
+}
+
+/**
+ * Vera's verifiable global track record (or scoped to `user` if provided).
+ * Empty history yields a clean 0-state, never an error.
+ *
+ * NOTE: scans the FULL block range in one eth_getLogs — public RPCs cap that
+ * range (rpc.mantle.xyz: 10k blocks), so browsers should use /api/vera-record
+ * instead (Etherscan-indexed, cached). Kept for tooling/server use.
+ */
+export async function getVeraRecord(
+  client: PublicClient,
+  user?: `0x${string}`,
+): Promise<VeraRecord> {
+  const [recs, execs] = await Promise.all([
+    readRecommendations(client, user),
+    readExecutions(client, user),
+  ]);
+  return aggregateVeraRecord(recs, execs);
+}
+
 export interface ActivityRow {
   kind: "invest";
   usdc: number;
@@ -176,15 +200,7 @@ export async function getUserActivity(
   user: `0x${string}`,
 ): Promise<ActivityRow[]> {
   const execs = await readExecutions(client, user);
-  return execs
-    .sort((a, b) => Number(b.blockNumber - a.blockNumber))
-    .map((e) => ({
-      kind: "invest" as const,
-      usdc: e.usdcSpent,
-      legCount: e.legCount,
-      txHash: e.txHash,
-      blockNumber: e.blockNumber,
-    }));
+  return toActivityRows(execs);
 }
 
 export { STAX_EXECUTOR };
