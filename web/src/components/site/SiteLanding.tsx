@@ -9,13 +9,14 @@
 // All CTAs route to /app.
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, Sparkles, Sun, Moon, Menu, KeyRound, Zap, BadgeCheck, ChevronDown } from "lucide-react";
+import { ArrowRight, Sparkles, Sun, Moon, Menu, KeyRound, Zap, BadgeCheck, ChevronDown, Play } from "lucide-react";
 import { displayFor } from "@/lib/displayAssets";
 import { FAQ } from "@/lib/faq";
 import { DemoMount } from "@/components/demo/DemoMount";
 import type { DemoPlay } from "@/components/demo/DemoProvider";
 import { PhoneChrome } from "@/components/site/PhoneChrome";
 import { LoopVideo } from "@/components/site/LoopVideo";
+import { FilmLightbox } from "@/components/site/FilmLightbox";
 
 type Mode = "light" | "dark";
 
@@ -121,12 +122,77 @@ function DemoPhone({ play, mode }: { play: Exclude<DemoPlay, null>; mode: Mode }
   );
 }
 
-const MARQUEE = ["AAPL", "NVDA", "TSLA", "GOOGL", "META", "SPY", "QQQ", "MSTR", "HOOD", "sUSDe"];
+const MARQUEE_A = ["AAPL", "NVDA", "TSLA", "GOOGL", "META", "SPY", "QQQ", "MSTR", "HOOD", "sUSDe"];
+const MARQUEE_B = ["mETH", "CRCL", "SPY", "AAPL", "QQQ", "NVDA", "sUSDe", "META", "HOOD", "TSLA"];
+
+/** One sliding ticker row; the reverse row is decorative (aria-hidden). */
+function MarqueeRow({ syms, rev }: { syms: string[]; rev?: boolean }) {
+  return (
+    <div className={"marquee-row" + (rev ? " m-rev" : "")} aria-hidden={rev || undefined}>
+      {[...syms, ...syms].map((sym, i) => {
+        const d = displayFor(sym);
+        return (
+          <div className="m-item" key={sym + i}>
+            <Tile sym={sym} />
+            <span className="m-meta"><b>{d.name}</b><Quote sym={sym} /></span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* "You could just say…" — the product promise, typeset big. Rotating examples of
+   real-language goals with the kind of plan Vera builds for each (sample data). */
+const GOALS = [
+  { say: "Grow $500, but keep a third of it safe.", syms: ["SPY", "NVDA", "sUSDe"], built: "6 holdings, a third in a yield dollar" },
+  { say: "Put $50 into AI companies every month.", syms: ["NVDA", "GOOGL", "META"], built: "4 AI leaders, repeating on Autopilot" },
+  { say: "I’ve never invested. Start me slow.", syms: ["SPY", "AAPL"], built: "mostly the S&P 500, from $1" },
+  { say: "Something calmer that still beats my bank.", syms: ["sUSDe", "SPY"], built: "a yield dollar, balanced with broad funds" },
+];
+
+function GoalQuotes() {
+  const [i, setI] = useState(0);
+  useEffect(() => {
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    const id = window.setInterval(() => setI((v) => (v + 1) % GOALS.length), 4600);
+    return () => window.clearInterval(id);
+  }, []);
+  return (
+    <section className="sec quotes-sec" aria-label="Things you can say to Vera">
+      <div className="site-wrap">
+        <div className="quotes reveal">
+          <p className="quotes-kicker">You could just say</p>
+          <div className="quotes-stack">
+            {GOALS.map((g, k) => (
+              <div key={g.say} className={"goal-quote" + (k === i ? " on" : "")} aria-hidden={k !== i}>
+                <p className="goal-say">&ldquo;{g.say}&rdquo;</p>
+                <div className="goal-built">
+                  <span className="goal-tiles">{g.syms.map((s) => <Tile key={s} sym={s} />)}</span>
+                  <span className="goal-built-t"><b>Vera builds</b> {g.built}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="quotes-foot">
+            <div className="quotes-dots">
+              {GOALS.map((g, k) => (
+                <button key={g.say} className={"qdot" + (k === i ? " on" : "")} onClick={() => setI(k)} aria-label={`Show example ${k + 1}`} />
+              ))}
+            </div>
+            <Link className="quotes-cta" href="/app">Say yours <Arrow size={15} /></Link>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 export function SiteLanding() {
   const rootRef = useRef<HTMLDivElement>(null);
   const [mode, setMode] = useState<Mode>("dark");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [filmOpen, setFilmOpen] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem("stax-landing-mode");
@@ -213,11 +279,37 @@ export function SiteLanding() {
     };
     root.addEventListener("pointermove", onPointer, { passive: true });
 
+    // Hero phone parallax — a gentle 3D lean toward the cursor. Desktop fine
+    // pointers only, and never under reduced motion (touch keeps the flat pose).
+    const showcase = root.querySelector<HTMLElement>(".hero-showcase");
+    const heroPhone = showcase?.querySelector<HTMLElement>(".phone") ?? null;
+    const finePointer = window.matchMedia?.("(hover: hover) and (pointer: fine)").matches;
+    const noMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    let onTilt: ((e: PointerEvent) => void) | undefined;
+    let onTiltLeave: (() => void) | undefined;
+    if (showcase && heroPhone && finePointer && !noMotion) {
+      onTilt = (e: PointerEvent) => {
+        const r = showcase.getBoundingClientRect();
+        const x = (e.clientX - r.left) / r.width - 0.5;
+        const y = (e.clientY - r.top) / r.height - 0.5;
+        heroPhone.style.setProperty("--ry", `${(x * 7).toFixed(2)}deg`);
+        heroPhone.style.setProperty("--rx", `${(-y * 5).toFixed(2)}deg`);
+      };
+      onTiltLeave = () => {
+        heroPhone.style.setProperty("--ry", "0deg");
+        heroPhone.style.setProperty("--rx", "0deg");
+      };
+      showcase.addEventListener("pointermove", onTilt, { passive: true });
+      showcase.addEventListener("pointerleave", onTiltLeave);
+    }
+
     return () => {
       io.disconnect();
       countIO.disconnect();
       window.removeEventListener("scroll", onScroll);
       root.removeEventListener("pointermove", onPointer);
+      if (showcase && onTilt) showcase.removeEventListener("pointermove", onTilt);
+      if (showcase && onTiltLeave) showcase.removeEventListener("pointerleave", onTiltLeave);
       window.clearTimeout(safety);
     };
   }, []);
@@ -300,9 +392,14 @@ export function SiteLanding() {
           <div className="video-overlay">
             <div className="video-copy">
               <span className="eyebrow"><Sparkles size={14} strokeWidth={1.9} /> Real shares, in plain words</span>
-              <div className="serif video-title">Just say what you want.</div>
+              <div className="serif video-title">Just <em>say</em> what you want.</div>
               <p>Vera turns your goal into a real mix of companies you know, then places it in one tap. Gas-free, and signed on-chain.</p>
-              <Link className="btn btn-glass" href="/app">Open the app <Arrow size={16} /></Link>
+              <div className="video-ctas">
+                <Link className="btn btn-glass" href="/app">Open the app <Arrow size={16} /></Link>
+                <button className="btn btn-glass" onClick={() => setFilmOpen(true)}>
+                  <Play size={15} strokeWidth={2.4} /> Watch the film <span className="film-len">30s</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -313,10 +410,11 @@ export function SiteLanding() {
       <section className="hero hero-centered">
         <div className="site-wrap">
           <div className="hero-head">
-            <h1 className="serif reveal" data-d="1">Own the world&apos;s best companies.</h1>
+            <h1 className="serif reveal" data-d="1">Own the world&apos;s <em className="hero-em">best companies</em>.</h1>
             <p className="hero-sub reveal" data-d="2">Buy fractional shares of global stocks, directly onchain.</p>
             <div className="hero-cta reveal" data-d="3">
               <Link className="btn btn-primary" href="/app">Start Investing <Arrow /></Link>
+              <Link className="btn btn-glass" href="/demo">Try the live demo</Link>
             </div>
           </div>
 
@@ -347,20 +445,14 @@ export function SiteLanding() {
         </div>
       </section>
 
-      {/* MARQUEE — the stock ticker slides */}
+      {/* MARQUEE — two counter-scrolling ticker rows */}
       <div className="marquee reveal">
-        <div className="marquee-row">
-          {[...MARQUEE, ...MARQUEE].map((sym, i) => {
-            const d = displayFor(sym);
-            return (
-              <div className="m-item" key={sym + i}>
-                <Tile sym={sym} />
-                <span className="m-meta"><b>{d.name}</b><Quote sym={sym} /></span>
-              </div>
-            );
-          })}
-        </div>
+        <MarqueeRow syms={MARQUEE_A} />
+        <MarqueeRow syms={MARQUEE_B} rev />
       </div>
+
+      {/* THE PROMISE — rotating plain-words goals, typeset big */}
+      <GoalQuotes />
 
       {/* MEET VERA — playable phone LEFT, copy right (auto-plays how Vera builds + signs) */}
       <section className="sec" id="vera">
@@ -527,6 +619,7 @@ export function SiteLanding() {
               <h4>Product</h4>
               <a href="#how">How it works</a>
               <a href="#features">Features</a>
+              <Link href="/demo">Try the demo</Link>
               <Link href="/app">Open the app</Link>
             </div>
             <div>
@@ -550,6 +643,8 @@ export function SiteLanding() {
           </div>
         </div>
       </footer>
+
+      {filmOpen && <FilmLightbox onClose={() => setFilmOpen(false)} />}
     </div>
   );
 }
