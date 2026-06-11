@@ -65,7 +65,7 @@ export function WalletScreen({
 
   const cash = bal?.value ?? 0;
   const holdings: Holding[] = port?.holdings ?? [];
-  const invested = port?.totalUsd ?? 0;
+  const invested = port?.investedUsd ?? 0;
   const total = cash + invested;
 
   // Transactions, 10 per page.
@@ -170,7 +170,9 @@ export function WalletScreen({
         ) : (
           <div className="card stagger-in" style={{ padding: "4px 14px" }}>
             {holdings.map((h, i) => {
-              const tile = toTile(h.asset.symbol, h.asset.name);
+              const base = toTile(h.asset.symbol, h.asset.name);
+              // Real 1D market data replaces the presentational tint when available.
+              const tile = { ...base, day: h.dayChangePct ?? base.day, spark: h.spark ?? base.spark };
               const dec = h.asset.decimals ?? 18;
               return (
                 <div key={h.asset.symbol} style={{ borderBottom: i < holdings.length - 1 ? "1px solid var(--line-2)" : "none" }}>
@@ -185,7 +187,7 @@ export function WalletScreen({
                           {hide ? DOTS : h.valueUsd !== undefined ? usd(h.valueUsd) : "—"}
                         </div>
                         <div className="tnum" style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 2 }}>
-                          {hide ? DOTS : `${tokenQty(h.raw, dec)}${h.priceUsd !== undefined ? ` · ${usd(h.priceUsd)}` : ""}`}
+                          {hide ? DOTS : `${tokenQty(h.raw, dec)} ${h.asset.symbol}`}
                         </div>
                       </div>
                     }

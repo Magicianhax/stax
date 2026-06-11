@@ -16,7 +16,7 @@ import { asViemProvider } from "@/lib/provider";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { useRefreshBalances } from "@/hooks/useBalances";
 import { AGNI_ROUTER_ABI, ERC20_ABI, FLUXION_ROUTER_ABI, V3_POOL_ABI } from "@/lib/abis";
-import { USDC, FLUXION_ROUTER, ASSET_ROUTES, type Asset, type RouteHop } from "@/lib/mantle";
+import { USDC, FLUXION_ROUTER, ASSET_ROUTES, reverseRoute, type Asset, type RouteHop } from "@/lib/mantle";
 import { publicClient } from "@/lib/wagmi";
 import { priceLimitSqrtX96 } from "@/lib/swapGuards";
 import { feeOf, STAX_TREASURY } from "@/lib/fees";
@@ -201,11 +201,12 @@ export function useSwap() {
   );
 
   /**
-   * Sell `amountIn` raw units of a held stock-tier `asset` back to USDC through
-   * its Fluxion pool (exactInputSingle, recipient = user). Batched as one
-   * sponsored UserOp: [ asset.approve(router, amountIn), router.exactInputSingle ].
-   * `minUsdcOut` is the slippage-guarded floor (raw 6dp). Stock tier only — routed
-   * SAFE/CRYPTO sells aren't wired here yet (the UI gates them honestly).
+   * Sell `amountIn` raw units of a held `asset` back to USDC, batched as one
+   * sponsored UserOp: [ asset.approve(router, amountIn), router.swap ].
+   * Stocks sell through their Fluxion pool (exactInputSingle); routed
+   * SAFE/CRYPTO assets (sUSDe/mETH) sell through their validated Agni route in
+   * REVERSE (exactInput, asset -> ... -> USDC). recipient = user in both cases.
+   * `minUsdcOut` is the slippage-guarded floor (raw 6dp).
    */
   const sell = useCallback(
     async (params: {
@@ -229,40 +230,62 @@ export function useSwap() {
       try {
         const wallet = activeWallet;
         if (!wallet) throw new Error("No account found. Please sign in again.");
-        if (!asset.address || !asset.pool) throw new Error(`${asset.symbol} can't be sold here yet.`);
+        const route = ASSET_ROUTES[asset.symbol];
+        if (!asset.address || (!asset.pool && !route))
+          throw new Error(`${asset.symbol} can't be sold here yet.`);
         if (amountIn <= BigInt(0)) throw new Error("Nothing to sell.");
 
         const deadline = BigInt(Math.floor(Date.now() / 1000) + DEADLINE_SECONDS);
-        // Asset is tokenIn here; price-impact ceiling on top of the minUsdcOut floor.
-        const sqrtLimit = await singleHopSqrtLimit(asset.pool, asset.address);
+        const router = route ? route.router : (FLUXION_ROUTER as `0x${string}`);
+        // Single-hop (Fluxion) gets a price-impact ceiling on top of the
+        // minUsdcOut floor; the multi-hop Agni exactInput(path) has no per-hop
+        // limit param, so minUsdcOut guards it alone (same as the buy side).
+        const sqrtLimit = route ? BigInt(0) : await singleHopSqrtLimit(asset.pool!, asset.address);
 
         const approveCall: Call = {
           to: asset.address,
           data: encodeFunctionData({
             abi: ERC20_ABI,
             functionName: "approve",
-            args: [FLUXION_ROUTER as `0x${string}`, amountIn],
+            args: [router, amountIn],
           }),
         };
-        const swapCall: Call = {
-          to: FLUXION_ROUTER as `0x${string}`,
-          data: encodeFunctionData({
-            abi: FLUXION_ROUTER_ABI,
-            functionName: "exactInputSingle",
-            args: [
-              {
-                tokenIn: asset.address,
-                tokenOut: USDC.address as `0x${string}`,
-                fee: asset.feeTier ?? 3000,
-                recipient: recipient as `0x${string}`,
-                deadline,
-                amountIn,
-                amountOutMinimum: minUsdcOut,
-                sqrtPriceLimitX96: sqrtLimit,
-              },
-            ],
-          }),
-        };
+        const swapCall: Call = route
+          ? {
+              to: router,
+              data: encodeFunctionData({
+                abi: AGNI_ROUTER_ABI,
+                functionName: "exactInput",
+                args: [
+                  {
+                    path: encodeV3Path(reverseRoute(route.hops)),
+                    recipient: recipient as `0x${string}`,
+                    deadline,
+                    amountIn,
+                    amountOutMinimum: minUsdcOut,
+                  },
+                ],
+              }),
+            }
+          : {
+              to: router,
+              data: encodeFunctionData({
+                abi: FLUXION_ROUTER_ABI,
+                functionName: "exactInputSingle",
+                args: [
+                  {
+                    tokenIn: asset.address,
+                    tokenOut: USDC.address as `0x${string}`,
+                    fee: asset.feeTier ?? 3000,
+                    recipient: recipient as `0x${string}`,
+                    deadline,
+                    amountIn,
+                    amountOutMinimum: minUsdcOut,
+                    sqrtPriceLimitX96: sqrtLimit,
+                  },
+                ],
+              }),
+            };
 
         setPhase("swapping");
         const provider = asViemProvider(await wallet.getEthereumProvider());

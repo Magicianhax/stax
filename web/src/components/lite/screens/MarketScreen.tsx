@@ -2,12 +2,14 @@
 
 // Market — Pro asset browser (screens_pro.jsx · Market). A searchable list of
 // the REAL ALL_ASSETS universe (lib/mantle.ts), categorised + decorated with
-// plain-language display copy (displayAssets.ts). Safe/crypto tiers that the
-// executor can't route as one-tap manual buys yet are dimmed + tagged "Soon".
+// plain-language display copy (displayAssets.ts). Prices are live on-chain spot;
+// day moves + sparklines are real market data (/api/market). Safe/crypto tiers
+// that the executor can't route as one-tap manual buys yet are dimmed + "Soon".
 import { useMemo, useState } from "react";
 import { ALL_ASSETS } from "@/lib/mantle";
 import { displayFor } from "@/lib/displayAssets";
 import { usePrices } from "@/hooks/usePrices";
+import { useMarketSummary } from "@/hooks/useMarket";
 import { Icon, AssetTile, Sparkline } from "@/components/design";
 import { usd } from "@/lib/format";
 
@@ -21,6 +23,7 @@ export function MarketScreen({
   const [q, setQ] = useState("");
   const [cat, setCat] = useState<(typeof CATS)[number]>("All");
   const { data: prices } = usePrices();
+  const { data: marketData } = useMarketSummary();
 
   const list = useMemo(() => {
     const query = q.trim().toLowerCase();
@@ -83,7 +86,12 @@ export function MarketScreen({
       {/* list */}
       <div style={{ padding: "8px 22px 0" }} className="stagger">
         {list.map(({ asset, d }) => {
-          const up = d.day >= 0;
+          // Real market day move + sparkline when the asset has a live source;
+          // fall back to the presentational reference so rows never blank.
+          const live = marketData?.summary[asset.symbol];
+          const day = live?.dayChangePct ?? d.day;
+          const spark = live?.spark ?? d.spark;
+          const up = day >= 0;
           // Real on-chain spot when available; fall back to the indicative reference.
           const livePrice = prices?.prices[asset.symbol]?.priceUsd;
           const shownPrice = livePrice ?? d.price;
@@ -127,7 +135,7 @@ export function MarketScreen({
                   {d.apy ? ` · ${d.apy} a year` : ""}
                 </div>
               </div>
-              <Sparkline data={d.spark} color={up ? "var(--pos)" : "var(--neg)"} />
+              <Sparkline data={spark} color={up ? "var(--pos)" : "var(--neg)"} />
               <div style={{ textAlign: "right", minWidth: 70 }}>
                 <div className="tnum" style={{ fontWeight: 600, fontSize: 15.5 }}>
                   {shownPrice !== undefined ? usd(shownPrice) : "—"}
@@ -136,7 +144,7 @@ export function MarketScreen({
                   className="tnum"
                   style={{ fontSize: 12.5, fontWeight: 600, color: up ? "var(--pos)" : "var(--neg)" }}
                 >
-                  {(up ? "+" : "") + d.day.toFixed(2)}%
+                  {(up ? "+" : "") + day.toFixed(2)}%
                 </div>
               </div>
             </button>

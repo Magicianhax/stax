@@ -9,7 +9,7 @@
 // approximate current value. (The design's demo gain pill is intentionally
 // omitted rather than faked.)
 import { useState } from "react";
-import { useUsdcBalance, usePortfolio, type Holding } from "@/hooks/useBalances";
+import { usePortfolio, type Holding } from "@/hooks/useBalances";
 import { useActivity } from "@/hooks/useActivity";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import {
@@ -21,7 +21,7 @@ import {
   VerifiedBadge,
 } from "@/components/design";
 import { toTile, catFor } from "@/lib/displayAssets";
-import { usd } from "@/lib/format";
+import { usd, tokenQty } from "@/lib/format";
 import { iconBtn } from "./primitives";
 
 const DOTS = "••••••";
@@ -32,18 +32,19 @@ export function HomeScreen({
   go: (screen: string, params?: Record<string, unknown>) => void;
 }) {
   const { address } = useSmartAccount();
-  const { data: bal, isLoading: balLoading } = useUsdcBalance(address ?? undefined);
+  // Cash, invested, and total all arrive pre-computed from /api/portfolio —
+  // this screen renders them verbatim (no client-side money math).
   const { data: port, isLoading: portLoading } = usePortfolio(address ?? undefined);
   const { data: activity } = useActivity(address ?? undefined);
   const [hideBalance, setHideBalance] = useState(false);
 
-  const balance = bal?.value ?? 0;
+  const balance = port?.cashUsd ?? 0;
   const holdings: Holding[] = port?.holdings ?? [];
-  const invested = port?.totalUsd ?? 0;
-  const total = invested + balance;
+  const invested = port?.investedUsd ?? 0;
+  const total = port?.totalUsd ?? 0;
 
   // First-load skeleton (only the initial fetch; interval refetches keep the value).
-  const balanceLoading = balLoading || portLoading;
+  const balanceLoading = portLoading;
   // Overflow guard: shrink the hero numeral as the formatted value gets longer,
   // so a 7-figure balance never spills past the 402px frame.
   const balLen = usd(total).length;
@@ -241,7 +242,18 @@ export function HomeScreen({
         ) : (
           <div className="card stagger-in" style={{ padding: "4px 14px" }}>
             {holdings.slice(0, 5).map((h, i) => {
-              const tile = toTile(h.asset.symbol, h.asset.name);
+              const base = toTile(h.asset.symbol, h.asset.name);
+              // Real 1D market data (from the server) replaces the presentational
+              // tint whenever the asset has a live source.
+              const tile = {
+                ...base,
+                day: h.dayChangePct ?? base.day,
+                spark: h.spark ?? base.spark,
+              };
+              const day = h.dayChangePct;
+              // Plain holdings line ("1.13 sUSDe") — no visible math; the price
+              // and value live on the asset page.
+              const qtyLine = `${tokenQty(h.raw, h.asset.decimals ?? 18)} ${h.asset.symbol}`;
               return (
                 <div
                   key={h.asset.symbol}
@@ -252,16 +264,30 @@ export function HomeScreen({
                 >
                   <HoldingRow
                     asset={tile}
-                    sub={catFor(h.asset.symbol, h.asset.name)}
+                    sub={hideBalance ? catFor(h.asset.symbol, h.asset.name) : qtyLine}
                     showSpark
                     onClick={() => go("asset", { symbol: h.asset.symbol })}
                     right={
-                      <div className="tnum" style={{ fontWeight: 600, fontSize: 16 }}>
-                        {hideBalance
-                          ? DOTS
-                          : h.valueUsd !== undefined
-                            ? usd(h.valueUsd)
-                            : `${h.qty.toLocaleString("en-US", { maximumFractionDigits: 3 })}`}
+                      <div className="tnum" style={{ textAlign: "right" }}>
+                        <div style={{ fontWeight: 600, fontSize: 16 }}>
+                          {hideBalance
+                            ? DOTS
+                            : h.valueUsd !== undefined
+                              ? usd(h.valueUsd)
+                              : tokenQty(h.raw, h.asset.decimals ?? 18)}
+                        </div>
+                        {day !== undefined && (
+                          <div
+                            style={{
+                              fontSize: 12.5,
+                              fontWeight: 600,
+                              marginTop: 2,
+                              color: day >= 0 ? "var(--pos)" : "var(--neg)",
+                            }}
+                          >
+                            {(day >= 0 ? "+" : "") + day.toFixed(2)}% today
+                          </div>
+                        )}
                       </div>
                     }
                   />

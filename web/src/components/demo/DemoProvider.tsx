@@ -10,7 +10,7 @@
 //   "invest" → loops the goal → plan → invest → success flow
 //   "vera"   → loops Vera's build-and-sign story
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
-import type { Holding } from "@/hooks/useBalances";
+import type { Portfolio } from "@/hooks/useBalances";
 import type { ActivityRow, VeraRecord } from "@/lib/onchainHistory";
 import type { AllocateResult, InvestSuccess } from "@/lib/invest-types";
 import type { Allocation } from "@/lib/allocation-schema";
@@ -29,7 +29,7 @@ export type DemoPlay = "invest" | "vera" | null;
 export interface DemoApi {
   address: `0x${string}`;
   usdc: { raw: bigint; value: number };
-  portfolio: { holdings: Holding[]; totalUsd: number };
+  portfolio: Portfolio;
   activity: ActivityRow[];
   veraRecord: VeraRecord;
   allocate: (goal: string, amountUsd: number, risk?: string) => AllocateResult;

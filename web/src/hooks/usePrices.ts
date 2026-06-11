@@ -14,7 +14,7 @@ export interface PricesResponse {
   asOf: string;
 }
 
-async function fetchPrices(): Promise<PricesResponse> {
+export async function fetchPrices(): Promise<PricesResponse> {
   const res = await fetch("/api/prices");
   const json = await res.json();
   if (!res.ok) {
@@ -23,13 +23,13 @@ async function fetchPrices(): Promise<PricesResponse> {
   return json as PricesResponse;
 }
 
-/** All live asset prices (symbol -> AssetPrice). Refreshes every 20s. */
+/** All live asset prices (symbol -> AssetPrice). Refreshes every 30s. */
 export function usePrices() {
   return useQuery({
     queryKey: ["prices"],
     queryFn: fetchPrices,
-    staleTime: 15_000,
-    refetchInterval: 20_000,
+    staleTime: 20_000,
+    refetchInterval: 30_000,
   });
 }
 

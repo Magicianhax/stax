@@ -8,7 +8,7 @@
 // Note on P&L: we don't track cost basis on-chain, so we DON'T fabricate an
 // "all time" gain (the design's demo gain pill is intentionally omitted). The
 // hero shows real total value; per-holding rows show approximate current value.
-import { useUsdcBalance, usePortfolio, type Holding } from "@/hooks/useBalances";
+import { usePortfolio, type Holding } from "@/hooks/useBalances";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import {
   Icon,
@@ -20,7 +20,7 @@ import {
   VerifiedBadge,
 } from "@/components/design";
 import { displayFor, toTile } from "@/lib/displayAssets";
-import { usd } from "@/lib/format";
+import { usd, tokenQty } from "@/lib/format";
 
 export function PortfolioScreen({
   go,
@@ -28,15 +28,16 @@ export function PortfolioScreen({
   go: (screen: string, params?: Record<string, unknown>) => void;
 }) {
   const { address } = useSmartAccount();
-  const { data: bal } = useUsdcBalance(address ?? undefined);
+  // Cash, invested, and total all arrive pre-computed from /api/portfolio —
+  // this screen renders them verbatim (no client-side money math).
   const { data: port, isLoading: portLoading } = usePortfolio(address ?? undefined);
 
-  const cash = bal?.value ?? 0;
+  const cash = port?.cashUsd ?? 0;
   const holdings: Holding[] = port?.holdings ?? [];
-  const invested = port?.totalUsd ?? 0;
+  const invested = port?.investedUsd ?? 0;
   // Only holdings we could price contribute to the donut/legend share.
   const priced = holdings.filter((h) => h.valueUsd !== undefined && h.valueUsd > 0);
-  const total = invested + cash;
+  const total = port?.totalUsd ?? 0;
 
   // ── First-load skeleton — don't flash the empty state before holdings resolve.
   if (portLoading && holdings.length === 0) {
@@ -222,8 +223,15 @@ export function PortfolioScreen({
         <SectionTitle>Holdings</SectionTitle>
         <div className="card stagger-in" style={{ padding: "4px 14px" }}>
           {holdings.map((h, i) => {
-            const tile = toTile(h.asset.symbol, h.asset.name);
-            const d = displayFor(h.asset.symbol, h.asset.name);
+            const base = toTile(h.asset.symbol, h.asset.name);
+            // Real 1D market data (from the server) replaces the presentational
+            // tint whenever the asset has a live source.
+            const tile = {
+              ...base,
+              day: h.dayChangePct ?? base.day,
+              spark: h.spark ?? base.spark,
+            };
+            const day = h.dayChangePct;
             return (
               <div
                 key={h.asset.symbol}
@@ -233,14 +241,28 @@ export function PortfolioScreen({
               >
                 <HoldingRow
                   asset={tile}
-                  sub={d.cat}
+                  sub={`${tokenQty(h.raw, h.asset.decimals ?? 18)} ${h.asset.symbol}`}
                   showSpark
                   onClick={() => go("asset", { symbol: h.asset.symbol })}
                   right={
-                    <div className="tnum" style={{ fontWeight: 600, fontSize: 16 }}>
-                      {h.valueUsd !== undefined
-                        ? usd(h.valueUsd)
-                        : `${h.qty.toLocaleString("en-US", { maximumFractionDigits: 3 })}`}
+                    <div className="tnum" style={{ textAlign: "right" }}>
+                      <div style={{ fontWeight: 600, fontSize: 16 }}>
+                        {h.valueUsd !== undefined
+                          ? usd(h.valueUsd)
+                          : tokenQty(h.raw, h.asset.decimals ?? 18)}
+                      </div>
+                      {day !== undefined && (
+                        <div
+                          style={{
+                            fontSize: 12.5,
+                            fontWeight: 600,
+                            marginTop: 2,
+                            color: day >= 0 ? "var(--pos)" : "var(--neg)",
+                          }}
+                        >
+                          {(day >= 0 ? "+" : "") + day.toFixed(2)}% today
+                        </div>
+                      )}
                     </div>
                   }
                 />

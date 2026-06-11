@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { createPublicClient, http, isAddress } from "viem";
 import { z } from "zod";
 import { AllocationSchema } from "@/lib/allocation-schema";
-import { MANTLE_CHAIN } from "@/lib/mantle";
+import { MANTLE_CHAIN, MULTICALL3 } from "@/lib/mantle";
 import { buildLegs, STAX_EXECUTOR } from "@/lib/legBuilder";
 import { buildPlanId, recHash, signRiskInference } from "@/lib/eip712";
 import { netOf } from "@/lib/fees";
@@ -30,13 +30,17 @@ const InvestPlanRequestSchema = z.object({
   amountUsd: z.number().positive().max(MAX_AMOUNT_USD),
 });
 
+// batch.multicall folds the per-leg pool reads into one eth_call so the public
+// RPC's rate limiter never drops part of a quote burst.
 const publicClient = createPublicClient({
   chain: {
     id: MANTLE_CHAIN.id,
     name: MANTLE_CHAIN.name,
     nativeCurrency: MANTLE_CHAIN.nativeCurrency,
     rpcUrls: MANTLE_CHAIN.rpcUrls,
+    contracts: { multicall3: { address: MULTICALL3 } },
   },
+  batch: { multicall: { wait: 16 } },
   transport: http(RPC_URL),
 });
 

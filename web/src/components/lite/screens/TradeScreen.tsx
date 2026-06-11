@@ -1,19 +1,19 @@
 "use client";
 
 // Trade — Pro manual buy/sell (screens_pro.jsx · Trade) wired to the REAL gasless
-// path. BUY: useQuote (live Fluxion spot) + useSwap.buy (batched approve +
-// exactInputSingle as one sponsored UserOp). SELL: useSellQuote + useSwap.sell
-// (the held stock token -> USDC, recipient = user). The slippage tolerance maps
-// Tight / Normal / Loose to 50 / 100 / 300 bps (the on-chain amountOutMinimum is
-// the real protection). On success we route to the plain-words receipt.
-//
-// Selling is supported for stock-tier holdings (single-hop Fluxion). Routed
-// SAFE/CRYPTO sells aren't wired yet, so they're gated honestly.
+// path. BUY: useQuote (live Fluxion/Agni spot) + useSwap.buy (batched approve +
+// swap as one sponsored UserOp). SELL: useSellQuote + useSwap.sell (the held
+// token -> USDC, recipient = user) — single-hop Fluxion for stocks, reversed
+// Agni route for sUSDe/mETH. The slippage tolerance maps Tight / Normal / Loose
+// to 50 / 100 / 300 bps (the on-chain amountOutMinimum is the real protection).
+// On success we route to the plain-words receipt.
 import { useEffect, useState } from "react";
-import { ALL_ASSETS, STOCKS, type Asset } from "@/lib/mantle";
+import { ALL_ASSETS, isRoutable, type Asset } from "@/lib/mantle";
 import { useQuote, useSellQuote } from "@/hooks/useQuote";
 import { useSwap } from "@/hooks/useSwap";
 import { useUsdcBalance, usePortfolio } from "@/hooks/useBalances";
+import { usePrice } from "@/hooks/usePrices";
+import { useMarketHistory } from "@/hooks/useMarket";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { displayFor } from "@/lib/displayAssets";
 import { Icon, AssetTile, Crossfade, PriceChart } from "@/components/design";
@@ -38,8 +38,17 @@ export function TradeScreen({
 }) {
   const asset: Asset = ALL_ASSETS.find((a) => a.symbol === symbol) ?? ALL_ASSETS[0];
   const d = displayFor(asset.symbol, asset.name);
-  const up = d.day >= 0;
-  const isStock = STOCKS.some((s) => s.symbol === asset.symbol);
+  // Sellable = anything with a validated swap route (stocks via Fluxion,
+  // sUSDe/mETH via their reversed Agni route).
+  const sellable = isRoutable(asset.symbol);
+  // Real market context: live on-chain spot + real 1D move/series, with the
+  // presentational reference as the offline fallback.
+  const { priceUsd: livePrice } = usePrice(asset.symbol);
+  const { data: dayMarket } = useMarketHistory(asset.symbol, "1D");
+  const shownPrice = livePrice ?? d.price;
+  const day = dayMarket?.changePct ?? d.day;
+  const spark = dayMarket?.series ?? d.spark;
+  const up = day >= 0;
   const { address } = useSmartAccount();
   const { data: bal } = useUsdcBalance(address ?? undefined);
   const { data: port } = usePortfolio(address ?? undefined);
@@ -60,7 +69,7 @@ export function TradeScreen({
   const sellRaw = (heldRaw * BigInt(Math.round(sellPct))) / BigInt(100);
   const sellQty = holding ? fromUnits(sellRaw, asset.decimals ?? 18) : 0;
   const { data: sellQuote, isFetching: sellFetching } = useSellQuote(
-    side === "sell" && isStock ? asset : null,
+    side === "sell" && sellable ? asset : null,
     side === "sell" ? sellRaw : BigInt(0),
   );
 
@@ -69,7 +78,7 @@ export function TradeScreen({
     side === "buy" && n > 0 && !over && !!quote && quote.expectedOutRaw > BigInt(0) && !!address;
   const canSell =
     side === "sell" &&
-    isStock &&
+    sellable &&
     sellRaw > BigInt(0) &&
     !!sellQuote &&
     sellQuote.expectedUsdcRaw > BigInt(0) &&
@@ -127,21 +136,21 @@ export function TradeScreen({
       {/* price + market context */}
       <div style={{ padding: "12px 22px 0", display: "flex", alignItems: "baseline", gap: 10 }}>
         <span className="tnum" style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-.02em" }}>
-          {d.price !== undefined ? usd(d.price) : "—"}
+          {shownPrice !== undefined ? usd(shownPrice) : "—"}
         </span>
         <span
           className="tnum"
           style={{ fontSize: 13, fontWeight: 700, color: up ? "var(--pos)" : "var(--neg)" }}
         >
-          {(up ? "+" : "") + d.day.toFixed(2)}% today
+          {(up ? "+" : "") + day.toFixed(2)}% today
         </span>
       </div>
       <div style={{ padding: "10px 22px 2px" }}>
         <PriceChart
-          data={d.spark}
+          data={spark}
           up={up}
           height={120}
-          label={`${d.name} price chart, ${up ? "up" : "down"} ${Math.abs(d.day).toFixed(1)}% today`}
+          label={`${d.name} price chart, ${up ? "up" : "down"} ${Math.abs(day).toFixed(1)}% today`}
         />
       </div>
 
@@ -169,7 +178,7 @@ export function TradeScreen({
         </div>
       </div>
 
-      {side === "sell" && (!isStock || !holding || heldRaw <= BigInt(0)) ? (
+      {side === "sell" && (!sellable || !holding || heldRaw <= BigInt(0)) ? (
         <div style={{ padding: "40px 30px 0", textAlign: "center", color: "var(--ink-2)" }}>
           <div
             style={{
@@ -341,8 +350,8 @@ export function TradeScreen({
                 ? "Getting a live price…"
                 : quote && quote.expectedOutRaw > BigInt(0)
                   ? `≈ ${tokenQty(quote.expectedOutRaw, asset.decimals ?? 18)} shares`
-                  : d.price !== undefined
-                    ? `${usd(d.price)} each`
+                  : shownPrice !== undefined
+                    ? `${usd(shownPrice)} each`
                     : ""}
             </div>
             <div

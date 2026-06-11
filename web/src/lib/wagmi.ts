@@ -44,9 +44,17 @@ export const wagmiConfig = createConfig({
   ssr: true,
 });
 
-/** Shared read-only client for balances, allowances, pool quotes, receipts. */
+/**
+ * Shared read-only client for balances, allowances, pool quotes, receipts.
+ * `batch.multicall` aggregates every readContract issued in the same tick into
+ * ONE Multicall3 eth_call — a portfolio refresh (15 balanceOf) or a quote burst
+ * becomes a single RPC request instead of 15-20, which is what the public
+ * rpc.mantle.xyz rate limiter demands (unbatched bursts get some calls dropped,
+ * making holdings flicker in and out).
+ */
 export const publicClient = createPublicClient({
   chain: mantle,
+  batch: { multicall: { wait: 16 } },
   transport: http(RPC_URL),
 });
 

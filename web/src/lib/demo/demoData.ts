@@ -21,10 +21,11 @@ function assetOf(symbol: string): Asset {
 function holding(symbol: string, valueUsd: number): Holding {
   const asset = assetOf(symbol);
   const dec = asset.decimals ?? 18;
-  const priceUsd = displayFor(symbol).price ?? 1;
+  const d = displayFor(symbol);
+  const priceUsd = d.price ?? 1;
   const qty = valueUsd / priceUsd;
   const raw = parseUnits(qty.toFixed(Math.min(dec, 6)), dec);
-  return { asset, raw, qty, valueUsd, priceUsd };
+  return { asset, raw, qty, valueUsd, priceUsd, dayChangePct: d.day, spark: d.spark };
 }
 
 // ~$2,512 invested across four holdings + ~$240 spendable cash.
@@ -35,12 +36,16 @@ const DEMO_HOLDINGS: Holding[] = [
   holding("sUSDe", 478.37),
 ];
 
-export const DEMO_PORTFOLIO = {
-  holdings: DEMO_HOLDINGS,
-  totalUsd: DEMO_HOLDINGS.reduce((s, h) => s + (h.valueUsd ?? 0), 0),
-};
+const DEMO_INVESTED = DEMO_HOLDINGS.reduce((s, h) => s + (h.valueUsd ?? 0), 0);
 
 export const DEMO_USDC = { raw: parseUnits("240.55", 6), value: 240.55 };
+
+export const DEMO_PORTFOLIO = {
+  holdings: DEMO_HOLDINGS,
+  investedUsd: DEMO_INVESTED,
+  cashUsd: DEMO_USDC.value,
+  totalUsd: DEMO_INVESTED + DEMO_USDC.value,
+};
 
 const hx = (tag: string): `0x${string}` => ("0x" + tag.repeat(32).slice(0, 64)) as `0x${string}`;
 

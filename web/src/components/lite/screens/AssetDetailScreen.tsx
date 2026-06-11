@@ -1,14 +1,16 @@
 "use client";
 
-// AssetDetail — Pro asset view (screens_pro.jsx · AssetDetail). Shows a price
-// sparkline (presentational reference series), plain-language about copy, and
-// the user's REAL position in this asset (from usePortfolio). Buy/Sell open the
-// manual Trade screen (useQuote + useSwap, gasless). Tiers the executor can't
-// route yet are flagged "Coming soon".
+// AssetDetail — Pro asset view (screens_pro.jsx · AssetDetail). Shows a REAL
+// price chart (/api/market: Yahoo Finance for the equities our xStocks track,
+// CoinGecko for the token tier), plain-language about copy, and the user's REAL
+// position in this asset (from usePortfolio). Buy/Sell open the manual Trade
+// screen (useQuote + useSwap, gasless). Tiers the executor can't route yet are
+// flagged "Coming soon".
 import { useState } from "react";
 import { ALL_ASSETS, type Asset } from "@/lib/mantle";
 import { usePortfolio } from "@/hooks/useBalances";
 import { usePrice } from "@/hooks/usePrices";
+import { useMarketHistory, type MarketRange } from "@/hooks/useMarket";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { displayFor } from "@/lib/displayAssets";
 import { Icon, AssetTile, PriceChart, SectionTitle, Stat } from "@/components/design";
@@ -31,23 +33,29 @@ export function AssetDetailScreen({
   const holding = port?.holdings.find((h) => h.asset.symbol === asset.symbol);
   const { priceUsd: livePrice } = usePrice(asset.symbol);
   const shownPrice = livePrice ?? d.price;
-  const up = d.day >= 0;
   const coming = Boolean(d.coming);
   const [r, setR] = useState(2);
 
-  // Range selector windows the reference series so each range is a real, distinct
-  // view (shorter ranges zoom into the most recent points) instead of a dead control.
+  // REAL market history for the selected range (server-cached; keepPreviousData
+  // makes range switches seamless). Assets with no live source (or an upstream
+  // outage) fall back to the windowed reference series so the chart never blanks.
+  const { data: market } = useMarketHistory(asset.symbol, RANGES[r] as MarketRange);
   const RANGE_FRAC = [0.18, 0.38, 0.6, 0.82, 1];
-  const sparkData = (() => {
+  const fallbackSpark = (() => {
     const s = d.spark ?? [];
     if (s.length < 2) return s;
     const n = Math.max(2, Math.round(s.length * (RANGE_FRAC[r] ?? 1)));
     return s.slice(s.length - n);
   })();
-  const winUp = sparkData.length > 1 ? sparkData[sparkData.length - 1] >= sparkData[0] : up;
-  // Change across the selected range window (presentational, from the reference series).
+  const sparkData = market?.series ?? fallbackSpark;
+  // Change across the selected range — real when we have market data (1D is vs
+  // the previous session's close, like a broker shows it).
   const rangeChange =
-    sparkData.length > 1 ? ((sparkData[sparkData.length - 1] - sparkData[0]) / sparkData[0]) * 100 : d.day;
+    market?.changePct ??
+    (sparkData.length > 1
+      ? ((sparkData[sparkData.length - 1] - sparkData[0]) / sparkData[0]) * 100
+      : d.day);
+  const winUp = rangeChange >= 0;
 
   // Key facts under About — a clean label/value list (not fat pill cards).
   const TYPE_LABEL: Record<string, string> = {

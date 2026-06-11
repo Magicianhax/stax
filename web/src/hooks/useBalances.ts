@@ -1,26 +1,28 @@
 "use client";
 
-// On-chain balance reads via the shared read-only public client.
+// Money reads.
 //
-//   useUsdcBalance(address)   -> spendable dollars (USDC, 6dp)
-//   usePortfolio(address)     -> buyable-token balances + approximate USD value
+//   useUsdcBalance(address)   -> spendable dollars (USDC, 6dp; one batched RPC read)
+//   usePortfolio(address)     -> fully-valued holdings from /api/portfolio
 //
-// USD valuation is approximate: we price each xStock off its Fluxion pool spot
-// (sqrtPriceX96), the same source the backend uses to quote legs. Crypto/safe
-// tiers without a pool show quantity only (value omitted).
+// The portfolio is computed SERVER-SIDE (one multicall + cached DEX-pool prices
+// + real 1D market moves) and rendered verbatim here — the browser does no
+// balance fan-out and no qty×price math. That keeps RPC traffic to ~one request
+// per poll and makes every screen agree on the same numbers.
 import { useCallback } from "react";
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { publicClient } from "@/lib/wagmi";
-import { ERC20_ABI, V3_POOL_ABI } from "@/lib/abis";
+import { ERC20_ABI } from "@/lib/abis";
 import { USDC, STOCKS, ALL_ASSETS, type Asset } from "@/lib/mantle";
 import { fromUnits } from "@/lib/format";
 import { useDemo } from "@/components/demo/DemoProvider";
 
-// Shared freshness policy for on-chain money reads: poll on a short interval AND
-// refetch when the user returns to the tab / reconnects / re-mounts a screen, so
-// a deposit or action shows up without a manual page refresh.
+// Shared freshness policy for money reads: poll on a calm interval AND refetch
+// when the user returns to the tab / reconnects / re-mounts a screen, so a
+// deposit or action shows up without a manual page refresh. Writes invalidate
+// immediately via useRefreshBalances, so the poll is only a safety net.
 const LIVE_BALANCE_OPTS = {
-  staleTime: 5_000,
+  staleTime: 15_000,
   refetchOnWindowFocus: true,
   refetchOnReconnect: true,
   refetchOnMount: "always",
@@ -29,15 +31,27 @@ const LIVE_BALANCE_OPTS = {
   placeholderData: keepPreviousData,
 } as const;
 
-const Q192 = (BigInt(2) ** BigInt(96)) ** BigInt(2);
-
 export interface Holding {
   asset: Asset;
   raw: bigint;
   qty: number;
-  /** Approximate USD value, or undefined if unpriced. */
+  /** USD value, or undefined if unpriced. */
   valueUsd?: number;
   priceUsd?: number;
+  /** Real 1D market move (%), or undefined if no live source. */
+  dayChangePct?: number;
+  /** Real 1D sparkline for row charts. */
+  spark?: number[];
+}
+
+export interface Portfolio {
+  holdings: Holding[];
+  /** Sum of priced holdings (USD). */
+  investedUsd: number;
+  /** Spendable USDC (USD). */
+  cashUsd: number;
+  /** investedUsd + cashUsd — the headline number, computed server-side. */
+  totalUsd: number;
 }
 
 /** Spendable USDC balance (number, dollars). */
@@ -46,7 +60,7 @@ export function useUsdcBalance(address?: string) {
   const query = useQuery({
     queryKey: ["usdc-balance", address],
     enabled: !demo && Boolean(address),
-    refetchInterval: 12_000,
+    refetchInterval: 30_000,
     ...LIVE_BALANCE_OPTS,
     queryFn: async (): Promise<{ raw: bigint; value: number }> => {
       const raw = (await publicClient.readContract({
@@ -62,74 +76,58 @@ export function useUsdcBalance(address?: string) {
   return query;
 }
 
-/** Spot USDC price (per whole token) of a stock from its Fluxion pool. */
-async function poolPriceUsd(asset: Asset): Promise<number | undefined> {
-  if (!asset.pool || !asset.decimals) return undefined;
-  try {
-    const [slot0, token0] = await Promise.all([
-      publicClient.readContract({ address: asset.pool, abi: V3_POOL_ABI, functionName: "slot0" }),
-      publicClient.readContract({ address: asset.pool, abi: V3_POOL_ABI, functionName: "token0" }),
-    ]);
-    const sqrtPriceX96 = (slot0 as readonly bigint[])[0];
-    const usdcIsToken0 = (token0 as string).toLowerCase() === USDC.address.toLowerCase();
-    // Price of 1 whole xStock in USDC. Quote a 1-token sell to get robust integer math.
-    const oneToken = BigInt(10) ** BigInt(asset.decimals);
-    const priceX192 = sqrtPriceX96 * sqrtPriceX96;
-    // usdcOut(raw 6dp) for selling 1 whole xStock:
-    const usdcOutRaw = usdcIsToken0
-      ? (oneToken * Q192) / priceX192 // USDC is token0: out = in / price
-      : (oneToken * priceX192) / Q192; // USDC is token1: out = in * price
-    return fromUnits(usdcOutRaw, USDC.decimals);
-  } catch {
-    return undefined;
-  }
+interface PortfolioApiHolding {
+  symbol: string;
+  raw: string;
+  qty: number;
+  priceUsd: number | null;
+  valueUsd: number | null;
+  dayChangePct: number | null;
+  spark: number[] | null;
 }
 
-/**
- * Read balances of the buyable tokens for `address` and value them approximately.
- * Returns only non-zero holdings, plus the summed approximate USD value.
- */
+interface PortfolioApiResponse {
+  cashUsd: number;
+  investedUsd: number;
+  totalUsd: number;
+  holdings: PortfolioApiHolding[];
+}
+
+/** The user's holdings, valued server-side. See /api/portfolio. */
 export function usePortfolio(address?: string) {
   const demo = useDemo();
   const query = useQuery({
     queryKey: ["portfolio", address],
     enabled: !demo && Boolean(address),
-    refetchInterval: 15_000,
+    refetchInterval: 30_000,
     ...LIVE_BALANCE_OPTS,
-    queryFn: async (): Promise<{ holdings: Holding[]; totalUsd: number }> => {
-      const balances = await Promise.all(
-        ALL_ASSETS.map(async (asset) => {
-          if (!asset.address || !asset.decimals) return null;
-          try {
-            const raw = (await publicClient.readContract({
-              address: asset.address,
-              abi: ERC20_ABI,
-              functionName: "balanceOf",
-              args: [address as `0x${string}`],
-            })) as bigint;
-            if (raw === BigInt(0)) return null;
-            return { asset, raw };
-          } catch {
-            return null;
-          }
-        }),
-      );
-
-      const live = balances.filter((b): b is { asset: Asset; raw: bigint } => b !== null);
-
-      const holdings: Holding[] = await Promise.all(
-        live.map(async ({ asset, raw }) => {
-          const qty = fromUnits(raw, asset.decimals!);
-          const priceUsd = await poolPriceUsd(asset);
-          const valueUsd = priceUsd !== undefined ? qty * priceUsd : undefined;
-          return { asset, raw, qty, valueUsd, priceUsd };
-        }),
-      );
-
-      const totalUsd = holdings.reduce((s, h) => s + (h.valueUsd ?? 0), 0);
-      // Stable order: stocks first (largest value), then others.
-      holdings.sort((a, b) => (b.valueUsd ?? 0) - (a.valueUsd ?? 0));
-      return { holdings, totalUsd };
+    queryFn: async (): Promise<Portfolio> => {
+      const res = await fetch(`/api/portfolio?address=${address}`);
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(typeof json?.error === "string" ? json.error : "Couldn't load portfolio.");
+      }
+      const api = json as PortfolioApiResponse;
+      const holdings: Holding[] = [];
+      for (const h of api.holdings) {
+        const asset = ALL_ASSETS.find((a) => a.symbol === h.symbol);
+        if (!asset) continue;
+        holdings.push({
+          asset,
+          raw: BigInt(h.raw),
+          qty: h.qty,
+          valueUsd: h.valueUsd ?? undefined,
+          priceUsd: h.priceUsd ?? undefined,
+          dayChangePct: h.dayChangePct ?? undefined,
+          spark: h.spark ?? undefined,
+        });
+      }
+      return {
+        holdings,
+        investedUsd: api.investedUsd,
+        cashUsd: api.cashUsd,
+        totalUsd: api.totalUsd,
+      };
     },
   });
   if (demo) return { ...query, data: demo.portfolio, isLoading: false, isPending: false } as typeof query;

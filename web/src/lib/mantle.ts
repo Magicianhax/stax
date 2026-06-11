@@ -9,6 +9,11 @@ export const MANTLE_CHAIN = {
   blockExplorers: { default: { name: "Mantlescan", url: "https://mantlescan.xyz" } },
 } as const;
 
+// Canonical Multicall3 (same address on every EVM chain; code verified on Mantle).
+// Server-side viem clients add this to their chain config so `batch.multicall`
+// can aggregate read bursts into a single eth_call.
+export const MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11" as const;
+
 export const USDC = {
   address: "0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9",
   symbol: "USDC",
@@ -143,4 +148,20 @@ export const ASSET_ROUTES: Record<string, AssetRoute> = {
 export function isRoutable(symbol: string): boolean {
   if (STOCKS.some((s) => s.symbol === symbol)) return true;
   return Boolean(ASSET_ROUTES[symbol]);
+}
+
+/**
+ * Reverse a validated buy route (USDC -> ... -> asset) into its sell direction
+ * (asset -> ... -> USDC). Same pools and fee tiers, hops walked backwards —
+ * V3 pools are symmetric, so the reversed path is equally valid for exactInput.
+ */
+export function reverseRoute(hops: RouteHop[]): RouteHop[] {
+  return [...hops].reverse().map((h) => ({
+    tokenIn: h.tokenOut,
+    tokenOut: h.tokenIn,
+    fee: h.fee,
+    pool: h.pool,
+    tokenInDecimals: h.tokenOutDecimals,
+    tokenOutDecimals: h.tokenInDecimals,
+  }));
 }

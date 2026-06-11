@@ -7,7 +7,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { publicClient } from "@/lib/wagmi";
 import { V3_POOL_ABI } from "@/lib/abis";
-import { USDC, ASSET_ROUTES, type Asset, type RouteHop } from "@/lib/mantle";
+import { USDC, ASSET_ROUTES, reverseRoute, type Asset, type RouteHop } from "@/lib/mantle";
 import { fromUnits } from "@/lib/format";
 
 const Q192 = (BigInt(2) ** BigInt(96)) ** BigInt(2);
@@ -26,8 +26,12 @@ function expectedOut(sqrtPriceX96: bigint, amountInRaw: bigint, usdcIsToken0: bo
   return (amountInRaw * Q192) / priceX192;
 }
 
-/** Chain the spot price across a multi-hop route to get expected final-token out. */
-async function expectedOutAlongRoute(hops: RouteHop[], usdcInRaw: bigint): Promise<bigint> {
+/**
+ * Chain the spot price across a multi-hop route to get expected final-token out.
+ * Direction-agnostic: works for buys (USDC -> asset) and reversed sells
+ * (asset -> USDC) — each hop infers its own direction from the pool's token0.
+ */
+async function expectedOutAlongRoute(hops: RouteHop[], amountInRaw: bigint): Promise<bigint> {
   const states = await Promise.all(
     hops.map((h) =>
       Promise.all([
@@ -36,7 +40,7 @@ async function expectedOutAlongRoute(hops: RouteHop[], usdcInRaw: bigint): Promi
       ]),
     ),
   );
-  let amount = usdcInRaw;
+  let amount = amountInRaw;
   for (let i = 0; i < hops.length; i++) {
     const h = hops[i];
     const sqrtPriceX96 = (states[i][0] as readonly bigint[])[0];
@@ -91,11 +95,16 @@ export interface SellQuote {
 }
 
 /**
- * Quote selling `tokenQtyRaw` raw units of `asset` into USDC, off the same Fluxion
- * pool spot. Stock tier only (needs a pool). Returns null while disabled/loading.
+ * Quote selling `tokenQtyRaw` raw units of `asset` into USDC. Stocks quote off
+ * their Fluxion pool spot; routed SAFE/CRYPTO assets (sUSDe/mETH) chain their
+ * validated Agni hops in REVERSE (asset -> ... -> USDC). Returns null while
+ * disabled/loading.
  */
 export function useSellQuote(asset: Asset | null, tokenQtyRaw: bigint) {
-  const enabled = Boolean(asset?.pool && asset?.address && asset?.decimals && tokenQtyRaw > BigInt(0));
+  const route = asset ? ASSET_ROUTES[asset.symbol] : undefined;
+  const enabled = Boolean(
+    asset?.address && asset?.decimals && tokenQtyRaw > BigInt(0) && (asset?.pool || route),
+  );
   return useQuery({
     queryKey: ["sell-quote", asset?.symbol, tokenQtyRaw.toString()],
     enabled,
@@ -103,14 +112,19 @@ export function useSellQuote(asset: Asset | null, tokenQtyRaw: bigint) {
     refetchInterval: 15_000,
     queryFn: async (): Promise<SellQuote> => {
       const a = asset!;
-      const [slot0, token0] = await Promise.all([
-        publicClient.readContract({ address: a.pool!, abi: V3_POOL_ABI, functionName: "slot0" }),
-        publicClient.readContract({ address: a.pool!, abi: V3_POOL_ABI, functionName: "token0" }),
-      ]);
-      const sqrtPriceX96 = (slot0 as readonly bigint[])[0];
-      const usdcIsToken0 = (token0 as string).toLowerCase() === USDC.address.toLowerCase();
-      // Selling the asset = USDC is the OUTPUT, so invert the buy-side branch.
-      const expectedUsdcRaw = expectedOut(sqrtPriceX96, tokenQtyRaw, !usdcIsToken0);
+      let expectedUsdcRaw: bigint;
+      if (route) {
+        expectedUsdcRaw = await expectedOutAlongRoute(reverseRoute(route.hops), tokenQtyRaw);
+      } else {
+        const [slot0, token0] = await Promise.all([
+          publicClient.readContract({ address: a.pool!, abi: V3_POOL_ABI, functionName: "slot0" }),
+          publicClient.readContract({ address: a.pool!, abi: V3_POOL_ABI, functionName: "token0" }),
+        ]);
+        const sqrtPriceX96 = (slot0 as readonly bigint[])[0];
+        const usdcIsToken0 = (token0 as string).toLowerCase() === USDC.address.toLowerCase();
+        // Selling the asset = USDC is the OUTPUT, so invert the buy-side branch.
+        expectedUsdcRaw = expectedOut(sqrtPriceX96, tokenQtyRaw, !usdcIsToken0);
+      }
       const expectedUsd = fromUnits(expectedUsdcRaw, USDC.decimals);
       return { amountInRaw: tokenQtyRaw, expectedUsdcRaw, expectedUsd };
     },
