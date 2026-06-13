@@ -27,6 +27,12 @@
 # internal planning notes — not for the public repo
 tasks/
 
+# personal / submission + marketing helper docs — local only.
+# Contain the owner's email and private notes; never commit.
+# (BRAND.md, SPEC.md, PRODUCT-BRIEF.md, demo.gif stay tracked — they're public.)
+docs/BUIDL_*
+docs/X_WEEK_PLAN.md
+
 # demo / marketing video project — kept local only, never committed
 video/
 

@@ -95,7 +95,8 @@ export const metadata: Metadata = {
   },
   formatDetection: { telephone: false },
   // Icons are served via Next file conventions (app/icon.png, app/apple-icon.png)
-  // and the OG/Twitter cards via app/opengraph-image.tsx — no manual config needed.
+  // and the OG/Twitter cards via the static app/opengraph-image.png +
+  // app/twitter-image.png (with .alt.txt) — no manual config needed.
 };
 
 export const viewport: Viewport = {
