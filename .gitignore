@@ -33,6 +33,15 @@ tasks/
 docs/BUIDL_*
 docs/X_WEEK_PLAN.md
 
+# pitch deck + assets built for demo day — local only, never committed.
+docs/pitch-deck.html
+docs/pitch-deck-notes.md
+docs/Stax-pitch-deck.pptx
+# partner logos added only for the deck (the app uses mantle.png + backed.svg).
+web/public/brand/partners/mantle.svg
+web/public/brand/partners/fluxion.svg
+web/public/brand/partners/fluxion-white.svg
+
 # demo / marketing video project — kept local only, never committed
 video/
 

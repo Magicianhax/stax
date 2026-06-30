@@ -56,13 +56,17 @@ const DISPLAY: Record<string, AssetDisplay> = {
   HOOD: { name: "Robinhood", ticker: "HOOD", logo: logoUrl("HOODx"), color: "#3d8a3d", kind: "stock", cat: "More", desc: "Robinhood runs a popular app for buying stocks and crypto. Here you own a piece of the company itself, which earns money as more people trade.", price: 41.92, day: 3.04, spark: [4, 5, 5, 6, 6, 7, 8, 9, 9, 11] },
   CRCL: { name: "Circle", ticker: "CRCL", logo: logoUrl("CRCLx"), color: "#2f6fd0", glyph: "C", kind: "stock", cat: "More", desc: "Circle is the company behind USDC, one of the largest digital dollars used across crypto. It earns income on the reserves that back the coin.", price: 38.5, day: 1.88, spark: [5, 5, 6, 6, 7, 7, 8, 8, 9, 9] },
   MSTR: { name: "Strategy", ticker: "MSTR", logo: logoUrl("MSTRx"), color: "#d08a2a", kind: "stock", cat: "More", desc: "Strategy (formerly MicroStrategy) is a software firm best known for holding one of the largest corporate stashes of Bitcoin, so its price tends to follow Bitcoin closely.", price: 392.77, day: -2.1, spark: [9, 10, 8, 9, 7, 8, 6, 7, 5, 6] },
-  // Safer / crypto tiers (kind: "safe" renders a "$" tile). sUSDe + mETH now route
-  // through Agni (validated) so they're buyable; FBTC has no clean single-router
-  // USDC route yet, so it stays honestly flagged `coming`.
-  // sUSDe accrues yield into its price, so it trades ABOVE $1 (≈$1.23 on-chain,
-  // 2026-06-11). The live Agni-route spot from /api/prices is what users see;
-  // this figure is only the offline fallback and should track reality loosely.
-  sUSDe: { name: "Safe Dollars", ticker: "sUSDe", logo: "https://assets.coingecko.com/coins/images/33613/small/USDE.png", color: "#c19a52", glyph: "$", kind: "safe", cat: "Safer", desc: "A dollar-based savings asset that grows in value as it earns a steady yield, so its price sits a little above $1 and drifts up over time. It's the calmest option here, though the rate moves and isn't guaranteed.", price: 1.23, apy: "4.8%", day: 0.01, spark: [8, 8, 8, 8, 9, 9, 9, 9, 10, 10] },
+  // Safer / crypto tiers (kind: "safe" renders a "$" tile). mETH routes through
+  // Agni (validated); FBTC has no clean single-router USDC route, so it stays
+  // honestly flagged `coming`.
+  // sUSDe DISABLED 2026-06-30: its Agni USDe<>sUSDe pool (0x07277…fBfc) drained to
+  // ZERO in-range liquidity, so both buy and sell revert (empty 0x) during the
+  // gasless UserOp simulation. No other venue is usable (Fluxion/Agni "no route";
+  // Merchant Moe routes but ~93% price impact). Flagged `coming` to pull it from
+  // the buy/sell UI and the AI universe (see lib/server/allocate.ts BUYABLE).
+  // Re-enable once a liquid USDC route exists (add a validated ASSET_ROUTES entry),
+  // or mint via Ethena's StakedUSDe vault (deposit USDe) instead of a DEX swap.
+  sUSDe: { name: "Safe Dollars", ticker: "sUSDe", logo: "https://assets.coingecko.com/coins/images/33613/small/USDE.png", color: "#c19a52", glyph: "$", kind: "safe", cat: "Safer", desc: "A dollar-based savings asset that grows in value as it earns a steady yield, so its price sits a little above $1 and drifts up over time. It's the calmest option here, though the rate moves and isn't guaranteed.", price: 1.23, apy: "4.8%", day: 0.01, coming: true, spark: [8, 8, 8, 8, 9, 9, 9, 9, 10, 10] },
   // Ondo RWA dollars — both REAL on Mantle but not yet buyable in-app (KYC mint/redeem
   // + no DEX liquidity), so shown as `coming`. USDY is the accumulating token (price
   // drifts up); mUSD is its $1-pegged rebasing wrapper. Prices/apy are indicative.

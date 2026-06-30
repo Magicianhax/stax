@@ -39,8 +39,9 @@ export function TradeScreen({
   const asset: Asset = ALL_ASSETS.find((a) => a.symbol === symbol) ?? ALL_ASSETS[0];
   const d = displayFor(asset.symbol, asset.name);
   // Sellable = anything with a validated swap route (stocks via Fluxion,
-  // sUSDe/mETH via their reversed Agni route).
-  const sellable = isRoutable(asset.symbol);
+  // mETH via its reversed Agni route). `coming` assets (e.g. sUSDe, whose pool
+  // lost liquidity) are never buyable or sellable, even if a route entry exists.
+  const sellable = isRoutable(asset.symbol) && !d.coming;
   // Real market context: live on-chain spot + real 1D move/series, with the
   // presentational reference as the offline fallback.
   const { priceUsd: livePrice } = usePrice(asset.symbol);
@@ -75,7 +76,7 @@ export function TradeScreen({
 
   const over = side === "buy" && n > balance + 1e-6;
   const canBuy =
-    side === "buy" && n > 0 && !over && !!quote && quote.expectedOutRaw > BigInt(0) && !!address;
+    side === "buy" && !d.coming && n > 0 && !over && !!quote && quote.expectedOutRaw > BigInt(0) && !!address;
   const canSell =
     side === "sell" &&
     sellable &&

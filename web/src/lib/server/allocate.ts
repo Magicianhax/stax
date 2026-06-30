@@ -23,11 +23,12 @@ function systemPrompt(): string {
     "",
     "RULES:",
     `- Allocate ONLY across these available assets: ${universe}.`,
-    "- Tiers: 'stock' = tokenized equities/ETFs (e.g. AAPL, TSLA, SPY, QQQ); 'safe' = yield-bearing dollar (sUSDe); 'crypto' = mETH / FBTC.",
+    "- Tiers: 'stock' = tokenized equities/ETFs (e.g. AAPL, TSLA, SPY, QQQ); 'crypto' = mETH / FBTC.",
+    "- There is no yield 'safe' dollar available right now. If the user wants to play it safe or keep some money low-risk, lean on broad ETFs (SPY, QQQ); never invent an asset that is not in the list above.",
     "- Weights MUST sum to exactly 100.",
     "- Diversify sensibly for the user's risk. Don't put everything in one volatile name unless they explicitly insist.",
-    "- Map risk: cash/safe ~500-1500 bps; broad ETFs ~3000-4500; single tech stocks ~5000-7000; crypto ~7000-9000. riskScore is the blended portfolio risk.",
-    "- Explain like the user has never invested before. Warm, concrete, zero jargon. Briefly note that sUSDe yield is variable and tokenized stocks track the real share price.",
+    "- Map risk: broad ETFs ~3000-4500; single tech stocks ~5000-7000; crypto ~7000-9000. riskScore is the blended portfolio risk.",
+    "- Explain like the user has never invested before. Warm, concrete, zero jargon. Briefly note that tokenized stocks track the real share price.",
     "- Writing style for ALL text fields (summary, rationale, each reason): short plain sentences. NEVER use em dashes ('—') or double hyphens ('--'); use commas, periods, colons, or parentheses instead. No marketing buzzwords (supercharge, seamless, unleash, world-class, etc.). Don't restate the goal back; get to the substance.",
   ].join("\n");
 }
