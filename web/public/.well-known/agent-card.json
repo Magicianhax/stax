@@ -1,0 +1,26 @@
+{
+  "name": "Vera",
+  "description": "AI broker for real tokenized stocks on Mantle. You tell Vera a goal in plain words; she builds a diversified portfolio of xStocks (issued by Backed, traded on Fluxion), signs every recommendation with EIP-712, commits it on-chain via StaxExecutor before execution, and places it gasless (ERC-4337). Autopilot runs the strategy on a schedule inside hard user-set bounds: amount, cadence, risk ceiling, spend cap. Every run is checked against those limits before anything signs. Non-custodial; the user holds the tokens.",
+  "image": "https://www.stax.best/icon-512.png",
+  "active": true,
+  "services": {
+    "web": { "url": "https://www.stax.best" }
+  },
+  "supportedTrust": ["reputation"],
+  "skills": ["portfolio-allocation", "trading-strategy", "risk-management", "dollar-cost-averaging"],
+  "domains": ["finance", "investing", "real-world-assets"],
+  "x402": false,
+  "metadata": {
+    "version": "1.0",
+    "chain": "mantle",
+    "chainId": 5000,
+    "app": "https://www.stax.best",
+    "demo": "https://www.stax.best/demo",
+    "sourceCode": "https://github.com/Magicianhax/stax",
+    "staxExecutor": "0x3411196abdc3dbe59c5e2878c44d1931a975af12",
+    "inferenceVerifier": "0x1eba56412e02a88f17a7dfa878494b3dfd4e0d1b",
+    "staxIdentityRegistry": "0x9f147a87f131408dd0bd750c16ac782620572abf",
+    "staxAgentId": 1,
+    "note": "Vera also holds agentId 1 in Stax's own ERC-8004-style IdentityRegistry on Mantle (address above); recommendations are committed through StaxExecutor and risk-gated by InferenceVerifier."
+  }
+}
