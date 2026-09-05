@@ -211,8 +211,9 @@ function nextOpenAfter(y: number, m: number, d: number): Date {
     const dd = t.getUTCDate();
     if (isTradingDay(yy, mm, dd)) return etInstant(yy, mm, dd, OPEN_MIN);
   }
-  // Unreachable in practice (never more than 4 consecutive closed days).
-  return etInstant(y, m, d + 1, OPEN_MIN);
+  // Unreachable in practice (never more than 4 consecutive closed days). Fall back to
+  // the day after the scan window, rolled over correctly across month/year ends.
+  return etInstant(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate(), OPEN_MIN);
 }
 
 /** Current NYSE regular-session status for `now`. */

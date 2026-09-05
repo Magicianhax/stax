@@ -192,7 +192,11 @@ export function BasketDetailScreen({
                 data={perf.spark}
                 up={trendUp}
                 height={110}
-                label={`${basket.name} over the last month, ${trendUp ? "up" : "down"} ${Math.abs(perf.returns["1M"] ?? 0).toFixed(1)}%`}
+                label={
+                  perf.returns["1M"] == null
+                    ? `${basket.name} over the last month, return not available yet`
+                    : `${basket.name} over the last month, ${trendUp ? "up" : "down"} ${Math.abs(perf.returns["1M"]).toFixed(1)}%`
+                }
               />
             ) : (
               <div
