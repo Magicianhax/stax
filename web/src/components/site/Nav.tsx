@@ -1,10 +1,12 @@
 "use client";
 
-// Sticky glass nav for the marketing site: mark, three anchor links, "Open Stax".
-// Under 720px the links collapse and only the mark + "Open Stax" remain (every
-// section is one scroll away on a phone, and a burger menu would be a second
-// tap for nothing). Every target is at least 44px tall.
-import Link from "next/link";
+// Sticky glass nav: mark, three anchors, "Open Stax". The hairline under the
+// bar runs edge to edge of the container, not the viewport, so it lines up
+// with every section divider below. Under 720px the anchors collapse (every
+// section is one scroll away on a phone) and only mark + CTA remain.
+import { ArrowRight } from "lucide-react";
+import { ShineButton } from "@/components/site/ui/ShineButton";
+import L from "./layout.module.css";
 import s from "./Nav.module.css";
 
 const LINKS = [
@@ -16,22 +18,25 @@ const LINKS = [
 export function Nav() {
   return (
     <nav className={s.nav} aria-label="Site">
-      <div className={s.inner}>
-        <a className={s.brand} href="#top" aria-label="Stax, back to top">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/brand/stax-light.png" alt="" width={30} height={30} className={s.mark} />
-          <span>Stax</span>
-        </a>
-        <div className={s.links}>
-          {LINKS.map((l) => (
-            <a key={l.href} href={l.href} className={s.link}>
-              {l.label}
-            </a>
-          ))}
+      <div className={L.wrap}>
+        <div className={s.bar}>
+          <a className={s.brand} href="#top" aria-label="Stax, back to top">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/brand/stax-light.png" alt="" width={28} height={28} className={s.mark} />
+            <span>Stax</span>
+          </a>
+          <div className={s.links}>
+            {LINKS.map((l) => (
+              <a key={l.href} href={l.href} className={s.link}>
+                {l.label}
+              </a>
+            ))}
+          </div>
+          <ShineButton href="/app" className={s.cta}>
+            Open Stax
+            <ArrowRight size={16} strokeWidth={2.4} aria-hidden="true" />
+          </ShineButton>
         </div>
-        <Link href="/app" className={`btn btn-primary btn-sm ${s.cta}`}>
-          Open Stax
-        </Link>
       </div>
     </nav>
   );

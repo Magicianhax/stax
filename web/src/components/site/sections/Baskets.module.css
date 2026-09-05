@@ -1,50 +1,19 @@
+/* 3×4 columns, every row the same height; the card fills its cell. */
 .grid {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 20px;
 }
 .cell {
-  display: block;
+  grid-column: 1 / -1;
+  display: flex;
   min-width: 0;
-  transition:
-    opacity 0.65s var(--s-ease-expo) var(--d, 0ms),
-    transform 0.65s var(--s-ease-expo) var(--d, 0ms);
-}
-.cell:nth-child(2) { --d: 60ms; }
-.cell:nth-child(3) { --d: 120ms; }
-.cell:nth-child(4) { --d: 180ms; }
-.cell:nth-child(5) { --d: 240ms; }
-.cell:nth-child(n + 6) { --d: 300ms; }
-@media (prefers-reduced-motion: no-preference) {
-  :global(.site[data-ready] .reveal:not(.is-in)) .cell {
-    opacity: 0;
-    transform: translateY(22px);
-  }
 }
 .card {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  padding: 20px 20px 18px;
-  border-radius: var(--s-r-lg);
-  background: var(--s-glass);
-  backdrop-filter: var(--s-glass-blur);
-  -webkit-backdrop-filter: var(--s-glass-blur);
-  border: 1px solid var(--s-glass-line);
-  box-shadow: var(--s-glass-hi), var(--s-shadow);
+  width: 100%;
   color: var(--s-ink);
-  transition:
-    transform 0.28s var(--s-ease-soft),
-    box-shadow 0.28s var(--s-ease);
-}
-@media (hover: hover) {
-  .card:hover {
-    transform: translateY(-3px);
-    box-shadow: var(--s-glass-hi), var(--s-shadow-lg);
-  }
 }
 .card:active {
   transform: scale(0.985);
@@ -81,35 +50,45 @@
 }
 .holdings {
   margin-top: auto;
-  padding-top: 20px;
+  padding-top: 22px;
   font-size: 13.5px;
   line-height: 1.45;
   color: var(--s-ink-2);
 }
 .bar {
-  margin-top: 10px;
+  margin-top: 12px;
+  border-radius: 99px;
 }
 
+@media (min-width: 900px) {
+  .cell {
+    grid-column: span 4;
+  }
+}
 @media (max-width: 899px) {
-  .grid {
+  ul.grid {
     display: flex;
     gap: 14px;
     overflow-x: auto;
     scroll-snap-type: x mandatory;
-    scroll-padding: 0 22px;
-    margin: 0 -22px;
-    padding: 4px 22px 14px;
+    scroll-padding: 0 24px;
+    margin: 0 -24px;
+    padding: 4px 24px 14px;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
   }
-  .grid::-webkit-scrollbar {
+  ul.grid::-webkit-scrollbar {
     display: none;
   }
   .cell {
-    flex: 0 0 min(82vw, 340px);
+    flex: 0 0 min(80vw, 340px);
     scroll-snap-align: start;
   }
-  .card {
-    padding: 18px 18px 16px;
+}
+@media (max-width: 479px) {
+  ul.grid {
+    scroll-padding: 0 16px;
+    margin: 0 -16px;
+    padding: 4px 16px 14px;
   }
 }

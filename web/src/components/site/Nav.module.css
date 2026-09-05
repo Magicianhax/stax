@@ -5,19 +5,16 @@
   background: var(--s-glass-strong);
   backdrop-filter: var(--s-glass-blur);
   -webkit-backdrop-filter: var(--s-glass-blur);
-  border-bottom: 1px solid var(--s-line);
-  box-shadow: var(--s-glass-hi);
 }
 
-.inner {
-  width: 100%;
-  max-width: var(--s-maxw);
-  margin: 0 auto;
-  padding: 0 28px;
-  height: 64px;
+/* The hairline lives on the bar (inside the container padding), so it shares
+   the container edges with every section divider on the page. */
+.bar {
   display: flex;
   align-items: center;
-  gap: 28px;
+  gap: 24px;
+  height: 64px;
+  border-bottom: 1px solid var(--s-line);
 }
 
 .brand {
@@ -32,8 +29,8 @@
 }
 
 .mark {
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   border-radius: 8px;
   display: block;
 }
@@ -41,8 +38,8 @@
 .links {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-left: 6px;
+  gap: 4px;
+  margin-left: 8px;
   flex: 1;
 }
 
@@ -55,7 +52,7 @@
   color: var(--s-ink-2);
   font-size: 15px;
   font-weight: 600;
-  transition: color 0.2s, background 0.2s;
+  transition: color 180ms var(--s-ease), background 180ms var(--s-ease);
 }
 
 @media (hover: hover) {
@@ -65,13 +62,15 @@
   }
 }
 
-.cta {
+.nav .cta {
   margin-left: auto;
+  height: 44px;
+  padding: 0 20px;
+  font-size: 14.5px;
 }
 
 @media (max-width: 719px) {
-  .inner {
-    padding: 0 18px;
+  .bar {
     gap: 12px;
   }
   .links {

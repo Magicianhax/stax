@@ -1406,21 +1406,6 @@ body {
 .site .footer-brand p { font-size: 14.5px; color: var(--s-ink-2); max-width: 280px; margin-top: 14px; line-height: 1.6; }
 .site .footer-bottom { margin-top: 44px; padding-top: 24px; border-top: 1px solid var(--s-line); display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--s-ink-3); }
 
-/* scroll reveal — shared by every section via useReveal() / <Reveal> in
-   components/site/motion.ts. Gated on data-ready (set by the shell after
-   hydration) so nothing is ever hidden without JS. Opacity + transform only. */
-.site[data-ready] .reveal {
-  opacity: 0;
-  transform: translateY(18px);
-  transition:
-    opacity 0.65s var(--s-ease-expo) var(--reveal-delay, 0ms),
-    transform 0.65s var(--s-ease-expo) var(--reveal-delay, 0ms);
-}
-.site[data-ready] .reveal.is-in {
-  opacity: 1;
-  transform: none;
-}
-
 /* responsive */
 @media (max-width: 560px) {
   .site-wrap { padding: 0 18px; }
@@ -1432,5 +1417,4 @@ body {
   .site *,
   .site *::before,
   .site *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; }
-  .site[data-ready] .reveal { opacity: 1; transform: none; transition: none; }
 }

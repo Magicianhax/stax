@@ -1,24 +1,21 @@
-/* ── diagram ─────────────────────────────────────────────────────────────── */
+/* ── diagram: six steps, two columns each, one line across the discs ─────── */
 .diagram {
-  --draw: 0;
   position: relative;
-  margin-top: 8px;
 }
 .steps {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 18px;
   position: relative;
   z-index: 1;
 }
 .step {
+  grid-column: 1 / -1;
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
+  min-width: 0;
 }
 .disc {
   width: 56px;
@@ -47,8 +44,8 @@
 }
 .stepTitle {
   margin: 16px 0 0;
-  max-width: 15ch;
-  font-size: 16.5px;
+  max-width: 14ch;
+  font-size: 16px;
   font-weight: 700;
   letter-spacing: -0.012em;
   line-height: 1.25;
@@ -84,36 +81,48 @@
 .ghost {
   stroke: var(--s-line);
 }
+/* drawn by default; GSAP pulls the offset to 1 and scrubs it back to 0 */
 .ink {
   stroke: var(--s-accent-2);
   stroke-dasharray: 1;
-  stroke-dashoffset: calc(1 - var(--draw));
+  stroke-dashoffset: 0;
 }
 :global(.site[data-mode="dark"]) .ink {
   stroke: var(--s-accent);
 }
 
-/* ── the contracts ───────────────────────────────────────────────────────── */
-.ledger {
+/* ── the contracts: a 12-column table on the container's own tracks ──────── */
+.table {
   margin-top: 64px;
-  padding: 24px 26px 10px;
-  border-radius: var(--s-r-lg);
-  background: var(--s-glass);
-  backdrop-filter: var(--s-glass-blur);
-  -webkit-backdrop-filter: var(--s-glass-blur);
-  border: 1px solid var(--s-glass-line);
-  box-shadow: var(--s-glass-hi), var(--s-glass-shadow);
+  border-top: 1px solid var(--s-line);
+}
+.chainHead,
+.row {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  column-gap: 24px;
+  align-items: baseline;
+  border-bottom: 1px solid var(--s-line);
 }
 .chainHead {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  margin-top: 22px;
+  padding: 18px 0 10px;
 }
-.chainHead:first-child {
-  margin-top: 0;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--s-line);
+.chainHead > :nth-child(1) {
+  grid-column: span 4;
+}
+.chainHead > :nth-child(2) {
+  grid-column: span 6;
+}
+.chainHead > :nth-child(3) {
+  grid-column: span 2;
+}
+.chainCell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--s-ink);
 }
 .chainLogo {
   width: 18px;
@@ -121,41 +130,49 @@
   border-radius: 50%;
   display: block;
 }
-.chainName {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--s-ink);
-}
 .chainNote {
   font-size: 13.5px;
   color: var(--s-ink-3);
 }
 .row {
-  display: grid;
-  grid-template-columns: minmax(200px, 1.1fr) minmax(0, 2fr) auto;
-  align-items: center;
-  gap: 18px;
-  min-height: 56px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--s-line);
+  position: relative;
+  min-height: 60px;
+  padding: 14px 0;
   color: var(--s-ink);
-  transition: color 0.2s;
 }
-.row:last-child {
-  border-bottom: 0;
+.row > :nth-child(1) {
+  grid-column: span 4;
+}
+.row > :nth-child(2) {
+  grid-column: span 6;
+}
+.row > :nth-child(3) {
+  grid-column: span 2;
+}
+/* the highlight bleeds 12px past the text so it reads as a row, not a smear */
+.row::before {
+  content: "";
+  position: absolute;
+  inset: 4px -12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--s-primary) 9%, transparent);
+  opacity: 0;
+  transition: opacity 0.18s var(--s-ease);
+  pointer-events: none;
 }
 .rowStatic {
   color: var(--s-ink-2);
 }
-.rowName {
+.name {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   font-size: 15px;
   font-weight: 700;
   line-height: 1.25;
 }
-.rowDoes {
-  margin-top: 2px;
+.does {
+  margin-top: 3px;
   font-size: 13.5px;
   font-weight: 500;
   color: var(--s-ink-2);
@@ -169,49 +186,71 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition: color 0.18s var(--s-ease);
 }
 .addrShort {
   display: none;
 }
-.rowLink {
+.link {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  min-width: 96px;
   justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
   font-size: 14px;
   font-weight: 700;
-  color: var(--s-accent-2);
+  color: var(--s-ink-2);
   white-space: nowrap;
+  transition: color 0.18s var(--s-ease);
 }
-:global(.site[data-mode="dark"]) .rowLink {
+/* terracotta stays on the glyph only: the text needs AA on paper */
+.arrow {
+  color: var(--s-accent-2);
+  transition: transform 0.2s var(--s-ease-soft);
+}
+:global(.site[data-mode="dark"]) .arrow {
   color: var(--s-accent);
 }
 @media (hover: hover) {
-  a.row:hover .rowLink svg {
-    transform: translate(1px, -1px);
+  a.row:hover::before {
+    opacity: 1;
+  }
+  a.row:hover .addr {
+    color: var(--s-ink);
+  }
+  a.row:hover .link {
+    color: var(--s-ink);
+  }
+  a.row:hover .arrow {
+    transform: translate(2px, -2px);
   }
 }
-.rowLink svg {
-  transition: transform 0.2s var(--s-ease-soft);
+a.row:focus-visible {
+  outline: none;
+}
+a.row:focus-visible::before {
+  opacity: 1;
+  box-shadow: 0 0 0 2px var(--s-primary);
+}
+
+@media (min-width: 900px) {
+  .step {
+    grid-column: span 2;
+  }
 }
 
 /* ── narrow: the line runs down the left, steps become rows ─────────────── */
 @media (max-width: 899px) {
-  .diagram {
-    margin-top: 0;
-  }
-  .steps {
-    grid-template-columns: 1fr;
+  .diagram .steps {
     grid-auto-rows: 1fr;
-    gap: 0;
+    row-gap: 0;
   }
   .step {
     flex-direction: row;
     align-items: flex-start;
     text-align: left;
     gap: 16px;
-    padding: 10px 0 22px;
+    padding: 8px 0 20px;
   }
   .disc {
     width: 48px;
@@ -227,25 +266,30 @@
   .down {
     display: block;
   }
-  .ledger {
+  .table {
     margin-top: 40px;
-    padding: 20px 18px 6px;
+  }
+  .chainHead > :nth-child(1),
+  .chainHead > :nth-child(2),
+  .row > :nth-child(1),
+  .row > :nth-child(2) {
+    grid-column: 1 / 10;
+  }
+  .chainHead > :nth-child(3) {
+    grid-column: 10 / 13;
+    grid-row: 1;
+  }
+  .row > :nth-child(3) {
+    grid-column: 10 / 13;
+    grid-row: 1 / span 2;
+    align-self: center;
   }
   .row {
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 6px 14px;
+    row-gap: 6px;
     padding: 12px 0;
   }
-  .rowName {
-    grid-column: 1;
-  }
-  .rowLink {
-    grid-column: 2;
-    grid-row: 1 / span 2;
-    min-width: 0;
-  }
-  .addr {
-    grid-column: 1;
+  .row::before {
+    inset: 2px -8px;
   }
   .addrFull {
     display: none;
@@ -253,7 +297,18 @@
   .addrShort {
     display: inline;
   }
-  .rowStatic .addrFull {
-    display: inline;
+  .rowStatic .addr {
+    white-space: normal;
+  }
+  .link {
+    font-size: 13px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .row::before,
+  .addr,
+  .link,
+  .arrow {
+    transition: none;
   }
 }

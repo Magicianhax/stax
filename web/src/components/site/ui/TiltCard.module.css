@@ -1,0 +1,9 @@
+.root {
+  perspective: 1200px;
+  min-width: 0;
+}
+
+.inner {
+  transform-style: preserve-3d;
+  height: 100%;
+}

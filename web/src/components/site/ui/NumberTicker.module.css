@@ -1,0 +1,7 @@
+.n {
+  font-variant-numeric: tabular-nums;
+}
+.dash {
+  font-weight: 400;
+  color: var(--s-ink-3);
+}

@@ -1,0 +1,45 @@
+.field {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  -webkit-mask-image: radial-gradient(ellipse 72% 80% at 50% 45%, #000 25%, transparent 100%);
+  mask-image: radial-gradient(ellipse 72% 80% at 50% 45%, #000 25%, transparent 100%);
+}
+
+.lattice {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, var(--s-ink) 1px, transparent 1.6px);
+  background-size: 48px 48px;
+  background-position: 0 0;
+  opacity: 0.08;
+}
+
+.dots {
+  position: absolute;
+  inset: 0;
+}
+
+.dot {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  margin: -1.5px 0 0 -1.5px;
+  border-radius: 50%;
+  background: var(--s-ink);
+  opacity: 0.08;
+}
+
+.glow {
+  --gx: 50%;
+  --gy: 40%;
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: radial-gradient(
+    420px circle at var(--gx) var(--gy),
+    color-mix(in srgb, var(--s-primary) 22%, transparent),
+    transparent 70%
+  );
+}

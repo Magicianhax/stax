@@ -1,9 +1,12 @@
 "use client";
 
-// Two separate wins at the Mantle Turing Test Hackathon 2026, shown as the two
-// announcement posts themselves: static cards (no widget script), verbatim
-// text from @Mantle_Official on July 10, 2026, each card linking to its post.
-import { Reveal } from "@/components/site/motion";
+// Two separate wins at the Mantle Turing Test Hackathon 2026, as two identical
+// 6+6 cards. Each card is one link to the announcement post: the award row
+// (rosette, name, event), then the post itself with verbatim text from
+// @Mantle_Official on July 10, 2026, clamped to five lines with the full text
+// in the title attribute.
+import { Reveal } from "@/components/site/ui/Reveal";
+import L from "@/components/site/layout.module.css";
 import s from "./Awards.module.css";
 
 export const AWARD_EVENT = "Mantle Turing Test Hackathon 2026";
@@ -13,9 +16,12 @@ export const AWARDS = [
   {
     name: "Track Winner · Trading & Strategy",
     href: "https://x.com/Mantle_Official/status/2075596029408514552",
+    /** Shown on the card: trimmed verbatim, the handle list elided. */
     text: [
-      "The Track Winners, one from each of the six. → @stax_market → @Madhav__28 → @RZ1989sol → @0x___eth → @rookie_of_ph → @MeLikeFishes. From autonomous trading to agentic economies and consumer apps, these builds led their categories start to finish.",
+      "The Track Winners, one from each of the six → @stax_market … From autonomous trading to agentic economies and consumer apps, these builds led their categories start to finish.",
     ],
+    /** The complete post, for the title attribute. */
+    full: "The Track Winners, one from each of the six. → @stax_market → @Madhav__28 → @RZ1989sol → @0x___eth → @rookie_of_ph → @MeLikeFishes. From autonomous trading to agentic economies and consumer apps, these builds led their categories start to finish.",
   },
   {
     name: "Best UI/UX",
@@ -25,17 +31,12 @@ export const AWARDS = [
       "Most onchain apps hand you a manual. Stax hands you an app you already know how to use, clear hierarchy, full design language, and onboarding with zero friction.",
       "The kind of design that turns a build into something people actually use.",
     ],
+    full: null,
   },
 ] as const;
 
 /** The award rosette (same drawing as /brand/awards/mark.svg), in currentColor. */
-export function AwardMark({
-  size = 22,
-  className,
-}: {
-  size?: number;
-  className?: string;
-}) {
+export function AwardMark({ size = 22, className }: { size?: number; className?: string }) {
   return (
     <svg
       width={size}
@@ -61,13 +62,7 @@ export function AwardMark({
 /** The X mark, drawn inline so no third-party script or image is loaded. */
 function XMark({ size = 18 }: { size?: number }) {
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      aria-hidden="true"
-    >
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
     </svg>
   );
@@ -75,57 +70,52 @@ function XMark({ size = 18 }: { size?: number }) {
 
 export function Awards() {
   return (
-    <section className={s.sec} id="awards" aria-labelledby="awards-title">
-      <div className="site-wrap">
-        <Reveal as="h2" id="awards-title" className={`serif ${s.title}`}>
-          Two separate wins.
+    <section className={L.sec} id="awards" aria-labelledby="awards-title">
+      <div className={L.wrap}>
+        <Reveal className={L.head}>
+          <h2 id="awards-title" className={L.h2}>
+            Two separate wins.
+          </h2>
         </Reveal>
-        <ul className={s.grid}>
-          {AWARDS.map((a, i) => (
-            <Reveal
-              key={a.href}
-              as="li"
-              delay={60 * (i + 1)}
-              className={s.item}
-            >
-              <p className={s.award}>
-                <AwardMark size={20} className={s.mark} />
-                {a.name}
-              </p>
-              <a
-                className={s.card}
-                href={a.href}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={`${a.name}: announcement by Mantle on X, ${AWARD_DATE}`}
-              >
-                <span className={s.cardHead}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src="/brand/partners/mantle.png"
-                    alt=""
-                    width={36}
-                    height={36}
-                    className={s.avatar}
-                  />
-                  <span className={s.who}>
-                    <b>Mantle</b>
-                    <span className={s.handle}>@Mantle_Official</span>
+        <Reveal as="ul" className={`${L.grid} ${L.eq} ${s.list}`}>
+          {AWARDS.map((a) => {
+            const shown = a.text.join("\n");
+            const full = a.full ?? shown;
+            return (
+              <li key={a.href} className={s.item}>
+                <a
+                  className={`${L.card} ${s.card}`}
+                  href={a.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={`${a.name}, ${AWARD_EVENT}: announcement by Mantle on X, ${AWARD_DATE}`}
+                >
+                  <span className={s.award}>
+                    <AwardMark size={20} className={s.rosette} />
+                    <span className={s.awardName}>{a.name}</span>
+                    <span className={s.event}>{AWARD_EVENT}</span>
                   </span>
-                  <XMark />
-                </span>
-                <span className={s.body}>
-                  {a.text.map((para) => (
-                    <span key={para} className={s.para}>
-                      {para}
+
+                  <span className={s.post}>
+                    <span className={s.postHead}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src="/brand/partners/mantle.png" alt="" width={36} height={36} className={s.avatar} />
+                      <span className={s.who}>
+                        <b>Mantle</b>
+                        <span className={s.handle}>@Mantle_Official</span>
+                      </span>
+                      <XMark />
                     </span>
-                  ))}
-                </span>
-                <span className={s.date}>{AWARD_DATE}</span>
-              </a>
-            </Reveal>
-          ))}
-        </ul>
+                    <span className={s.text} title={full}>
+                      {shown}
+                    </span>
+                    <span className={s.date}>{AWARD_DATE}</span>
+                  </span>
+                </a>
+              </li>
+            );
+          })}
+        </Reveal>
       </div>
     </section>
   );

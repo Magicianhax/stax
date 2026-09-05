@@ -1,66 +1,72 @@
 "use client";
 
-// First viewport: the promise on the left (7 columns), the proof wall on the
-// right (5). The ledger-grid ground is drawn in CSS on this section and fades
-// at the edges with a mask. The entrance is one orchestrated stagger (60ms
-// steps) and nothing else on the section moves afterwards.
+// First viewport. Left, 7 columns: kicker with the two award rosettes, the
+// H1, one sentence, two buttons and the film link. Right, 5 columns: the proof
+// wall. The ground is the DotField (sparse breathing lattice + pointer glow),
+// masked at the edges, on this section only. One staggered entrance; nothing
+// else on the section moves afterwards except the wall's border beam.
 import { useState } from "react";
-import Link from "next/link";
 import { ArrowRight, Play } from "lucide-react";
 import { FilmLightbox } from "@/components/site/FilmLightbox";
-import { Reveal } from "@/components/site/motion";
+import { DotField } from "@/components/site/ui/DotField";
+import { Reveal } from "@/components/site/ui/Reveal";
+import { ShineButton } from "@/components/site/ui/ShineButton";
+import L from "@/components/site/layout.module.css";
 import { ProofWall } from "./ProofWall";
-import { AwardMark } from "./Awards";
+import { AwardMark, AWARD_EVENT } from "./Awards";
 import s from "./Hero.module.css";
 
 export function Hero() {
   const [filmOpen, setFilmOpen] = useState(false);
 
   return (
-    <section className={s.hero} id="top" aria-labelledby="hero-title">
-      <div className={`site-wrap ${s.grid}`}>
-        <div className={s.copy}>
-          <Reveal as="p" className={s.kicker}>
-            <AwardMark size={20} className={s.kickerMark} />
-            <AwardMark size={20} className={s.kickerMark} />
-            <span>Two wins, Mantle Turing Test Hackathon 2026</span>
-          </Reveal>
+    <section className={`${L.sec} ${s.hero}`} id="top" aria-labelledby="hero-title">
+      <DotField />
+      <div className={`${L.wrap} ${L.grid} ${s.grid}`}>
+        <Reveal className={s.copy} stagger={0.08}>
+          <p className={s.kicker}>
+            <span className={s.award}>
+              <AwardMark size={18} className={s.rosette} />
+              Trading &amp; Strategy winner
+            </span>
+            <span className={s.sep} aria-hidden="true">
+              ·
+            </span>
+            <span className={s.award}>
+              <AwardMark size={18} className={s.rosette} />
+              Best UI/UX
+            </span>
+            <span className={s.event}>{AWARD_EVENT}</span>
+          </p>
 
-          <Reveal
-            as="h1"
-            delay={60}
-            id="hero-title"
-            className={`serif ${s.h1}`}
-          >
-            Own the best companies. Ask in plain words.
-          </Reveal>
+          <h1 id="hero-title" className={s.h1}>
+            Say it. Own it.
+          </h1>
 
-          <Reveal as="p" delay={120} className={s.sub}>
-            Say a goal. Vera builds the plan, a contract checks it, you own it.
-          </Reveal>
+          <p className={s.sub}>
+            Tell Vera your goal in plain words. She builds a plan of real stocks, a contract checks it, and you own it
+            in one tap.
+          </p>
 
-          <Reveal delay={180} className={s.ctas}>
-            <Link href="/app" className="btn btn-primary">
-              Open Stax <ArrowRight size={18} strokeWidth={2.2} />
-            </Link>
-            <Link href="/demo" className="btn btn-glass">
+          <div className={s.ctas}>
+            <ShineButton href="/app">
+              Open Stax
+              <ArrowRight size={18} strokeWidth={2.2} aria-hidden="true" />
+            </ShineButton>
+            <ShineButton href="/demo" variant="glass">
               Try the demo
-            </Link>
-          </Reveal>
+            </ShineButton>
+          </div>
 
-          <Reveal delay={240} className={s.subRow}>
-            <button
-              type="button"
-              className={s.film}
-              onClick={() => setFilmOpen(true)}
-            >
-              <Play size={14} strokeWidth={2.4} aria-hidden="true" /> Watch the
-              film
+          <div className={s.subRow}>
+            <button type="button" className={s.film} onClick={() => setFilmOpen(true)}>
+              <Play size={14} strokeWidth={2.4} aria-hidden="true" />
+              Watch the film
             </button>
-          </Reveal>
-        </div>
+          </div>
+        </Reveal>
 
-        <Reveal delay={200} className={s.wall}>
+        <Reveal className={s.wall}>
           <ProofWall />
         </Reveal>
       </div>

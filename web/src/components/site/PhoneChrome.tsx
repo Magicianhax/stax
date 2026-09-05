@@ -25,7 +25,7 @@ const ALT: Record<PhoneScreen, string> = {
 export function PhoneChrome({
   screen,
   alt,
-  sizes = "(min-width: 900px) 300px, 78vw",
+  sizes = "(min-width: 900px) 368px, 72vw",
   priority = false,
   className,
 }: {

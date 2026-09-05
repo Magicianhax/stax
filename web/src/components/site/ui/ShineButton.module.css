@@ -1,0 +1,76 @@
+.btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 52px;
+  padding: 0 26px;
+  border-radius: 99px;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  isolation: isolate;
+  transition: transform 180ms var(--s-ease-soft), box-shadow 180ms var(--s-ease), filter 180ms;
+}
+
+.label {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.shine {
+  position: absolute;
+  top: -40%;
+  left: 0;
+  width: 55%;
+  height: 180%;
+  z-index: -1;
+  pointer-events: none;
+  transform: translateX(-160%);
+  background: linear-gradient(105deg, transparent 20%, rgba(255, 255, 255, 0.42) 50%, transparent 80%);
+}
+
+.primary {
+  background: var(--s-hero-grad);
+  color: #fff;
+  box-shadow: var(--s-glass-hi), 0 8px 22px color-mix(in srgb, var(--s-primary) 40%, transparent);
+}
+
+.glass {
+  background: var(--s-glass-strong);
+  backdrop-filter: var(--s-glass-blur);
+  -webkit-backdrop-filter: var(--s-glass-blur);
+  color: var(--s-ink);
+  border: 1px solid var(--s-glass-line);
+  box-shadow: var(--s-glass-hi);
+}
+
+.glass .shine {
+  background: linear-gradient(105deg, transparent 20%, color-mix(in srgb, var(--s-primary) 18%, transparent) 50%, transparent 80%);
+}
+
+@media (hover: hover) {
+  .btn:hover {
+    transform: scale(1.02);
+  }
+  .primary:hover {
+    box-shadow: var(--s-glass-hi), 0 14px 30px color-mix(in srgb, var(--s-primary) 50%, transparent);
+    filter: brightness(1.04);
+  }
+  .glass:hover {
+    box-shadow: var(--s-glass-hi), var(--s-shadow);
+  }
+}
+
+.btn:active {
+  transform: scale(0.98);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn {
+    transition: none;
+  }
+}

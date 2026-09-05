@@ -1,229 +1,123 @@
-.panel {
+/* The wall is proof, not a link: no hover lift (the doubled class outranks the
+   shared .card hover). overflow hidden clips the border beam to the radius. */
+.card.card {
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  padding: 24px 24px 20px;
-  border-radius: var(--s-r-lg);
-  background: var(--s-glass);
-  backdrop-filter: var(--s-glass-blur);
-  -webkit-backdrop-filter: var(--s-glass-blur);
-  border: 1px solid var(--s-glass-line);
+  gap: 20px;
+  overflow: hidden;
+  transform: none;
   box-shadow: var(--s-glass-hi), var(--s-glass-shadow);
+}
+
+.card.card::after {
+  display: none;
 }
 
 .head {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.title {
-  display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   margin: 0;
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 700;
-  line-height: 1.3;
   letter-spacing: -0.01em;
+  line-height: 1.3;
   color: var(--s-ink);
-  text-wrap: balance;
 }
 
-.titleMark {
+.mark {
   flex: none;
-  margin-top: 2px;
   color: var(--s-accent-2);
 }
 
-.chains {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 32px;
-  padding: 0 11px;
-  border-radius: 99px;
-  border: 1px solid var(--s-line);
-  background: transparent;
-  color: var(--s-ink-2);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: default;
-}
-
-button.chip {
-  cursor: pointer;
-  min-height: 44px;
-  transition: color 0.2s, background 0.2s;
-}
-
-.chipOn {
-  color: var(--s-ink);
-  background: var(--s-surface);
-  border-color: transparent;
-  box-shadow: var(--s-shadow);
-}
-
-.chipSoon {
-  color: var(--s-ink-2);
-  background: var(--s-paper-2);
-  border-color: transparent;
-}
-
-.chipLogo {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  display: block;
+:global(.site[data-mode="dark"]) .mark {
+  color: var(--s-accent);
 }
 
 .stats {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
   border-top: 1px solid var(--s-line);
   border-bottom: 1px solid var(--s-line);
 }
 
 .stat {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 14px 12px 12px 0;
+  flex-direction: column-reverse;
+  gap: 4px;
+  padding: 16px 12px 14px 0;
+  min-width: 0;
 }
 
 .stat + .stat {
-  padding-left: 14px;
+  padding-left: 16px;
   border-left: 1px solid var(--s-line);
 }
 
-.statValue {
-  font-size: 26px;
+.stat dt {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--s-ink-2);
+  white-space: nowrap;
+}
+
+.stat dd {
+  margin: 0;
+  font-size: 28px;
   font-weight: 700;
   line-height: 1.1;
   letter-spacing: -0.03em;
   color: var(--s-ink);
+  white-space: nowrap;
 }
 
-.statLabel {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--s-ink-2);
-}
-
-/* Feed: fixed row height, the list slides down one row when a new one enters. */
-.feedClip {
-  overflow: hidden;
-  position: relative;
-}
-
-.feed {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.latest {
   display: flex;
-  flex-direction: column;
-}
-
-.feedSlide {
-  animation: feedIn 640ms var(--s-ease-expo) both;
-}
-
-@keyframes feedIn {
-  from {
-    transform: translateY(-52px);
-  }
-  to {
-    transform: translateY(0);
-  }
-}
-
-.row {
-  display: grid;
-  grid-template-columns: minmax(96px, 1.1fr) minmax(76px, 1fr) minmax(64px, auto) auto;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
-  height: 52px;
-  border-bottom: 1px solid var(--s-line);
-  font-size: 14px;
+  gap: 6px 10px;
+  margin: 0;
+  min-height: 24px;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--s-ink-2);
+  font-variant-numeric: tabular-nums;
 }
 
-.feedSlide .row:first-child {
-  animation: rowIn 640ms var(--s-ease-expo) both;
-}
-
-@keyframes rowIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-.rowOut {
-  animation: rowOut 400ms var(--s-ease) both;
-}
-
-@keyframes rowOut {
-  from {
-    opacity: 1;
-  }
-  to {
-    opacity: 0;
-  }
-}
-
-.risk {
+.strong {
   font-weight: 700;
   color: var(--s-ink);
-  white-space: nowrap;
 }
 
-.riskWord {
-  font-style: normal;
-  font-weight: 500;
-  color: var(--s-ink-2);
+.dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--s-ink-3);
 }
 
-.amount {
-  font-weight: 700;
-  color: var(--s-ink);
-  white-space: nowrap;
-}
-
-.planOnly {
-  font-weight: 500;
-  color: var(--s-ink-2);
-}
-
-.when {
-  font-size: 12.5px;
-  color: var(--s-ink-2);
-  white-space: nowrap;
-}
-
+/* Link text stays ink for contrast (terracotta text is 2.4:1 on paper); only
+   the arrow carries the on-chain accent. 44px tap target, pulled back into
+   the line with negative block margins. */
 .link {
   display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 5px;
+  gap: 4px;
+  margin-left: auto;
   min-height: 44px;
-  padding: 0 2px;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--s-accent-2);
+  margin-block: -10px;
+  font-weight: 700;
+  color: var(--s-ink-2);
   white-space: nowrap;
-  transition: color 0.2s;
+  transition: color 180ms var(--s-ease);
 }
 
-:global(.site[data-mode="dark"]) .link {
+.arrow {
+  color: var(--s-accent-2);
+}
+
+:global(.site[data-mode="dark"]) .arrow {
   color: var(--s-accent);
 }
 
@@ -233,89 +127,21 @@ button.chip {
   }
 }
 
-/* Empty state: the mechanism, never sample rows. */
-.mechanism {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-}
-
-.step {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 52px;
-  border-bottom: 1px solid var(--s-line);
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--s-ink);
-}
-
-.stepN {
-  flex: none;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  font-family: var(--s-mono);
-  font-size: 12px;
-  color: var(--s-primary-d);
-  background: var(--s-primary-soft);
-}
-
-:global(.site[data-mode="dark"]) .stepN {
-  color: var(--s-primary);
-}
-
-.foot {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.45;
-  color: var(--s-ink-2);
-}
-
-@media (max-width: 560px) {
-  .panel {
-    padding: 20px 18px 16px;
+@media (max-width: 479px) {
+  .card.card {
+    padding: 20px;
     gap: 16px;
-  }
-  .statValue {
-    font-size: 22px;
   }
   .stat {
     padding-right: 8px;
   }
+  .stat dt {
+    font-size: 12px;
+  }
+  .stat dd {
+    font-size: 24px;
+  }
   .stat + .stat {
     padding-left: 10px;
   }
-  .row {
-    grid-template-columns: minmax(64px, 1fr) minmax(64px, 1fr) auto auto;
-    gap: 8px;
-    font-size: 13px;
-  }
-  .riskWord {
-    display: none;
-  }
-  .link span:first-child {
-    display: none;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .feedSlide,
-  .feedSlide .row:first-child,
-  .rowOut {
-    animation: none;
-  }
-}
-
-.statValue,
-.risk,
-.amount,
-.when,
-.stepN {
-  font-variant-numeric: tabular-nums;
 }
