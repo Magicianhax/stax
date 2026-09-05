@@ -10,16 +10,20 @@ import "server-only";
 // autopilot twice. recordRun() therefore never touches next_run_at; the claim owns
 // the schedule. See supabase/migrations/*_autopilot.sql.
 import type { AutopilotConfig } from "@/lib/autopilot";
-import { DEFAULT_CHAIN_KEY, isChainKey, type ChainKey } from "@/lib/chains";
+import { isChainKey, type ChainKey } from "@/lib/chains";
 import { supabaseAdmin } from "@/lib/server/supabase";
 
 const TABLE = "autopilots";
 
 type Row = Record<string, unknown>;
 
-/** Rows written before the multi-chain migration have no `chain` → Base (the default). */
+/**
+ * Rows written before the multi-chain migration have no `chain`. Stax was Mantle-only
+ * then, so a missing value means MANTLE — never the current default (Base), or a
+ * legacy user's autopilot would start running against an unfunded Base account.
+ */
 function chainOf(v: unknown): ChainKey {
-  return isChainKey(v) ? v : DEFAULT_CHAIN_KEY;
+  return isChainKey(v) ? v : "mantle";
 }
 
 function rowToConfig(r: Row): AutopilotConfig {
