@@ -23,12 +23,16 @@ export interface BasketItem {
 
 export type BasketAuthor = "stax" | "vera" | "you" | "shared";
 
+/** Tile glyphs are Lucide icons, never emoji. Names are validated on shared links. */
+export const BASKET_ICONS = ["basket", "building", "cpu", "coins", "sprout", "rocket", "bitcoin", "layers", "globe", "gem", "sparkles"] as const;
+export type BasketIcon = (typeof BASKET_ICONS)[number];
+
 export interface Basket {
   id: string; // curated: "base:big-tech"; personal: "p_…"; shared: hash of contents
   chain: ChainKey;
   name: string; // ≤ 28 chars, plain words
   tagline: string; // one line, no jargon
-  emoji: string; // tile glyph
+  icon: BasketIcon; // tile glyph (Lucide icon name, see components/BasketIcon)
   color: string; // hex accent for the tile
   items: BasketItem[]; // weights sum to 100; only routable symbols
   riskScore: number; // bps, always from riskScoreFor()
@@ -115,7 +119,7 @@ const BASE_SEEDS: Seed[] = [
     slug: "big-tech",
     name: "Big Tech",
     tagline: "The four names everyone knows, in one tap.",
-    emoji: "🏙️",
+    icon: "building",
     color: "#3b5bdb",
     items: [
       { symbol: "AAPL", weightPct: 30, reason: "The steady anchor: a giant with a loyal customer base." },
@@ -128,7 +132,7 @@ const BASE_SEEDS: Seed[] = [
     slug: "ai-chips",
     name: "AI & Chips",
     tagline: "A focused bet on the companies building AI.",
-    emoji: "🧠",
+    icon: "cpu",
     color: "#4a7d2c",
     items: [
       { symbol: "NVDA", weightPct: 50, reason: "Makes the chips that train and run AI." },
@@ -140,7 +144,7 @@ const BASE_SEEDS: Seed[] = [
     slug: "coinbase-ecosystem",
     name: "Coinbase Ecosystem",
     tagline: "The exchange plus the coins it trades most.",
-    emoji: "🔵",
+    icon: "layers",
     color: "#1652f0",
     items: [
       { symbol: "COIN", weightPct: 40, reason: "The company that issues these very shares." },
@@ -152,7 +156,7 @@ const BASE_SEEDS: Seed[] = [
     slug: "stocks-crypto",
     name: "Stocks & Crypto",
     tagline: "Two big tech names next to the two big coins.",
-    emoji: "🪙",
+    icon: "coins",
     color: "#c47a2c",
     items: [
       { symbol: "NVDA", weightPct: 30, reason: "The AI chip leader." },
@@ -165,7 +169,7 @@ const BASE_SEEDS: Seed[] = [
     slug: "safe-growth",
     name: "Safe Growth",
     tagline: "Almost half stays in earning dollars. The rest grows.",
-    emoji: "🌱",
+    icon: "sprout",
     color: "#2e6f5e",
     items: [
       { symbol: "aUSDC", weightPct: 40, reason: "A calm cushion that still earns a little." },
@@ -178,7 +182,7 @@ const BASE_SEEDS: Seed[] = [
     slug: "frontier",
     name: "Frontier",
     tagline: "Rockets, chips, and Bitcoin. Expect big swings.",
-    emoji: "🚀",
+    icon: "rocket",
     color: "#1c1f24",
     items: [
       { symbol: "SPCX", weightPct: 40, reason: "A rare piece of a private space company." },
@@ -190,7 +194,7 @@ const BASE_SEEDS: Seed[] = [
     slug: "bitcoin-blue-chips",
     name: "Bitcoin & Blue Chips",
     tagline: "A third in Bitcoin, the rest in steady giants.",
-    emoji: "🟠",
+    icon: "bitcoin",
     color: "#d08a2a",
     items: [
       { symbol: "BTC", weightPct: 35, reason: "Bitcoin, held as Coinbase-backed cbBTC." },
@@ -206,7 +210,7 @@ const MANTLE_SEEDS: Seed[] = [
     slug: "big-tech",
     name: "Big Tech",
     tagline: "The four names everyone knows, in one tap.",
-    emoji: "🏙️",
+    icon: "building",
     color: "#3b5bdb",
     items: [
       { symbol: "AAPL", weightPct: 30, reason: "The steady anchor: a giant with a loyal customer base." },
@@ -219,7 +223,7 @@ const MANTLE_SEEDS: Seed[] = [
     slug: "broad-market",
     name: "Broad Market",
     tagline: "Hundreds of companies at once. A classic first step.",
-    emoji: "🌍",
+    icon: "globe",
     color: "#1f6f54",
     items: [
       { symbol: "SPY", weightPct: 60, reason: "The 500 largest US companies in one fund." },
@@ -230,7 +234,7 @@ const MANTLE_SEEDS: Seed[] = [
     slug: "steady-start",
     name: "Steady Start",
     tagline: "Mostly the whole market, with two giants on top.",
-    emoji: "🌱",
+    icon: "sprout",
     color: "#2e6f5e",
     items: [
       { symbol: "SPY", weightPct: 60, reason: "Spread across the whole US market." },
@@ -242,7 +246,7 @@ const MANTLE_SEEDS: Seed[] = [
     slug: "ai-chips",
     name: "AI & Chips",
     tagline: "A focused bet on the companies building AI.",
-    emoji: "🧠",
+    icon: "cpu",
     color: "#4a7d2c",
     items: [
       { symbol: "NVDA", weightPct: 50, reason: "Makes the chips that train and run AI." },
@@ -254,7 +258,7 @@ const MANTLE_SEEDS: Seed[] = [
     slug: "crypto-blue-chips",
     name: "Crypto Blue Chips",
     tagline: "Staked Ether beside two steady tech names.",
-    emoji: "💠",
+    icon: "gem",
     color: "#5b7fd0",
     items: [
       { symbol: "mETH", weightPct: 40, reason: "Ether that earns a staking reward on top." },
@@ -344,7 +348,7 @@ export function allocationToBasket(
   allocation: Allocation,
   name: string,
   goal?: string,
-  opts: { author?: BasketAuthor; emoji?: string; now?: number } = {},
+  opts: { author?: BasketAuthor; icon?: BasketIcon; now?: number } = {},
 ): Basket {
   const items = normalizeWeights(
     allocation.allocations
@@ -357,7 +361,7 @@ export function allocationToBasket(
     chain: chain.key,
     name: cleanName,
     tagline: cleanText(allocation.rationale, BASKET_TAGLINE_MAX),
-    emoji: opts.emoji ?? "🧺",
+    icon: opts.icon ?? "sparkles",
     color: colorFor(cleanName),
     items,
     riskScore: riskScoreFor(chain, items),
@@ -402,12 +406,9 @@ function cleanText(v: unknown, max: number): string {
   return v.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
 }
 
-// One emoji (with optional variation selector / ZWJ sequence), else the default glyph.
-const EMOJI_RE = /^\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier}|\u200D\p{Extended_Pictographic})*$/u;
-function cleanEmoji(v: unknown): string {
-  if (typeof v !== "string") return "🧺";
-  const s = v.trim();
-  return s.length <= 12 && EMOJI_RE.test(s) ? s : "🧺";
+// A known icon name, else the default basket glyph.
+function cleanIcon(v: unknown): BasketIcon {
+  return typeof v === "string" && (BASKET_ICONS as readonly string[]).includes(v) ? (v as BasketIcon) : "basket";
 }
 
 /** Compact base64url payload for `/app?basket=<param>`. Risk and color are never carried. */
@@ -417,7 +418,7 @@ export function encodeBasketLink(basket: Basket): string {
     c: basket.chain,
     n: basket.name.slice(0, BASKET_NAME_MAX),
     t: basket.tagline.slice(0, BASKET_TAGLINE_MAX),
-    e: basket.emoji,
+    e: basket.icon,
     i: basket.items.map((i) => [i.symbol, i.weightPct]),
   };
   return toBase64Url(JSON.stringify(payload));
@@ -478,7 +479,7 @@ export function decodeBasketLink(param: string | null | undefined, now = Math.fl
       chain: chain.key,
       name,
       tagline,
-      emoji: cleanEmoji(p.e),
+      icon: cleanIcon(p.e),
       color: colorFor(name),
       items: normalized,
       riskScore: riskScoreFor(chain, normalized),

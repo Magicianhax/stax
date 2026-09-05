@@ -5,6 +5,7 @@
 // colors) — nothing here reaches into components/design/*.
 import type { CSSProperties } from "react";
 import { displayFor } from "@/lib/displayAssets";
+import { BasketIconGlyph } from "@/components/BasketIcon";
 import { basketShareUrl, riskWord, type Basket } from "@/lib/baskets";
 import { useBasketPerformance } from "@/hooks/useBasketPerformance";
 
@@ -26,7 +27,7 @@ export function BasketDisc({ basket, size = 48 }: { basket: Basket; size?: numbe
         boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${basket.color} 22%, transparent)`,
       }}
     >
-      {basket.emoji}
+      <BasketIconGlyph icon={basket.icon} size={Math.round(size * 0.46)} color={basket.color} />
     </span>
   );
 }

@@ -141,7 +141,7 @@ export function demoSeedBaskets(chain: "base" | "mantle"): Basket[] {
       chain: "base",
       name: "My first Stax",
       tagline: "A balanced mix that grows over time and keeps some safe.",
-      emoji: "🧺",
+      icon: "basket",
       color: "#57a07e",
       items,
       riskScore: 5000, // rehydrated on read by useBaskets

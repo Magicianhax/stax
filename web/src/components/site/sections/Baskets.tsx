@@ -12,6 +12,7 @@ import { getChain } from "@/lib/chains";
 import { curatedBaskets, encodeBasketLink, riskWord, type Basket } from "@/lib/baskets";
 import { displayFor } from "@/lib/displayAssets";
 import { WeightBar } from "@/components/WeightBar";
+import { BasketIconGlyph } from "@/components/BasketIcon";
 import { gsap, useGSAP, MOTION_OK } from "../ui/gsap";
 import { onEnter } from "../ui/Reveal";
 import { Reveal } from "../ui/Reveal";
@@ -74,7 +75,7 @@ export function Baskets() {
                       boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${b.color} 24%, transparent)`,
                     }}
                   >
-                    {b.emoji}
+                    <BasketIconGlyph icon={b.icon} size={22} color={b.color} />
                   </span>
                   <div className={s.text}>
                     <div className={s.name}>{b.name}</div>
