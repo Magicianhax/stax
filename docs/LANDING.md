@@ -121,3 +121,81 @@ Until every file exists the shell will not type-check; that is expected, the lea
   Assets marquee becomes a single quiet row of logos, no captions. BuiltOn collapses into one line
   of marks above the footer. Guarantee keeps the diagram, drops the paragraph.
 - **Motion is one gesture per section**, not decoration.
+
+## Iteration 2 (user review, 2026-09-06): balance, alignment, motion, real logos
+
+What the user saw and wants fixed, in their words: tweets unequal sizes; things not aligned,
+scattered; the grid pattern is static, too dense, off-brand; hovering does nothing; "ugly divs" in
+the hero (the proof-wall empty state); hero text feels old; integration logos should be real and on
+ONE line. "We are building a professional brand, everything should be correctly placed."
+
+### Layout law (every section, no exceptions)
+- One container: `.wrap` = max-width 1200px, padding-inline 24px (16px < 480px), 12-column CSS grid
+  with 24px gutters. Every section's content sits on those columns; headings start at column 1 and
+  cards fill exact column spans (12 / 6+6 / 4+4+4 / 3×4). Nothing free-floats.
+- One section header block: `h2` (Fraunces, clamp 36–56px, tight) + optional one-liner (≤16 words,
+  `--s-ink-2`), 20px apart, 48px below to content. Same on every section.
+- Vertical rhythm: 128px between sections on desktop, 88px mobile. Equal top/bottom.
+- Equal cards: any row of cards uses `grid-auto-rows: 1fr`, identical padding (24px), identical
+  radius (`--s-r-lg`), identical border/shadow. The two tweet cards MUST be the same height and width
+  (6+6 columns, `align-items: stretch`, text clamped to the same number of lines with the full text
+  on hover/focus title attribute). Same for basket cards and phone frames.
+- Hairline alignment: section dividers and the nav hairline share the container edges.
+
+### Motion + pattern (GSAP is installed: `gsap` + `@gsap/react` `useGSAP`; use the gsap-react skill patterns, never `motion`/framer)
+- Background: replace the static ledger grid with a **sparse animated dot field** on the hero only:
+  dots on a 48px lattice at 8% ink opacity, ~1 in 6 dots slowly breathes (opacity 0.08→0.22 over
+  4–7s, random phase, GSAP timeline, paused under reduced motion), plus a very soft sage radial
+  glow that follows the pointer with a 0.6s lag (GSAP quickTo on two CSS vars). Mask-fade at the
+  edges. This is the brand's calm register; nothing strobes.
+- Hover (desktop pointer only, `@media (hover:hover)`): cards lift 4px + shadow deepens + a 1px
+  sage border glow fades in (180ms); buttons scale 1.02 with a soft shine sweep once; logos in the
+  integration row go from `--s-ink-3` to full ink on hover; phone frames tilt ≤3° toward the
+  pointer (GSAP quickTo rotateX/rotateY, spring back on leave); basket weight bars extend from 0
+  on first reveal; the proof wall's stat numbers use a number-ticker on reveal.
+- Reveal: one `useGSAP` batch per section (`gsap.from` y:24 opacity:0, stagger 0.06, expo.out,
+  ScrollTrigger once). Keep content visible without JS.
+- Library components to port (MIT, Magic UI / Aceternity style, into `src/components/site/ui/`):
+  `DotField` (above), `BorderBeam` (a single beam travelling the proof-wall card's border),
+  `NumberTicker`, `Marquee` (one line, pause on hover), `ShineButton`, `TiltCard`. Port the
+  behaviour in GSAP/CSS; do not add new dependencies.
+
+### Hero (rewrite copy, ≤30 words; the old copy is retired)
+- Kicker: "Winner · Trading & Strategy  ·  Best UI/UX" with the two rosettes, "Mantle Turing Test
+  Hackathon 2026" as a muted suffix.
+- H1: "Say it. Own it." (Fraunces, clamp 56–96px).
+- Sub: "Tell Vera your goal in plain words. She builds the plan, a contract checks it, and you own
+  real shares in one tap."
+- Buttons: "Open Stax" (ShineButton) · "Try the demo" (glass). Then "Watch the film" text link.
+- Right column: **no boxed empty state.** The proof wall becomes ONE glass card with a BorderBeam:
+  a header row (verified mark + "Signed, then verified on-chain"), three NumberTicker stats
+  (Plans built / Invested / Checks passed) that show real numbers from the API and a thin "—" while
+  loading or unavailable, and under them a single line of the latest record (risk %, amount,
+  relative time, explorer link) or, when unavailable, a calm one-liner "Record loads from Mantle
+  mainnet." No 3×2 verb grid, no stacked boxes.
+- Mobile: H1 stack, buttons full width, the card below, everything on the same 24px gutter.
+
+### Awards (equal, aligned)
+- Heading "Two separate wins." + two identical 6+6 cards (award name row with rosette; the tweet
+  card inside: avatar, Mantle / @Mantle_Official, X mark, text clamped to 5 lines, date). Both cards
+  the same height; the whole card is the link; hover lift.
+
+### Integrations (one line, real logos)
+- Fetch official SVG logos: Coinbase and Chainlink from `https://cdn.simpleicons.org/coinbase` and
+  `/chainlink`; Base and Mantle already exist; try official sources for Uniswap, Aave, Privy,
+  Pimlico, Backed (their sites / GitHub brand assets). Normalize every mark to monochrome
+  `currentColor`, 24px cap height, and store in `public/brand/partners/`. Where no official SVG can
+  be fetched, use the name as a wordmark in Hanken 700 at the same height, never a drawn substitute.
+- Render as ONE line: on desktop a single centered flex row (gap 40px, never wraps); on mobile the
+  same row inside the `Marquee` (one line, slow, pause on hover). Sits above the footer, with a
+  2-word kicker "Built on".
+
+### Everything else
+- Phones (HowItWorks): three frames on 4+4+4 columns, same size, same baseline; labels centered
+  under each; TiltCard hover.
+- Guarantee: diagram spans 12 columns; contract rows are a 12-column table with aligned mono
+  columns.
+- Baskets: 3×4 columns, equal heights, weight bars animate on reveal, hover lift.
+- Assets: one Marquee line of logos, 56px, pause on hover, no captions.
+- FAQ: 12 columns, heading 5 cols + list 7 cols, aligned to the same container.
+- Closing + footer: footer columns on the grid; links baseline-aligned.

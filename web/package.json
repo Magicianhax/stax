@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.81",
+    "@gsap/react": "^2.1.2",
     "@privy-io/node": "^0.20.0",
     "@privy-io/react-auth": "^3.28.0",
     "@supabase/supabase-js": "^2.107.0",
