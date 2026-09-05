@@ -1,209 +1,48 @@
 "use client";
 
-// Stax marketing site (route "/"). Recreated from the Stax design handoff v6
-// (Landing.html) and adapted to our brand: Fraunces display, Hanken UI,
-// JetBrains mono, sage glass, real Vera asset. Light by default with a persisted
-// dark toggle. The hero phone mirrors the real in-app Home screen; the three
-// asset chips around it sit STILL (no orbit spin). Copy is em-dash-free; the
-// Vera stat band / records and marquee figures are illustrative sample data.
-// Base-first: the asset showcase, marquee and goal examples pull from the Base
-// registry (lib/chains) + display metadata, so the page lists what the app sells.
-// All CTAs route to /app.
-import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
-import { ArrowRight, Sparkles, Sun, Moon, Menu, KeyRound, Zap, BadgeCheck, ChevronDown, Play } from "lucide-react";
-import { getChain } from "@/lib/chains";
-import { displayFor } from "@/lib/displayAssets";
-import { FAQ } from "@/lib/faq";
+// Direction contract (docs/LANDING.md, "Proof wall", seed e0aa85b4, structure #3).
+//
+// THESIS: Advice you can audit. The page proves Stax instead of describing it:
+// the first viewport puts the promise beside a wall of real on-chain records
+// and two third-party awards. No centered hero, floating phone, feature grid
+// or embedded demo.
+// OWN-WORLD: paper ground with a faint ruled ledger grid (1px --s-line every
+// 8px one way, 64px the other, fading at the edges), sage for the one action,
+// terracotta only for on-chain marks, glass panels for proof, mono for hashes
+// and amounts. One orchestrated entrance, a live ticking feed, numbers that
+// count up once, an SVG line that draws itself for the guarantee. No parallax,
+// no autoplaying video.
+// STORY: a first-time investor on a phone understands "real stocks, an AI a
+// contract checks before money moves, two awards", believes it because the
+// records are real and linkable, and opens Stax or the demo.
+// FIRST VIEWPORT (desktop): 7/5 columns, promise left, proof wall right; mobile
+// stacks with 3 wall rows under the CTAs. Copy budget: hero ≤ 30 words, every
+// other section a heading and the thing itself; the two award tweets sit after
+// the guarantee as static cards.
+// FINISH: unreviewed and undocumented is unfinished; this build ends with the
+// finish review and the verdict.
+import { useEffect, useRef } from "react";
+import { useMediaQuery } from "@/components/site/motion";
+import { Nav } from "@/components/site/Nav";
+import { Hero } from "@/components/site/sections/Hero";
+import { Awards } from "@/components/site/sections/Awards";
+import { HowItWorks } from "@/components/site/sections/HowItWorks";
+import { Guarantee } from "@/components/site/sections/Guarantee";
+import { Baskets } from "@/components/site/sections/Baskets";
+import { Assets } from "@/components/site/sections/Assets";
+import { Faq } from "@/components/site/sections/Faq";
+import { Closing } from "@/components/site/sections/Closing";
 
-const BASE = getChain("base");
-/** Base assets you can buy today (registry order), and the ones still coming. */
-const BASE_LIVE = BASE.assets.all.filter((a) => !a.coming).map((a) => a.symbol);
-const BASE_STOCKS_LIVE = BASE.assets.stocks.filter((a) => !a.coming).map((a) => a.symbol);
-const FAQ_ITEMS = FAQ;
-import { DemoMount } from "@/components/demo/DemoMount";
-import type { DemoPlay } from "@/components/demo/DemoProvider";
-import { PhoneChrome } from "@/components/site/PhoneChrome";
-import { LoopVideo } from "@/components/site/LoopVideo";
-import { FilmLightbox } from "@/components/site/FilmLightbox";
-
-type Mode = "light" | "dark";
-
-// Premium icon set (lucide-react), same family the in-app UI uses.
-const Arrow = ({ size = 18 }: { size?: number }) => <ArrowRight size={size} strokeWidth={2.2} />;
-
-/** A network's official mark — shown beside its name wherever it appears. */
-function ChainLogo({ chain, size = 16 }: { chain: "base" | "mantle"; size?: number }) {
-  const c = getChain(chain);
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img src={c.brand.logo} alt="" width={size} height={size} decoding="async" style={{ width: size, height: size, borderRadius: "50%", display: "block", flex: "none" }} />
-  );
-}
-
-/** The real Stax app-icon logo (light mark used in both themes, per brand). */
-function StaxMark({ size = 30 }: { size?: number }) {
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src="/brand/stax-light.png"
-      alt=""
-      width={size}
-      height={size}
-      style={{ width: size, height: size, borderRadius: size * 0.26, display: "block" }}
-    />
-  );
-}
-
-/** Small asset tile — real brand logo with a coloured-initial fallback. */
-function Tile({ sym }: { sym: string }) {
-  const d = displayFor(sym);
-  return (
-    <span className="tile" style={{ background: d.color }}>
-      {d.logo ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={d.logo} alt="" loading="lazy" decoding="async" />
-      ) : (
-        d.glyph ?? d.name[0]
-      )}
-    </span>
-  );
-}
-
-function fmtPrice(p?: number): string {
-  if (p == null) return "";
-  return p >= 1000 ? "$" + p.toLocaleString("en-US", { maximumFractionDigits: 0 }) : "$" + p.toFixed(2);
-}
-
-/** Price + day move (▲/▼ %, or APY for yield assets) — shared by marquee + chips. */
-function Quote({ sym }: { sym: string }) {
-  const d = displayFor(sym);
-  if (d.apy) {
-    return <span className="m-px">{fmtPrice(d.price)} <span className="m-apy">{d.apy} / yr</span></span>;
-  }
-  const up = d.day >= 0;
-  return (
-    <span className="m-px">
-      {fmtPrice(d.price)} <i className={up ? "up" : "down"}>{up ? "▲" : "▼"} {Math.abs(d.day).toFixed(2)}%</i>
-    </span>
-  );
-}
-
-/** Hero phone: the REAL app, fully interactive and STATIC (never auto-plays) —
-    visitors tap to explore it themselves. */
-function HeroDemo({ mode }: { mode: Mode }) {
-  return (
-    <div className="demo-embed">
-      <div className="demo-embed-fit">
-        <DemoMount play={null} mode={mode} />
-      </div>
-    </div>
-  );
-}
-
-/** A standalone playable phone — auto-plays its script once scrolled into view
-    (lazy-mounted so the marketing page stays light on first paint). */
-function DemoPhone({ play, mode }: { play: Exclude<DemoPlay, null>; mode: Mode }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [show, setShow] = useState(false);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const io = new IntersectionObserver(
-      (entries) => entries.forEach((e) => { if (e.isIntersecting) { setShow(true); io.disconnect(); } }),
-      { rootMargin: "220px" },
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, []);
-  return (
-    <div className="phone" ref={ref}>
-      <div className="phone-screen">
-        <div className="demo-embed is-static">
-          {show && (
-            <div className="demo-embed-fit">
-              <DemoMount play={play} mode={mode} />
-            </div>
-          )}
-        </div>
-        <PhoneChrome />
-      </div>
-    </div>
-  );
-}
-
-// Ticker rows: everything buyable on Base today; the reverse row is a rotation.
-const MARQUEE_A = BASE_LIVE;
-const MARQUEE_B = [...BASE_LIVE.slice(3), ...BASE_LIVE.slice(0, 3)].reverse();
-
-/** One sliding ticker row; the reverse row is decorative (aria-hidden). */
-function MarqueeRow({ syms, rev }: { syms: string[]; rev?: boolean }) {
-  return (
-    <div className={"marquee-row" + (rev ? " m-rev" : "")} aria-hidden={rev || undefined}>
-      {[...syms, ...syms].map((sym, i) => {
-        const d = displayFor(sym);
-        return (
-          <div className="m-item" key={sym + i}>
-            <Tile sym={sym} />
-            <span className="m-meta"><b>{d.name}</b><Quote sym={sym} /></span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-/* "You could just say…" — the product promise, typeset big. Rotating examples of
-   real-language goals with the kind of plan Vera builds for each (sample data). */
-const GOALS = [
-  { say: "Grow $500, but keep a third of it safe.", syms: ["NVDA", "AAPL", "aUSDC"], built: "5 holdings, a third in Safe Dollars" },
-  { say: "Put $50 into AI companies every month.", syms: ["NVDA", "GOOGL", "META"], built: "4 AI leaders, repeating on Autopilot" },
-  { say: "I’ve never invested. Start me slow.", syms: ["AAPL", "GOOGL"], built: "mostly Apple and Google, from $1" },
-  { say: "Something calmer that still beats my bank.", syms: ["aUSDC", "AAPL"], built: "Safe Dollars, balanced with steady names" },
-];
-
-function GoalQuotes() {
-  const [i, setI] = useState(0);
-  useEffect(() => {
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
-    const id = window.setInterval(() => setI((v) => (v + 1) % GOALS.length), 4600);
-    return () => window.clearInterval(id);
-  }, []);
-  return (
-    <section className="sec quotes-sec" aria-label="Things you can say to Vera">
-      <div className="site-wrap">
-        <div className="quotes reveal">
-          <p className="quotes-kicker">You could just say</p>
-          <div className="quotes-stack">
-            {GOALS.map((g, k) => (
-              <div key={g.say} className={"goal-quote" + (k === i ? " on" : "")} aria-hidden={k !== i}>
-                <p className="goal-say">&ldquo;{g.say}&rdquo;</p>
-                <div className="goal-built">
-                  <span className="goal-tiles">{g.syms.map((s) => <Tile key={s} sym={s} />)}</span>
-                  <span className="goal-built-t"><b>Vera builds</b> {g.built}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="quotes-foot">
-            <div className="quotes-dots">
-              {GOALS.map((g, k) => (
-                <button key={g.say} className={"qdot" + (k === i ? " on" : "")} onClick={() => setI(k)} aria-label={`Show example ${k + 1}`} />
-              ))}
-            </div>
-            <Link className="quotes-cta" href="/app">Say yours <Arrow size={15} /></Link>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
+// Runs before hydration so a dark-system visitor never sees a light flash.
+// Mirrors the matchMedia read in useMediaQuery below.
+const MODE_SCRIPT =
+  "try{var r=document.querySelector('.site');if(r&&matchMedia('(prefers-color-scheme: dark)').matches)r.setAttribute('data-mode','dark')}catch(e){}";
 
 export function SiteLanding() {
   const rootRef = useRef<HTMLDivElement>(null);
-  const [mode, setMode] = useState<Mode>("dark");
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [filmOpen, setFilmOpen] = useState(false);
+  // System theme, live. The pre-hydration script below sets the same attribute
+  // before first paint; useSyncExternalStore then takes over.
+  const dark = useMediaQuery("(prefers-color-scheme: dark)");
 
   // Shared basket links may land on the root (`/?basket=…`): forward them to the
   // app, which decodes and opens the basket. Plain navigation, no router needed.
@@ -213,469 +52,26 @@ export function SiteLanding() {
     if (basket) window.location.replace(`/app?basket=${encodeURIComponent(basket)}`);
   }, []);
 
+  // data-ready gates every scroll reveal (globals.css), so content is fully
+  // visible whenever JS has not run. Set on the DOM node, not in state.
   useEffect(() => {
-    const saved = localStorage.getItem("stax-landing-mode");
-    if (saved === "dark" || saved === "light") setMode(saved);
+    rootRef.current?.setAttribute("data-ready", "true");
   }, []);
-
-  const toggleMode = () => {
-    setMode((m) => {
-      const next: Mode = m === "dark" ? "light" : "dark";
-      localStorage.setItem("stax-landing-mode", next);
-      return next;
-    });
-  };
-
-  // Scroll reveal + count-up + hide-on-scroll nav. Gated on `data-ready`.
-  useEffect(() => {
-    const root = rootRef.current;
-    if (!root) return;
-    root.setAttribute("data-ready", "true");
-
-    const reveals = Array.from(root.querySelectorAll<HTMLElement>(".reveal"));
-    const io = new IntersectionObserver(
-      (entries) => entries.forEach((e) => { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } }),
-      { threshold: 0.12, rootMargin: "0px 0px -8% 0px" },
-    );
-    reveals.forEach((el) => io.observe(el));
-    const vh = window.innerHeight || 800;
-    reveals.forEach((el) => { if (el.getBoundingClientRect().top < vh * 0.96) el.classList.add("in"); });
-    const safety = window.setTimeout(() => reveals.forEach((el) => el.classList.add("in")), 2200);
-
-    // count-up stats (Vera stat band)
-    const counters = Array.from(root.querySelectorAll<HTMLElement>("[data-count]"));
-    const runCount = (el: HTMLElement) => {
-      if (el.dataset.done) return;
-      el.dataset.done = "1";
-      const to = parseFloat(el.dataset.count || "0");
-      const dp = parseInt(el.dataset.dp || "0", 10);
-      const suffix = el.dataset.suffix || "";
-      const dur = 1400;
-      let start: number | null = null;
-      const step = (ts: number) => {
-        if (start === null) start = ts;
-        const p = Math.min((ts - start) / dur, 1);
-        const eased = 1 - Math.pow(1 - p, 3);
-        el.textContent = (to * eased).toFixed(dp) + suffix;
-        if (p < 1) requestAnimationFrame(step);
-        else el.textContent = to.toFixed(dp) + suffix;
-      };
-      requestAnimationFrame(step);
-    };
-    const countIO = new IntersectionObserver(
-      (entries) => entries.forEach((e) => { if (e.isIntersecting) { runCount(e.target as HTMLElement); countIO.unobserve(e.target); } }),
-      { threshold: 0.5 },
-    );
-    counters.forEach((el) => countIO.observe(el));
-
-    const nav = root.querySelector<HTMLElement>(".nav");
-    let lastY = 0;
-    let ticking = false;
-    const onScroll = () => {
-      if (ticking) return;
-      ticking = true;
-      requestAnimationFrame(() => {
-        const y = window.scrollY;
-        if (nav) {
-          nav.style.top = y > 200 && y > lastY ? "-110px" : "14px";
-          // glass over the opening video; solid once scrolled onto page content
-          // (otherwise the hero text bleeds through the translucent pill).
-          nav.dataset.solid = y > window.innerHeight * 0.7 ? "1" : "";
-        }
-        lastY = y;
-        ticking = false;
-      });
-    };
-    window.addEventListener("scroll", onScroll, { passive: true });
-
-    // Liquid Glass: the specular sheen on glass buttons tracks the pointer.
-    const onPointer = (e: PointerEvent) => {
-      const btn = (e.target as HTMLElement | null)?.closest<HTMLElement>(".btn");
-      if (!btn) return;
-      const r = btn.getBoundingClientRect();
-      btn.style.setProperty("--gx", `${(((e.clientX - r.left) / r.width) * 100).toFixed(1)}%`);
-      btn.style.setProperty("--gy", `${(((e.clientY - r.top) / r.height) * 100).toFixed(1)}%`);
-    };
-    root.addEventListener("pointermove", onPointer, { passive: true });
-
-    // Hero phone parallax — a gentle 3D lean toward the cursor. Desktop fine
-    // pointers only, and never under reduced motion (touch keeps the flat pose).
-    const showcase = root.querySelector<HTMLElement>(".hero-showcase");
-    const heroPhone = showcase?.querySelector<HTMLElement>(".phone") ?? null;
-    const finePointer = window.matchMedia?.("(hover: hover) and (pointer: fine)").matches;
-    const noMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    let onTilt: ((e: PointerEvent) => void) | undefined;
-    let onTiltLeave: (() => void) | undefined;
-    if (showcase && heroPhone && finePointer && !noMotion) {
-      onTilt = (e: PointerEvent) => {
-        const r = showcase.getBoundingClientRect();
-        const x = (e.clientX - r.left) / r.width - 0.5;
-        const y = (e.clientY - r.top) / r.height - 0.5;
-        heroPhone.style.setProperty("--ry", `${(x * 7).toFixed(2)}deg`);
-        heroPhone.style.setProperty("--rx", `${(-y * 5).toFixed(2)}deg`);
-      };
-      onTiltLeave = () => {
-        heroPhone.style.setProperty("--ry", "0deg");
-        heroPhone.style.setProperty("--rx", "0deg");
-      };
-      showcase.addEventListener("pointermove", onTilt, { passive: true });
-      showcase.addEventListener("pointerleave", onTiltLeave);
-    }
-
-    return () => {
-      io.disconnect();
-      countIO.disconnect();
-      window.removeEventListener("scroll", onScroll);
-      root.removeEventListener("pointermove", onPointer);
-      if (showcase && onTilt) showcase.removeEventListener("pointermove", onTilt);
-      if (showcase && onTiltLeave) showcase.removeEventListener("pointerleave", onTiltLeave);
-      window.clearTimeout(safety);
-    };
-  }, []);
-
-  // Cross-fade between the main parts: each fades OUT as it scrolls up past the
-  // top (the .reveal handles the fade-IN). Skipped under reduced-motion.
-  useEffect(() => {
-    const root = rootRef.current;
-    if (!root) return;
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
-    let cleanup: (() => void) | undefined;
-    (async () => {
-      const gsapMod = await import("gsap");
-      const stMod = await import("gsap/ScrollTrigger");
-      const gsap = gsapMod.gsap ?? gsapMod.default;
-      const ScrollTrigger = stMod.ScrollTrigger ?? stMod.default;
-      gsap.registerPlugin(ScrollTrigger);
-      const ctx = gsap.context(() => {
-        const parts = gsap.utils.toArray<HTMLElement>(root.querySelectorAll(".hero, .video-sec, #vera, #how"));
-        parts.forEach((sec) => {
-          gsap.to(sec, {
-            opacity: 0,
-            ease: "none",
-            scrollTrigger: { trigger: sec, start: "bottom 64%", end: "bottom 14%", scrub: true },
-          });
-        });
-      }, root);
-      cleanup = () => ctx.revert();
-    })();
-    return () => cleanup?.();
-  }, []);
-
-  const navLinks = (
-    <>
-      <a href="#how" onClick={() => setMenuOpen(false)}>How it works</a>
-      <a href="#vera" onClick={() => setMenuOpen(false)}>Meet Vera</a>
-      <a href="#features" onClick={() => setMenuOpen(false)}>Features</a>
-      <Link className="nav-demo" href="/demo" onClick={() => setMenuOpen(false)}>
-        <span className="nav-demo-dot" /> Try the demo
-      </Link>
-    </>
-  );
 
   return (
-    <div className="site" data-mode={mode} ref={rootRef}>
-      <div className="site-bg-mesh" />
-      <div className="site-orb a" />
-      <div className="site-orb b" />
-      <div className="site-orb c" />
-
-      {/* NAV */}
-      <nav className="nav">
-        <div className="nav-inner">
-          <a className="brand" href="#top"><StaxMark /> Stax</a>
-          <div className="nav-links">{navLinks}</div>
-          <div className="nav-actions">
-            <button className="nav-toggle" onClick={toggleMode} aria-label="Toggle dark mode" title="Toggle theme">
-              {mode === "dark" ? <Sun size={20} strokeWidth={1.9} /> : <Moon size={20} strokeWidth={1.9} />}
-            </button>
-            <Link className="btn btn-primary btn-sm" href="/app">Open the app</Link>
-            <button className="nav-toggle nav-burger" onClick={() => setMenuOpen((o) => !o)} aria-label="Menu" aria-expanded={menuOpen}>
-              <Menu size={20} strokeWidth={2} />
-            </button>
-          </div>
-        </div>
-        {menuOpen && (
-          <div className="nav-drop">
-            <div className="nav-drop-panel glass">{navLinks}</div>
-          </div>
-        )}
-      </nav>
-
-      <span id="top" />
-
-      {/* VIDEO — full-bleed product film, the opening act; copy overlaid on top.
-          (drop the file at public/stax.mp4) */}
-      <section className="video-sec video-first reveal" id="video">
-        <div className="video-frame">
-          <LoopVideo className="video-el" src="/stax.mp4" />
-          <div className="video-overlay">
-            <div className="video-copy">
-              <span className="eyebrow"><Sparkles size={14} strokeWidth={1.9} /> Real shares, in plain words</span>
-              <div className="serif video-title">Just <em>say</em> what you want.</div>
-              <p>Vera turns your goal into a real mix of companies you know, then places it in one tap. Gas-free on Base, and signed on-chain.</p>
-              <div className="video-ctas">
-                <Link className="btn btn-glass" href="/app">Open the app <Arrow size={16} /></Link>
-                <button className="btn btn-glass" onClick={() => setFilmOpen(true)}>
-                  <Play size={15} strokeWidth={2.4} /> Watch the film <span className="film-len">30s</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* HERO — centered (Plasma-style): headline + CTA on top, then a large phone
-          with benefit callouts at the four corners. */}
-      <section className="hero hero-centered">
-        <div className="site-wrap">
-          <div className="hero-head">
-            <h1 className="serif reveal" data-d="1">Own the world&apos;s <em className="hero-em">best companies</em>.</h1>
-            <p className="hero-sub reveal" data-d="2">Buy fractional shares of real US stocks, directly on Base.</p>
-            <div className="hero-cta reveal" data-d="3">
-              <Link className="btn btn-primary" href="/app">Start Investing <Arrow /></Link>
-              <Link className="btn btn-glass" href="/demo">Try the live demo</Link>
-            </div>
-          </div>
-
-          <div className="hero-showcase reveal" data-d="2">
-            <div className="hero-feat hf-tl">
-              <div className="hero-feat-k">Real shares</div>
-              <div className="hero-feat-d">Issued by Coinbase, held by you.</div>
-            </div>
-            <div className="hero-feat hf-bl">
-              <div className="hero-feat-k">Self-custody</div>
-              <div className="hero-feat-d">Your assets, your keys, always.</div>
-            </div>
-            <div className="hero-feat hf-tr">
-              <div className="hero-feat-k">From $1</div>
-              <div className="hero-feat-d">Buy a fraction of any stock.</div>
-            </div>
-            <div className="hero-feat hf-br">
-              <div className="hero-feat-k">24/7 markets</div>
-              <div className="hero-feat-d">Trade any time, gas-free.</div>
-            </div>
-            <div className="phone">
-              <div className="phone-screen">
-                <HeroDemo mode={mode} />
-                <PhoneChrome />
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* MARQUEE — two counter-scrolling ticker rows */}
-      <div className="marquee reveal">
-        <MarqueeRow syms={MARQUEE_A} />
-        <MarqueeRow syms={MARQUEE_B} rev />
+    <>
+      <div className="site" ref={rootRef} data-mode={dark ? "dark" : "light"} suppressHydrationWarning>
+        <Nav />
+        <Hero />
+        <HowItWorks />
+        <Guarantee />
+        <Awards />
+        <Baskets />
+        <Assets />
+        <Faq />
+        <Closing />
       </div>
-
-      {/* THE PROMISE — rotating plain-words goals, typeset big */}
-      <GoalQuotes />
-
-      {/* MEET VERA — playable phone LEFT, copy right (auto-plays how Vera builds + signs) */}
-      <section className="sec" id="vera">
-        <div className="site-wrap demo-split phone-left reveal">
-          <div className="demo-copy">
-            <h2 className="serif">A track record that can&apos;t be edited.</h2>
-            <p className="demo-lead">
-              Vera turns your goal into a plan and signs every one to a permanent on-chain record. You
-              trust the numbers, not the marketing.
-            </p>
-            <dl className="deflist">
-              <div><dt>Signed</dt><dd>Every plan carries Vera&apos;s own cryptographic signature.</dd></div>
-              <div><dt>Recorded</dt><dd>Written to a permanent, public ledger that can&apos;t be edited later.</dd></div>
-              <div><dt>Open</dt><dd>Anyone can audit her full history, on-chain, anytime.</dd></div>
-            </dl>
-            <Link className="btn btn-glass btn-sm" href="/app">See Vera in the app <Arrow size={16} /></Link>
-          </div>
-          <DemoPhone play="vera" mode={mode} />
-        </div>
-      </section>
-
-      {/* HOW IT WORKS — copy left, playable phone RIGHT (auto-plays goal → plan → invest) */}
-      <section className="sec" id="how">
-        <div className="site-wrap demo-split phone-right reveal">
-          <div className="demo-copy">
-            <h2 className="serif">From a sentence to a real portfolio.</h2>
-            <p className="demo-lead">
-              Tell Vera a goal in plain words. She turns it into a real, diversified basket and places it
-              in one tap. No tickers, no jargon, no paperwork.
-            </p>
-            <ol className="flowlist">
-              <li><span className="flow-n">1</span><div><h3>Tell Vera your goal</h3><p>Say it however feels natural, like &ldquo;grow $300, mostly big tech, keep some safe.&rdquo;</p></div></li>
-              <li><span className="flow-n">2</span><div><h3>Review the plan</h3><p>Named companies and funds, each with a one-line reason. Nudge it safer or bolder anytime.</p></div></li>
-              <li><span className="flow-n">3</span><div><h3>Invest in one tap</h3><p>Vera buys every holding for you, instantly and gas-free, then records it on-chain.</p></div></li>
-            </ol>
-          </div>
-          <DemoPhone play="invest" mode={mode} />
-        </div>
-      </section>
-
-      {/* TRUST BAND — honest authority signals before the deeper content + CTA */}
-      <section className="site-wrap" style={{ padding: "6px 22px 10px" }}>
-        <div className="trust-band reveal">
-          <div className="trust-item"><span className="ic"><KeyRound size={18} /></span><div><b>Non-custodial</b><span>Your assets, your keys</span></div></div>
-          <div className="trust-item"><span className="ic"><Zap size={18} /></span><div><b>Gas-free</b><span>We cover every network fee</span></div></div>
-          <div className="trust-item"><span className="ic ic-img"><ChainLogo chain="base" size={20} /></span><div><b>On Base</b><span>Built by Coinbase</span></div></div>
-          <div className="trust-item"><span className="ic"><BadgeCheck size={18} /></span><div><b>Real shares</b><span>Issued by Coinbase</span></div></div>
-        </div>
-      </section>
-
-      {/* WHY STAX — bento */}
-      <section className="sec" id="features">
-        <div className="site-wrap">
-          <div className="sec-head reveal">
-            <h2 className="serif">Built for your first<br />investment, and your hundredth.</h2>
-          </div>
-          <div className="feat-list reveal">
-            <div className="feat-item">
-              <h3>Investing, without the jargon</h3>
-              <p>Describe a goal in a sentence. Vera turns it into a real, diversified portfolio you actually understand.</p>
-              <div className="feat-proof bc-chat">
-                <span className="bc-you">Something safe-ish that still grows</span>
-                <span className="bc-vera">{/* eslint-disable-next-line @next/next/no-img-element */}<img src="/brand/vera.png" alt="" /> A balanced mix, 20% kept safe →</span>
-              </div>
-            </div>
-
-            <div className="feat-item">
-              <h3>Trust you can check</h3>
-              <p>Every recommendation is signed and written on-chain, so it can&apos;t be edited after the fact.</p>
-              <div className="feat-proof bc-ledger">
-                <div className="bc-led-row"><span className="mono">0x7b…41a9</span><span className="up">+6.2%</span></div>
-                <div className="bc-led-row"><span className="mono">0x91…0e7f</span><span className="up">+9.4%</span></div>
-                <div className="bc-led-row"><span className="mono">0xa2…7c10</span><span className="down">−1.8%</span></div>
-              </div>
-            </div>
-
-            <div className="feat-item">
-              <h3>Real shares, held by you</h3>
-              <p>Actual stakes in Apple, Nvidia, SpaceX and more, never a synthetic copy.</p>
-              <div className="feat-proof bc-stack">
-                {BASE_STOCKS_LIVE.slice(0, 4).map((s) => <Tile key={s} sym={s} />)}
-              </div>
-            </div>
-
-            <div className="feat-item">
-              <h3>Flat 25 bps, zero gas</h3>
-              <p>One small fee on what you invest, and we cover every network cost. No spreads, no surprises.</p>
-              <div className="feat-proof bc-big">25 bps</div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* BUILT ON — real third-party credibility, with a plain explanation of each */}
-      <section className="site-wrap" style={{ padding: "10px 22px 0" }}>
-        <div className="reveal">
-          <div className="builton">
-            <span className="builton-label">Built on</span>
-            <a className="builton-logo" href="https://base.org" target="_blank" rel="noreferrer" aria-label="Base">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/brand/partners/base.svg" alt="" decoding="async" style={{ borderRadius: "50%" }} />
-              <b>Base</b>
-            </a>
-            <a className="builton-logo" href="https://www.coinbase.com" target="_blank" rel="noreferrer" aria-label="Coinbase tokenized stocks">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={displayFor("COIN").logo} alt="" decoding="async" style={{ borderRadius: 7 }} />
-              <b>Coinbase</b>
-            </a>
-            <span className="builton-div" aria-hidden />
-            <a className="builton-logo" href="https://www.mantle.xyz" target="_blank" rel="noreferrer" aria-label="Mantle Network">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/brand/partners/mantle.png" alt="" decoding="async" />
-              <b>Mantle</b>
-            </a>
-            <a className="builton-logo" href="https://backed.fi" target="_blank" rel="noreferrer" aria-label="Backed">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/brand/partners/backed.svg" alt="Backed" className="logo-mono" decoding="async" />
-            </a>
-          </div>
-          <p className="builton-note">
-            It settles on <b>Base</b>, the fast, low-cost Ethereum network built by Coinbase. Each stock is issued
-            by <b>Coinbase</b>, which holds the real share in custody and tokenizes it one-to-one, so what you own
-            tracks the actual company. Your earlier investments stay on <b>Mantle</b>, where stocks are issued by{" "}
-            <b>Backed</b>. Tokenized stocks are for eligible people outside the US.
-          </p>
-        </div>
-      </section>
-
-      {/* FAQ — shared content (lib/faq); native <details> accordion, keyboard-accessible */}
-      <section className="sec faq-sec" id="faq">
-        <div className="site-wrap">
-          <div className="sec-head reveal">
-            <h2 className="serif">Questions you&rsquo;d<br />actually ask.</h2>
-            <p>Straight answers, in the same plain words Vera uses.</p>
-          </div>
-          <div className="faq reveal">
-            {FAQ_ITEMS.map((item) => (
-              <details key={item.q} className="faq-item">
-                <summary>
-                  <span className="faq-q">{item.q}</span>
-                  <span className="faq-ico" aria-hidden="true"><ChevronDown size={20} strokeWidth={2.4} /></span>
-                </summary>
-                <div className="faq-a">
-                  <p>{item.a}</p>
-                </div>
-              </details>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* CTA */}
-      <section className="cta">
-        <div className="site-wrap">
-          <div className="cta-card reveal">
-            <h2 className="serif">Your first investment is <span className="cta-em">one sentence</span> away.</h2>
-            <p>Start with as little as $1. Tell Vera a goal, look over the plan she builds, and invest in one tap.</p>
-            <div style={{ display: "flex", gap: 14, justifyContent: "center", flexWrap: "wrap", position: "relative" }}>
-              <Link className="btn btn-primary" href="/app">Open the app</Link>
-              <a className="btn btn-glass" href="#how">How it works</a>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* FOOTER */}
-      <footer className="footer">
-        <div className="site-wrap">
-          <div className="footer-grid">
-            <div className="footer-brand">
-              <a className="brand" href="#top" style={{ fontSize: 22 }}><StaxMark /> Stax</a>
-              <p>Investing in plain words. Real companies, real shares, an assistant whose record you can verify.</p>
-            </div>
-            <div>
-              <h4>Product</h4>
-              <a href="#how">How it works</a>
-              <a href="#features">Features</a>
-              <Link href="/demo">Try the demo</Link>
-              <Link href="/app">Open the app</Link>
-            </div>
-            <div>
-              <h4>Learn</h4>
-              <a href="#vera">Meet Vera</a>
-              <a href="#how">How it works</a>
-            </div>
-            <div>
-              <h4>Built on</h4>
-              <a href="https://base.org" target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><ChainLogo chain="base" size={15} /> Base</a>
-              <a href="https://www.mantle.xyz" target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><ChainLogo chain="mantle" size={15} /> Mantle</a>
-              <span style={{ display: "block", color: "var(--s-ink-3)", fontSize: 14.5 }}>Stocks by Coinbase and Backed</span>
-            </div>
-            <div>
-              <h4>Connect</h4>
-              <a href="https://x.com/stax_market" target="_blank" rel="noreferrer">@stax_market on X</a>
-            </div>
-          </div>
-          <div className="footer-bottom">
-            <span>© 2026 Stax. Stocks can go down as well as up, only invest what you can leave for a while.</span>
-            <span className="mono">Not investment advice · Capital at risk</span>
-          </div>
-        </div>
-      </footer>
-
-      {filmOpen && <FilmLightbox onClose={() => setFilmOpen(false)} />}
-    </div>
+      <script dangerouslySetInnerHTML={{ __html: MODE_SCRIPT }} />
+    </>
   );
 }

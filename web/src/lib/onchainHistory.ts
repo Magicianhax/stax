@@ -28,6 +28,8 @@ export interface RecommendationRow {
   riskScore: number; // bps
   txHash: `0x${string}`;
   blockNumber: bigint;
+  /** Block time (unix seconds) when the log source provides it (Etherscan does; raw RPC does not). */
+  timestamp?: number;
 }
 
 export interface ExecutionRow {
@@ -37,6 +39,7 @@ export interface ExecutionRow {
   legCount: number;
   txHash: `0x${string}`;
   blockNumber: bigint;
+  timestamp?: number;
 }
 
 export interface VeraRecord {
@@ -51,6 +54,8 @@ export interface VeraRecord {
     usdcSpent?: number;
     txHash: `0x${string}`;
     blockNumber: bigint;
+    /** Unix seconds; absent when the source had no block time. */
+    timestamp?: number;
   }[];
 }
 
@@ -134,6 +139,7 @@ export function aggregateVeraRecord(
       usdcSpent: spentByPlan.get(r.planId),
       txHash: r.txHash,
       blockNumber: r.blockNumber,
+      timestamp: r.timestamp,
     }));
 
   return {

@@ -1,0 +1,169 @@
+.hero {
+  position: relative;
+  padding: 96px 0 120px;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+/* Ruled ledger grid: 1px lines every 8px one way, every 64px the other, fading
+   toward the edges. Pure CSS, no image. */
+.hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.85;
+  background-image:
+    repeating-linear-gradient(to bottom, var(--s-line) 0 1px, transparent 1px 8px),
+    repeating-linear-gradient(to right, var(--s-line) 0 1px, transparent 1px 64px);
+  -webkit-mask-image: radial-gradient(72% 80% at 50% 42%, #000 18%, transparent 100%);
+  mask-image: radial-gradient(72% 80% at 50% 42%, #000 18%, transparent 100%);
+}
+
+/* A still wash of sage and terracotta so the glass has something to refract. */
+.hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background:
+    radial-gradient(48% 46% at 8% 12%, color-mix(in srgb, var(--s-primary) 18%, transparent) 0%, transparent 62%),
+    radial-gradient(42% 44% at 92% 70%, color-mix(in srgb, var(--s-accent) 16%, transparent) 0%, transparent 60%);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 7fr 5fr;
+  gap: 56px;
+  align-items: center;
+}
+
+.copy {
+  min-width: 0;
+}
+
+.kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 22px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--s-ink-2);
+}
+
+.kickerMark {
+  color: var(--s-primary-d);
+  flex: none;
+}
+
+.kickerMark + .kickerMark {
+  margin-left: -6px;
+  margin-right: 4px;
+}
+
+:global(.site[data-mode="dark"]) .kickerMark {
+  color: var(--s-primary);
+}
+
+.h1 {
+  margin: 0;
+  font-size: clamp(40px, 6vw, 72px);
+  line-height: 1.02;
+  letter-spacing: -0.03em;
+  text-wrap: balance;
+  max-width: 13ch;
+}
+
+.sub {
+  margin: 22px 0 0;
+  max-width: 46ch;
+  font-size: 18px;
+  line-height: 1.55;
+  color: var(--s-ink-2);
+}
+
+.ctas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 30px;
+}
+
+.subRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 22px;
+  margin-top: 14px;
+}
+
+.film {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--s-ink);
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+@media (hover: hover) {
+  .film:hover {
+    color: var(--s-primary-d);
+  }
+  :global(.site[data-mode="dark"]) .film:hover {
+    color: var(--s-primary);
+  }
+}
+
+.wall {
+  min-width: 0;
+}
+
+@media (max-width: 1023px) {
+  .hero {
+    padding: 56px 0 72px;
+  }
+  .grid {
+    grid-template-columns: 1fr;
+    gap: 36px;
+  }
+  .h1 {
+    max-width: 16ch;
+  }
+  .wall {
+    max-width: 560px;
+  }
+}
+
+@media (max-width: 560px) {
+  .hero {
+    padding: 40px 0 56px;
+  }
+  .kicker {
+    font-size: 13px;
+    margin-bottom: 18px;
+  }
+  .kicker span {
+    line-height: 1.3;
+  }
+  .sub {
+    font-size: 17px;
+    margin-top: 18px;
+  }
+  .ctas {
+    margin-top: 24px;
+  }
+  .ctas :global(.btn) {
+    flex: 1 1 100%;
+  }
+}

@@ -1,0 +1,134 @@
+.sec {
+  padding: 120px 0 0;
+}
+
+.title {
+  margin: 0 0 32px;
+  font-size: clamp(30px, 3.6vw, 44px);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+}
+
+.grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.award {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--s-ink);
+}
+
+.mark {
+  color: var(--s-primary-d);
+  flex: none;
+}
+
+:global(.site[data-mode="dark"]) .mark {
+  color: var(--s-primary);
+}
+
+/* A static post card: the whole card is the link to the post. */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px 22px 18px;
+  border-radius: var(--s-r-lg);
+  background: var(--s-glass);
+  backdrop-filter: var(--s-glass-blur);
+  -webkit-backdrop-filter: var(--s-glass-blur);
+  border: 1px solid var(--s-glass-line);
+  box-shadow: var(--s-glass-hi), var(--s-shadow);
+  color: var(--s-ink);
+  transition: transform 0.25s var(--s-ease-soft), box-shadow 0.25s var(--s-ease);
+}
+
+@media (hover: hover) {
+  .card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--s-glass-hi), var(--s-shadow-lg);
+  }
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: block;
+  flex: none;
+}
+
+.who {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+  flex: 1;
+  min-width: 0;
+}
+
+.who b {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.handle {
+  font-size: 13.5px;
+  color: var(--s-ink-2);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.para {
+  font-size: 16px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.date {
+  font-size: 13.5px;
+  color: var(--s-ink-2);
+}
+
+@media (max-width: 760px) {
+  .sec {
+    padding: 72px 0 0;
+  }
+  .title {
+    margin-bottom: 22px;
+  }
+  .grid {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  .card {
+    padding: 18px 18px 16px;
+  }
+}

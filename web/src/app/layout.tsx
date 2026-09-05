@@ -8,6 +8,8 @@ import {
   SITE_NAME,
   SITE_DESCRIPTION,
   TWITTER_HANDLE,
+  GITHUB_URL,
+  AWARDS,
 } from "@/lib/seo";
 
 // Stax "Soft" theme fonts (see globals.css):
@@ -59,6 +61,9 @@ export const metadata: Metadata = {
     "fractional shares",
     "Vera",
     "Stax",
+    "Mantle Turing Test Hackathon 2026",
+    "Best UI/UX",
+    "Track Winner Trading & Strategy",
   ],
   manifest: "/manifest.webmanifest",
   alternates: {
@@ -126,7 +131,9 @@ const JSON_LD = {
       url: SITE_URL,
       logo: `${SITE_URL}/icon-512.png`,
       description: SITE_DESCRIPTION,
-      sameAs: [`https://x.com/${TWITTER_HANDLE.replace("@", "")}`],
+      sameAs: [`https://x.com/${TWITTER_HANDLE.replace("@", "")}`, GITHUB_URL],
+      // Third-party awards, each with the organiser's announcement as its citation.
+      award: AWARDS.map((a) => `${a.name}, ${a.event} (${a.date}): ${a.url}`),
     },
     {
       "@type": "WebSite",

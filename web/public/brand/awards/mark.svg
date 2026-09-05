@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#57a07e" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Stax award rosette: a laurel pair around a small seal. Sage stroke, no fill. -->
+  <path d="M6.5 5.5c-2.2 2.6-2.4 6.6-.4 9.6 1 1.5 2.4 2.6 4 3.2"/>
+  <path d="M17.5 5.5c2.2 2.6 2.4 6.6.4 9.6-1 1.5-2.4 2.6-4 3.2"/>
+  <path d="M6.2 9.2c1.6-.2 3 .3 4 1.4M17.8 9.2c-1.6-.2-3 .3-4 1.4M7 13.2c1.5 0 2.9.7 3.8 1.9M17 13.2c-1.5 0-2.9.7-3.8 1.9"/>
+  <circle cx="12" cy="9" r="3.1"/>
+  <path d="M12 12.2v8.3"/>
+</svg>

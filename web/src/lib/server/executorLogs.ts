@@ -48,6 +48,7 @@ interface EsLog {
   data: `0x${string}`;
   transactionHash: `0x${string}`;
   blockNumber: `0x${string}`;
+  timeStamp?: `0x${string}`; // hex unix seconds (Etherscan includes it per log)
 }
 
 async function etherscanLogs(chain: StaxChain, event: AbiEvent, user?: `0x${string}`): Promise<EsLog[]> {
@@ -107,14 +108,15 @@ async function chunkedLogs(chain: StaxChain, event: AbiEvent, user?: `0x${string
 type DecodedArgs = Record<string, unknown>;
 
 async function readEvent(chain: StaxChain, event: AbiEvent, user?: `0x${string}`): Promise<
-  { args: DecodedArgs; txHash: `0x${string}`; blockNumber: bigint }[]
+  { args: DecodedArgs; txHash: `0x${string}`; blockNumber: bigint; timestamp?: number }[]
 > {
   if (ETHERSCAN_KEY) {
     try {
       const raw = await etherscanLogs(chain, event, user);
       return raw.map((l) => {
         const { args } = decodeEventLog({ abi: [event], data: l.data, topics: l.topics as [`0x${string}`, ...`0x${string}`[]] });
-        return { args: args as DecodedArgs, txHash: l.transactionHash, blockNumber: BigInt(l.blockNumber) };
+        const timestamp = l.timeStamp ? Number(BigInt(l.timeStamp)) : undefined;
+        return { args: args as DecodedArgs, txHash: l.transactionHash, blockNumber: BigInt(l.blockNumber), timestamp };
       });
     } catch {
       /* fall through to chunked RPC */
@@ -142,6 +144,7 @@ async function readRecommendationRows(chain: StaxChain, user?: `0x${string}`): P
     riskScore: Number(r.args.riskScore ?? 0),
     txHash: r.txHash,
     blockNumber: r.blockNumber,
+    timestamp: r.timestamp,
   }));
 }
 
@@ -154,6 +157,7 @@ async function readExecutionRows(chain: StaxChain, user?: `0x${string}`): Promis
     legCount: Number(r.args.legCount ?? 0),
     txHash: r.txHash,
     blockNumber: r.blockNumber,
+    timestamp: r.timestamp,
   }));
 }
 

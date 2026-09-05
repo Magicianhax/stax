@@ -1,0 +1,83 @@
+.sec { padding: 128px 0; }
+.wrap { width: 100%; max-width: var(--s-maxw); margin: 0 auto; padding: 0 28px; }
+
+.title {
+  margin: 0 0 40px;
+  font-family: var(--s-display);
+  font-optical-sizing: auto;
+  font-weight: 500;
+  font-size: clamp(30px, 3.6vw, 46px);
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+  color: var(--s-ink);
+  text-wrap: balance;
+}
+
+.list { border-bottom: 1px solid var(--s-line); }
+.item { border-top: 1px solid var(--s-line); }
+
+.summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 44px;
+  padding: 22px 0;
+  cursor: pointer;
+  list-style: none;
+  color: var(--s-ink);
+  -webkit-tap-highlight-color: transparent;
+}
+.summary::-webkit-details-marker { display: none; }
+.summary::marker { content: ""; }
+.summary:focus-visible {
+  outline: 2px solid var(--s-primary);
+  outline-offset: 4px;
+  border-radius: 6px;
+}
+.q {
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.012em;
+  line-height: 1.35;
+  transition: color 0.2s var(--s-ease);
+}
+@media (hover: hover) {
+  .summary:hover .q { color: var(--s-primary-d); }
+  .summary:hover .chev { background: var(--s-primary-soft); color: var(--s-primary-d); }
+}
+.chev {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--s-ink-2);
+  background: color-mix(in srgb, var(--s-ink) 6%, transparent);
+  transition: transform 0.35s var(--s-ease-expo), background 0.2s var(--s-ease), color 0.2s var(--s-ease);
+}
+.item[open] .chev { transform: rotate(180deg); }
+
+.a { margin: 0; padding: 0 0 24px; max-width: 60ch; font-size: 16.5px; line-height: 1.6; color: var(--s-ink-2); }
+.item[open] .a { animation: faqIn 0.45s var(--s-ease-expo) both; }
+@keyframes faqIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (min-width: 900px) {
+  .wrap { display: grid; grid-template-columns: 5fr 7fr; column-gap: 64px; align-items: start; }
+  .title { margin-bottom: 0; position: sticky; top: 112px; }
+}
+@media (max-width: 700px) {
+  .sec { padding: 80px 0; }
+  .title { margin-bottom: 24px; }
+  .summary { padding: 16px 0; }
+  .q { font-size: 17px; }
+  .chev { width: 30px; height: 30px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chev, .q { transition: none; }
+  .item[open] .a { animation: none; }
+}

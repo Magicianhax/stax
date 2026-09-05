@@ -1,0 +1,78 @@
+/* A phone bezel around a screenshot. The bezel is always near-black (it is a
+   phone, not a card), so it reads the same in light and dark. Width comes from
+   the parent; the screen keeps the capture's 390:844 ratio. */
+.phone {
+  position: relative;
+  width: 100%;
+  padding: 10px;
+  border-radius: 44px;
+  background: #0f120f;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 1px 2px rgba(0, 0, 0, 0.25),
+    var(--s-shadow-lg);
+}
+.screen {
+  position: relative;
+  overflow: hidden;
+  border-radius: 35px;
+  aspect-ratio: 390 / 844;
+  background: var(--s-paper);
+  /* thin dark hairline where the glass meets the bezel */
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* status bar drawn over the screenshot's reserved 52px strip; colours are fixed
+   because the capture is always the light theme */
+.status {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 7.7% 0 8.5%;
+  color: #232a24;
+  pointer-events: none;
+}
+.island {
+  position: absolute;
+  top: 3.8%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 30%;
+  aspect-ratio: 90 / 27;
+  border-radius: 99px;
+  background: #0b0d0b;
+}
+.time {
+  font-family: var(--s-ui);
+  font-weight: 700;
+  font-size: clamp(11px, 3.9cqw, 15px);
+  letter-spacing: 0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.sys {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.ic {
+  height: 11px;
+  width: auto;
+  display: block;
+}
+.batt {
+  height: 12px;
+}
+
+.phone {
+  container-type: inline-size;
+}

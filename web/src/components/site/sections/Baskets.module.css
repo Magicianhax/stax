@@ -1,0 +1,115 @@
+.grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+}
+.cell {
+  display: block;
+  min-width: 0;
+  transition:
+    opacity 0.65s var(--s-ease-expo) var(--d, 0ms),
+    transform 0.65s var(--s-ease-expo) var(--d, 0ms);
+}
+.cell:nth-child(2) { --d: 60ms; }
+.cell:nth-child(3) { --d: 120ms; }
+.cell:nth-child(4) { --d: 180ms; }
+.cell:nth-child(5) { --d: 240ms; }
+.cell:nth-child(n + 6) { --d: 300ms; }
+@media (prefers-reduced-motion: no-preference) {
+  :global(.site[data-ready] .reveal:not(.is-in)) .cell {
+    opacity: 0;
+    transform: translateY(22px);
+  }
+}
+.card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 20px 20px 18px;
+  border-radius: var(--s-r-lg);
+  background: var(--s-glass);
+  backdrop-filter: var(--s-glass-blur);
+  -webkit-backdrop-filter: var(--s-glass-blur);
+  border: 1px solid var(--s-glass-line);
+  box-shadow: var(--s-glass-hi), var(--s-shadow);
+  color: var(--s-ink);
+  transition:
+    transform 0.28s var(--s-ease-soft),
+    box-shadow 0.28s var(--s-ease);
+}
+@media (hover: hover) {
+  .card:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--s-glass-hi), var(--s-shadow-lg);
+  }
+}
+.card:active {
+  transform: scale(0.985);
+}
+.top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.disc {
+  width: 50px;
+  height: 50px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 16px;
+  font-size: 25px;
+  line-height: 1;
+}
+.text {
+  min-width: 0;
+}
+.name {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+.risk {
+  margin-top: 3px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--s-ink-2);
+}
+.holdings {
+  margin-top: auto;
+  padding-top: 20px;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--s-ink-2);
+}
+.bar {
+  margin-top: 10px;
+}
+
+@media (max-width: 899px) {
+  .grid {
+    display: flex;
+    gap: 14px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scroll-padding: 0 22px;
+    margin: 0 -22px;
+    padding: 4px 22px 14px;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .grid::-webkit-scrollbar {
+    display: none;
+  }
+  .cell {
+    flex: 0 0 min(82vw, 340px);
+    scroll-snap-align: start;
+  }
+  .card {
+    padding: 18px 18px 16px;
+  }
+}

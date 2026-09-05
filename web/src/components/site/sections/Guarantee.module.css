@@ -1,0 +1,259 @@
+/* ── diagram ─────────────────────────────────────────────────────────────── */
+.diagram {
+  --draw: 0;
+  position: relative;
+  margin-top: 8px;
+}
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 18px;
+  position: relative;
+  z-index: 1;
+}
+.step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.disc {
+  width: 56px;
+  height: 56px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--s-primary-soft);
+  color: var(--s-primary-d);
+  box-shadow: 0 0 0 4px var(--s-paper);
+}
+:global(.site[data-mode="dark"]) .disc {
+  color: var(--s-primary);
+}
+/* the steps the chain touches wear the trust colour */
+.step[data-onchain="1"] .disc {
+  background: var(--s-surface);
+  color: var(--s-accent-2);
+  box-shadow:
+    0 0 0 4px var(--s-paper),
+    inset 0 0 0 1.5px color-mix(in srgb, var(--s-accent) 55%, transparent);
+}
+:global(.site[data-mode="dark"]) .step[data-onchain="1"] .disc {
+  color: var(--s-accent);
+}
+.stepTitle {
+  margin: 16px 0 0;
+  max-width: 15ch;
+  font-size: 16.5px;
+  font-weight: 700;
+  letter-spacing: -0.012em;
+  line-height: 1.25;
+  color: var(--s-ink);
+  text-wrap: balance;
+}
+
+.line {
+  position: absolute;
+  overflow: visible;
+  pointer-events: none;
+}
+.across {
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 56px;
+}
+.down {
+  display: none;
+  top: 0;
+  left: 0;
+  width: 48px;
+  height: 100%;
+}
+.ghost,
+.ink {
+  fill: none;
+  stroke-width: 2px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.ghost {
+  stroke: var(--s-line);
+}
+.ink {
+  stroke: var(--s-accent-2);
+  stroke-dasharray: 1;
+  stroke-dashoffset: calc(1 - var(--draw));
+}
+:global(.site[data-mode="dark"]) .ink {
+  stroke: var(--s-accent);
+}
+
+/* ── the contracts ───────────────────────────────────────────────────────── */
+.ledger {
+  margin-top: 64px;
+  padding: 24px 26px 10px;
+  border-radius: var(--s-r-lg);
+  background: var(--s-glass);
+  backdrop-filter: var(--s-glass-blur);
+  -webkit-backdrop-filter: var(--s-glass-blur);
+  border: 1px solid var(--s-glass-line);
+  box-shadow: var(--s-glass-hi), var(--s-glass-shadow);
+}
+.chainHead {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 22px;
+}
+.chainHead:first-child {
+  margin-top: 0;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--s-line);
+}
+.chainLogo {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: block;
+}
+.chainName {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--s-ink);
+}
+.chainNote {
+  font-size: 13.5px;
+  color: var(--s-ink-3);
+}
+.row {
+  display: grid;
+  grid-template-columns: minmax(200px, 1.1fr) minmax(0, 2fr) auto;
+  align-items: center;
+  gap: 18px;
+  min-height: 56px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--s-line);
+  color: var(--s-ink);
+  transition: color 0.2s;
+}
+.row:last-child {
+  border-bottom: 0;
+}
+.rowStatic {
+  color: var(--s-ink-2);
+}
+.rowName {
+  display: flex;
+  flex-direction: column;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.rowDoes {
+  margin-top: 2px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--s-ink-2);
+}
+.addr {
+  font-family: var(--s-mono);
+  font-size: 13px;
+  letter-spacing: -0.01em;
+  color: var(--s-ink-2);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.addrShort {
+  display: none;
+}
+.rowLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 96px;
+  justify-content: flex-end;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--s-accent-2);
+  white-space: nowrap;
+}
+:global(.site[data-mode="dark"]) .rowLink {
+  color: var(--s-accent);
+}
+@media (hover: hover) {
+  a.row:hover .rowLink svg {
+    transform: translate(1px, -1px);
+  }
+}
+.rowLink svg {
+  transition: transform 0.2s var(--s-ease-soft);
+}
+
+/* ── narrow: the line runs down the left, steps become rows ─────────────── */
+@media (max-width: 899px) {
+  .diagram {
+    margin-top: 0;
+  }
+  .steps {
+    grid-template-columns: 1fr;
+    grid-auto-rows: 1fr;
+    gap: 0;
+  }
+  .step {
+    flex-direction: row;
+    align-items: flex-start;
+    text-align: left;
+    gap: 16px;
+    padding: 10px 0 22px;
+  }
+  .disc {
+    width: 48px;
+    height: 48px;
+  }
+  .stepTitle {
+    margin-top: 12px;
+    max-width: 40ch;
+  }
+  .across {
+    display: none;
+  }
+  .down {
+    display: block;
+  }
+  .ledger {
+    margin-top: 40px;
+    padding: 20px 18px 6px;
+  }
+  .row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 14px;
+    padding: 12px 0;
+  }
+  .rowName {
+    grid-column: 1;
+  }
+  .rowLink {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    min-width: 0;
+  }
+  .addr {
+    grid-column: 1;
+  }
+  .addrFull {
+    display: none;
+  }
+  .addrShort {
+    display: inline;
+  }
+  .rowStatic .addrFull {
+    display: inline;
+  }
+}
