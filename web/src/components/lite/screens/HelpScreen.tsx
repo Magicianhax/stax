@@ -6,10 +6,9 @@ import { useState } from "react";
 import { Icon } from "@/components/design";
 import { haptic } from "@/lib/haptics";
 import { FAQ } from "@/lib/faq";
-import { ELIGIBILITY_FAQ } from "@/components/shared/faqExtras";
 import { iconBtn } from "./primitives";
 
-const ITEMS = [...FAQ, ELIGIBILITY_FAQ];
+const ITEMS = FAQ;
 
 // One expandable question. Collapses with a grid-rows 0fr→1fr height animation
 // (no JS measurement) so the answer eases open instead of snapping.

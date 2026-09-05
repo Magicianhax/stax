@@ -15,13 +15,12 @@ import { ArrowRight, Sparkles, Sun, Moon, Menu, KeyRound, Zap, BadgeCheck, Chevr
 import { getChain } from "@/lib/chains";
 import { displayFor } from "@/lib/displayAssets";
 import { FAQ } from "@/lib/faq";
-import { ELIGIBILITY_FAQ } from "@/components/shared/faqExtras";
 
 const BASE = getChain("base");
 /** Base assets you can buy today (registry order), and the ones still coming. */
 const BASE_LIVE = BASE.assets.all.filter((a) => !a.coming).map((a) => a.symbol);
 const BASE_STOCKS_LIVE = BASE.assets.stocks.filter((a) => !a.coming).map((a) => a.symbol);
-const FAQ_ITEMS = [...FAQ, ELIGIBILITY_FAQ];
+const FAQ_ITEMS = FAQ;
 import { DemoMount } from "@/components/demo/DemoMount";
 import type { DemoPlay } from "@/components/demo/DemoProvider";
 import { PhoneChrome } from "@/components/site/PhoneChrome";

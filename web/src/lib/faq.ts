@@ -40,4 +40,8 @@ export const FAQ: FaqItem[] = [
     q: "What can I invest in?",
     a: "Names you already know — Apple, Nvidia, Google, Meta, even SpaceX — plus Bitcoin and Ether, and “Safe Dollars” that earn a steady rate for the cash side of a plan. Switch to Mantle for broad funds like the S&P 500. More is on the way.",
   },
+  {
+    q: "Who can use Stax?",
+    a: "Tokenized stocks are offered by Coinbase on Base and by Backed on Mantle to eligible people outside the United States. If you're in the US or another restricted region, you can still try the demo, but you won't be able to buy stocks. Everything else in Stax stays in plain words either way.",
+  },
 ];
