@@ -61,6 +61,9 @@ export type {
 // Navigation
 export { TabBar, type TabBarProps, type TabId } from "./TabBar";
 
+// Network (Base · Mantle)
+export { ChainMark, NetworkChip, NetworkSwitch, ChainLaunching, ChainLaunchingLine } from "./Network";
+
 // Toast
 export {
   Toast,

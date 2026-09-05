@@ -51,8 +51,8 @@ export function VeraOrb({ size = 36, pulse = false }: VeraOrbProps) {
   );
 }
 
-// Minimal shape an AssetTile needs. Real asset objects (from lib/mantle.ts)
-// can be adapted to this in the screen layer.
+// Minimal shape an AssetTile needs. Real asset objects (from lib/chains) are
+// adapted to this in the screen layer (lib/displayAssets).
 export interface TileAsset {
   name: string;
   /** Background color for the tile. */
@@ -81,7 +81,7 @@ export function AssetTile({ asset, size = 44, radius }: AssetTileProps) {
   const [imgFailed, setImgFailed] = useState(false);
 
   if (asset.logo && !imgFailed) {
-    // Backed's logo PNGs are full-bleed branded icon squares, so fill the tile and
+    // Company logo PNGs are full-bleed branded icon squares, so fill the tile and
     // let the rounded tile clip them — uniform "app-icon" tiles across the set.
     return (
       <div

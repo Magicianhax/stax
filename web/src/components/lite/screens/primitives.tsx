@@ -58,16 +58,16 @@ export function Pager({
 }) {
   if (pageCount <= 1) return null;
   const btn: CSSProperties = {
-    width: 42,
-    height: 36,
-    borderRadius: 11,
+    width: 48,
+    height: 44, // ≥44px touch target
+    borderRadius: 13,
     background: "var(--surface-2)",
     display: "grid",
     placeItems: "center",
     color: "var(--ink-2)",
   };
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, padding: "16px 0 2px" }}>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, padding: "14px 0 2px" }}>
       <button
         className="tap"
         aria-label="Previous page"
@@ -92,6 +92,17 @@ export function Pager({
     </div>
   );
 }
+
+// Quiet sentence-case label above a grouped card (Settings, Autopilot). NOT an
+// uppercase tracked eyebrow — that reads as section scaffolding when it sits on
+// every group. Keep `.label-eyebrow` for genuine field labels inside cards.
+export const sectionLabel: CSSProperties = {
+  padding: "0 4px 9px",
+  fontSize: 13,
+  fontWeight: 600,
+  letterSpacing: "-.005em",
+  color: "var(--ink-2)",
+};
 
 export const iconBtn: CSSProperties = {
   width: 44, // ≥44px touch target (WCAG 2.5.5 / Apple HIG)

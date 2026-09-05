@@ -1,10 +1,10 @@
 "use client";
 
 // Trade — Pro manual buy/sell (screens_pro.jsx · Trade) wired to the REAL gasless
-// path. BUY: useQuote (live Fluxion/Agni spot) + useSwap.buy (batched approve +
-// swap as one sponsored UserOp). SELL: useSellQuote + useSwap.sell (the held
-// token -> USDC, recipient = user) — single-hop Fluxion for stocks, reversed
-// Agni route for sUSDe/mETH. The slippage tolerance maps Tight / Normal / Loose
+// path. BUY: useQuote (live venue spot on the active chain) + useSwap.buy (batched
+// approve + swap as one sponsored UserOp). SELL: useSellQuote + useSwap.sell (the
+// held token -> USDC, recipient = user). Venues come from lib/chains (Uniswap V3 /
+// Aave on Base; Fluxion / Agni on Mantle). Tolerance maps Tight / Normal / Loose
 // to 50 / 100 / 300 bps (the on-chain amountOutMinimum is the real protection).
 // On success we route to the plain-words receipt.
 import { useEffect, useState } from "react";
@@ -40,10 +40,11 @@ export function TradeScreen({
   const chain = useChain();
   const asset: Asset = chain.assets.all.find((a) => a.symbol === symbol) ?? chain.assets.all[0];
   const d = displayFor(asset.symbol, asset.name);
-  // Sellable = anything with a validated swap route (stocks via Fluxion,
-  // mETH via its reversed Agni route). `coming` assets (e.g. sUSDe, whose pool
-  // lost liquidity) are never buyable or sellable, even if a route entry exists.
-  const sellable = isRoutable(chain, asset.symbol) && !d.coming;
+  // Sellable = anything with a validated swap route on this chain. `coming`
+  // assets (no liquid market yet) are never buyable or sellable, even if a route
+  // entry exists.
+  const coming = Boolean(asset.coming || d.coming);
+  const sellable = isRoutable(chain, asset.symbol) && !coming;
   // Real market context: live on-chain spot + real 1D move/series, with the
   // presentational reference as the offline fallback.
   const { priceUsd: livePrice } = usePrice(asset.symbol);
@@ -78,7 +79,7 @@ export function TradeScreen({
 
   const over = side === "buy" && n > balance + 1e-6;
   const canBuy =
-    side === "buy" && !d.coming && n > 0 && !over && !!quote && quote.expectedOutRaw > BigInt(0) && !!address;
+    side === "buy" && !coming && n > 0 && !over && !!quote && quote.expectedOutRaw > BigInt(0) && !!address;
   const canSell =
     side === "sell" &&
     sellable &&
@@ -352,7 +353,7 @@ export function TradeScreen({
               {isFetching && !quote
                 ? "Getting a live price…"
                 : quote && quote.expectedOutRaw > BigInt(0)
-                  ? `≈ ${tokenQty(quote.expectedOutRaw, asset.decimals ?? 18)} shares`
+                  ? `≈ ${tokenQty(quote.expectedOutRaw, asset.decimals ?? 18)} ${asset.tier === "stock" ? "shares" : d.ticker ?? asset.symbol}`
                   : shownPrice !== undefined
                     ? `${usd(shownPrice)} each`
                     : ""}
@@ -360,8 +361,13 @@ export function TradeScreen({
             <div
               style={{ fontSize: 12.5, color: over ? "var(--neg)" : "var(--ink-2)", marginTop: 4 }}
             >
-              {usd(balance)} available
+              {over ? `That’s more than the ${usd(balance)} you have` : `${usd(balance)} available`}
             </div>
+            {coming && (
+              <div role="status" style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 10, lineHeight: 1.5 }}>
+                Not buyable on {chain.name} yet: there’s no liquid market for it. We’ll switch it on as soon as there is.
+              </div>
+            )}
           </div>
 
           {/* quick amounts */}

@@ -1,24 +1,35 @@
 "use client";
 
 // AssetDetail — Pro asset view (screens_pro.jsx · AssetDetail). Shows a REAL
-// price chart (/api/market: Yahoo Finance for the equities our xStocks track,
-// CoinGecko for the token tier), plain-language about copy, and the user's REAL
-// position in this asset (from usePortfolio). Buy/Sell open the manual Trade
-// screen (useQuote + useSwap, gasless). Tiers the executor can't route yet are
-// flagged "Coming soon".
+// price chart (/api/market: Yahoo Finance for the equities our tokenized stocks
+// track, CoinGecko for the token tier), plain-language about copy, and the user's
+// REAL position in this asset (from usePortfolio). Buy/Sell open the manual Trade
+// screen (useQuote + useSwap, gasless) — manual trades don't need the executor,
+// so they work even while a chain's Stax contracts are still being switched on.
+// Assets with no liquid market yet are tagged "Coming soon" with the buy disabled
+// and the reason spelled out.
 import { useState } from "react";
 import type { Asset } from "@/lib/chains";
 import { useChain } from "@/lib/chains/active";
 import { usePortfolio } from "@/hooks/useBalances";
-import { usePrice } from "@/hooks/usePrices";
+import { usePrices } from "@/hooks/usePrices";
 import { useMarketHistory, type MarketRange } from "@/hooks/useMarket";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { displayFor } from "@/lib/displayAssets";
 import { Icon, AssetTile, PriceChart, SectionTitle, Stat } from "@/components/design";
-import { usd } from "@/lib/format";
+import { usd, tokenQty } from "@/lib/format";
 import { iconBtn } from "./primitives";
+import { ComingTag, yieldLine } from "./MarketScreen";
 
 const RANGES = ["1D", "1W", "1M", "1Y", "All"];
+
+// Live venue price + supply rate for one symbol (the rate only exists for the
+// safe tier, e.g. Aave on Base).
+function usePriceWithApy(symbol: string): { priceUsd?: number; apy?: number } {
+  const { data } = usePrices();
+  const p = data?.prices[symbol];
+  return { priceUsd: p?.priceUsd, apy: p?.apy };
+}
 
 export function AssetDetailScreen({
   go,
@@ -33,9 +44,11 @@ export function AssetDetailScreen({
   const { address } = useSmartAccount();
   const { data: port } = usePortfolio(address ?? undefined);
   const holding = port?.holdings.find((h) => h.asset.symbol === asset.symbol);
-  const { priceUsd: livePrice } = usePrice(asset.symbol);
+  const { priceUsd: livePrice, apy: liveApy } = usePriceWithApy(asset.symbol);
   const shownPrice = livePrice ?? d.price;
-  const coming = Boolean(d.coming);
+  const safe = asset.tier === "safe";
+  const yieldText = safe ? yieldLine(liveApy, d.apy) : undefined;
+  const coming = Boolean(asset.coming || d.coming);
   const [r, setR] = useState(2);
 
   // REAL market history for the selected range (server-cached; keepPreviousData
@@ -71,10 +84,18 @@ export function AssetDetailScreen({
   const facts: { k: string; v: string }[] = [
     { k: "Type", v: TYPE_LABEL[d.kind ?? "stock"] ?? "Stock" },
     { k: "Category", v: d.cat },
-    ...(d.apy ? [{ k: "Yield", v: `${d.apy} a year` }] : []),
+    ...(yieldText
+      ? [{ k: "Rate", v: yieldText.replace("earns ", "").replace(" · rate can change", ", can change") }]
+      : d.apy
+        ? [{ k: "Rate", v: `about ${d.apy.replace("~", "")} a year, can change` }]
+        : []),
     { k: "Held as", v: heldAs },
+    ...(asset.tier === "stock" ? [{ k: "Issued by", v: chain.issuer.replace(" tokenized stocks", "") }] : []),
     { k: "Network", v: chain.name },
   ];
+  const reason = coming
+    ? `Not buyable on ${chain.name} yet: there’s no liquid market for it. We’ll switch it on as soon as there is.`
+    : undefined;
 
   return (
     <div className="screen screen-pad-top" style={{ paddingBottom: 0 }}>
@@ -89,20 +110,13 @@ export function AssetDetailScreen({
         style={{ padding: "12px 22px 0", display: "flex", alignItems: "center", gap: 14 }}
       >
         <AssetTile asset={d} size={54} />
-        <div style={{ flex: 1 }}>
-          <h1 className="serif" style={{ margin: 0, fontSize: 27, letterSpacing: "-.01em" }}>{d.name}</h1>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h1 className="serif" style={{ margin: 0, fontSize: 27, letterSpacing: "-.01em", overflowWrap: "anywhere" }}>{d.name}</h1>
           <div style={{ fontSize: 13.5, color: "var(--ink-2)" }}>
             {(d.ticker ?? asset.symbol) + " · " + d.cat}
           </div>
         </div>
-        {coming && (
-          <span
-            className="chip"
-            style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
-          >
-            Coming soon
-          </span>
-        )}
+        {coming && <ComingTag long />}
       </div>
 
       {/* price */}
@@ -110,13 +124,19 @@ export function AssetDetailScreen({
         <div className="tnum" style={{ fontSize: 36, fontWeight: 700, letterSpacing: "-.03em" }}>
           {shownPrice !== undefined ? usd(shownPrice) : "—"}
         </div>
-        <div
-          className="tnum"
-          style={{ fontSize: 14.5, fontWeight: 700, color: winUp ? "var(--pos)" : "var(--neg)", marginTop: 2 }}
-        >
-          {(winUp ? "+" : "") + rangeChange.toFixed(2)}%{" "}
-          <span style={{ color: "var(--ink-3)", fontWeight: 600 }}>· {RANGES[r]}</span>
-        </div>
+        {safe ? (
+          <div style={{ fontSize: 14.5, fontWeight: 600, color: "var(--ink-2)", marginTop: 2 }}>
+            {yieldText ?? "a dollar that stays a dollar"}
+          </div>
+        ) : (
+          <div
+            className="tnum"
+            style={{ fontSize: 14.5, fontWeight: 700, color: winUp ? "var(--pos)" : "var(--neg)", marginTop: 2 }}
+          >
+            {(winUp ? "+" : "") + rangeChange.toFixed(2)}%{" "}
+            <span style={{ color: "var(--ink-3)", fontWeight: 600 }}>· {RANGES[r]}</span>
+          </div>
+        )}
       </div>
 
       {/* chart */}
@@ -162,8 +182,8 @@ export function AssetDetailScreen({
               value={holding.valueUsd !== undefined ? usd(holding.valueUsd) : "—"}
             />
             <Stat
-              label="Shares"
-              value={holding.qty.toLocaleString("en-US", { maximumFractionDigits: 4 })}
+              label={asset.tier === "stock" ? "Shares" : "Amount"}
+              value={tokenQty(holding.raw, asset.decimals ?? 18)}
             />
             {shownPrice !== undefined && (
               <Stat label="Price" value={usd(shownPrice)} />
@@ -201,7 +221,8 @@ export function AssetDetailScreen({
         </div>
       </div>
 
-      {/* CTA */}
+      {/* CTA — manual buy/sell (no executor needed). Disabled with the reason
+          when there's no liquid market yet. */}
       <div
         style={{
           position: "sticky",
@@ -209,26 +230,31 @@ export function AssetDetailScreen({
           marginTop: "auto",
           padding: "16px 22px calc(18px + env(safe-area-inset-bottom))",
           background: "linear-gradient(to top, var(--paper), var(--paper) 62%, transparent)",
-          display: "flex",
-          gap: 10,
         }}
       >
-        <button
-          className="btn btn-ghost tap"
-          style={{ flex: 1 }}
-          disabled={!holding || coming}
-          onClick={() => go("trade", { symbol: asset.symbol, side: "sell" })}
-        >
-          Sell
-        </button>
-        <button
-          className="btn btn-primary tap"
-          style={{ flex: 2 }}
-          disabled={coming}
-          onClick={() => go("trade", { symbol: asset.symbol, side: "buy" })}
-        >
-          {coming ? "Coming soon" : "Buy"}
-        </button>
+        {reason && (
+          <p role="status" style={{ margin: "0 0 10px", textAlign: "center", fontSize: 12.5, lineHeight: 1.5, color: "var(--ink-2)" }}>
+            {reason}
+          </p>
+        )}
+        <div style={{ display: "flex", gap: 10 }}>
+          <button
+            className="btn btn-ghost tap"
+            style={{ flex: 1 }}
+            disabled={!holding || coming}
+            onClick={() => go("trade", { symbol: asset.symbol, side: "sell" })}
+          >
+            Sell
+          </button>
+          <button
+            className="btn btn-primary tap"
+            style={{ flex: 2 }}
+            disabled={coming}
+            onClick={() => go("trade", { symbol: asset.symbol, side: "buy" })}
+          >
+            {coming ? "Coming soon" : "Buy"}
+          </button>
+        </div>
       </div>
     </div>
   );

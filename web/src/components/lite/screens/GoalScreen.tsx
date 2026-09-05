@@ -6,9 +6,10 @@
 import { useState } from "react";
 import { useUsdcBalance } from "@/hooks/useBalances";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
-import { Icon, VeraOrb } from "@/components/design";
+import { Icon, VeraOrb, ChainLaunching } from "@/components/design";
 import { usd } from "@/lib/format";
 import { iconBtn, VeraTag } from "./primitives";
+import { useChainReady } from "../useChainReady";
 
 const SUGGESTIONS = [
   "Grow $300, mostly big tech, keep a little safe",
@@ -23,6 +24,7 @@ export function GoalScreen({
   go: (screen: string, params?: Record<string, unknown>) => void;
 }) {
   const { address } = useSmartAccount();
+  const { chain, ready } = useChainReady();
   const { data: bal } = useUsdcBalance(address ?? undefined);
   const balance = bal?.value ?? 0;
 
@@ -30,7 +32,7 @@ export function GoalScreen({
   const [amt, setAmt] = useState("300");
 
   const amount = parseFloat(amt);
-  const ready = goal.trim().length > 3 && amount > 0;
+  const canBuild = goal.trim().length > 3 && amount > 0;
 
   return (
     <div className="screen screen-pad-top" style={{ paddingBottom: 20 }}>
@@ -126,13 +128,26 @@ export function GoalScreen({
       </div>
 
       <div style={{ padding: "12px 22px calc(18px + env(safe-area-inset-bottom))" }}>
-        <button
-          className="btn btn-primary btn-block btn-lg tap"
-          disabled={!ready}
-          onClick={() => go("thinking", { goal: goal.trim(), amt: amount })}
-        >
-          <VeraOrb size={26} /> Build my plan
-        </button>
+        {ready ? (
+          <button
+            className="btn btn-primary btn-block btn-lg tap"
+            disabled={!canBuild}
+            onClick={() => go("thinking", { goal: goal.trim(), amt: amount })}
+          >
+            <VeraOrb size={26} /> Build my plan
+          </button>
+        ) : (
+          // Contracts not deployed on this network yet: say so calmly, offer the
+          // one thing that does work (browsing prices) instead of a dead button.
+          <ChainLaunching
+            chain={chain}
+            action={
+              <button className="btn btn-ghost btn-block tap" onClick={() => go("market")}>
+                Browse the market
+              </button>
+            }
+          />
+        )}
       </div>
     </div>
   );

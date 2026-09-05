@@ -6,12 +6,22 @@
 // dark toggle. The hero phone mirrors the real in-app Home screen; the three
 // asset chips around it sit STILL (no orbit spin). Copy is em-dash-free; the
 // Vera stat band / records and marquee figures are illustrative sample data.
+// Base-first: the asset showcase, marquee and goal examples pull from the Base
+// registry (lib/chains) + display metadata, so the page lists what the app sells.
 // All CTAs route to /app.
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, Sparkles, Sun, Moon, Menu, KeyRound, Zap, BadgeCheck, ChevronDown, Play } from "lucide-react";
+import { getChain } from "@/lib/chains";
 import { displayFor } from "@/lib/displayAssets";
 import { FAQ } from "@/lib/faq";
+import { ELIGIBILITY_FAQ } from "@/components/shared/faqExtras";
+
+const BASE = getChain("base");
+/** Base assets you can buy today (registry order), and the ones still coming. */
+const BASE_LIVE = BASE.assets.all.filter((a) => !a.coming).map((a) => a.symbol);
+const BASE_STOCKS_LIVE = BASE.assets.stocks.filter((a) => !a.coming).map((a) => a.symbol);
+const FAQ_ITEMS = [...FAQ, ELIGIBILITY_FAQ];
 import { DemoMount } from "@/components/demo/DemoMount";
 import type { DemoPlay } from "@/components/demo/DemoProvider";
 import { PhoneChrome } from "@/components/site/PhoneChrome";
@@ -23,11 +33,12 @@ type Mode = "light" | "dark";
 // Premium icon set (lucide-react), same family the in-app UI uses.
 const Arrow = ({ size = 18 }: { size?: number }) => <ArrowRight size={size} strokeWidth={2.2} />;
 
-/** Mantle's official logo — shown beside the Mantle name wherever it appears. */
-function MantleLogo({ size = 16 }: { size?: number }) {
+/** A network's official mark — shown beside its name wherever it appears. */
+function ChainLogo({ chain, size = 16 }: { chain: "base" | "mantle"; size?: number }) {
+  const c = getChain(chain);
   return (
     // eslint-disable-next-line @next/next/no-img-element
-    <img src="/brand/partners/mantle.png" alt="Mantle" width={size} height={size} decoding="async" style={{ width: size, height: size, display: "block", flex: "none" }} />
+    <img src={c.brand.logo} alt="" width={size} height={size} decoding="async" style={{ width: size, height: size, borderRadius: "50%", display: "block", flex: "none" }} />
   );
 }
 
@@ -122,8 +133,9 @@ function DemoPhone({ play, mode }: { play: Exclude<DemoPlay, null>; mode: Mode }
   );
 }
 
-const MARQUEE_A = ["AAPL", "NVDA", "TSLA", "GOOGL", "META", "SPY", "QQQ", "MSTR", "HOOD", "sUSDe"];
-const MARQUEE_B = ["mETH", "CRCL", "SPY", "AAPL", "QQQ", "NVDA", "sUSDe", "META", "HOOD", "TSLA"];
+// Ticker rows: everything buyable on Base today; the reverse row is a rotation.
+const MARQUEE_A = BASE_LIVE;
+const MARQUEE_B = [...BASE_LIVE.slice(3), ...BASE_LIVE.slice(0, 3)].reverse();
 
 /** One sliding ticker row; the reverse row is decorative (aria-hidden). */
 function MarqueeRow({ syms, rev }: { syms: string[]; rev?: boolean }) {
@@ -145,10 +157,10 @@ function MarqueeRow({ syms, rev }: { syms: string[]; rev?: boolean }) {
 /* "You could just say…" — the product promise, typeset big. Rotating examples of
    real-language goals with the kind of plan Vera builds for each (sample data). */
 const GOALS = [
-  { say: "Grow $500, but keep a third of it safe.", syms: ["SPY", "NVDA", "sUSDe"], built: "6 holdings, a third in a yield dollar" },
+  { say: "Grow $500, but keep a third of it safe.", syms: ["NVDA", "AAPL", "aUSDC"], built: "5 holdings, a third in Safe Dollars" },
   { say: "Put $50 into AI companies every month.", syms: ["NVDA", "GOOGL", "META"], built: "4 AI leaders, repeating on Autopilot" },
-  { say: "I’ve never invested. Start me slow.", syms: ["SPY", "AAPL"], built: "mostly the S&P 500, from $1" },
-  { say: "Something calmer that still beats my bank.", syms: ["sUSDe", "SPY"], built: "a yield dollar, balanced with broad funds" },
+  { say: "I’ve never invested. Start me slow.", syms: ["AAPL", "GOOGL"], built: "mostly Apple and Google, from $1" },
+  { say: "Something calmer that still beats my bank.", syms: ["aUSDC", "AAPL"], built: "Safe Dollars, balanced with steady names" },
 ];
 
 function GoalQuotes() {
@@ -393,7 +405,7 @@ export function SiteLanding() {
             <div className="video-copy">
               <span className="eyebrow"><Sparkles size={14} strokeWidth={1.9} /> Real shares, in plain words</span>
               <div className="serif video-title">Just <em>say</em> what you want.</div>
-              <p>Vera turns your goal into a real mix of companies you know, then places it in one tap. Gas-free, and signed on-chain.</p>
+              <p>Vera turns your goal into a real mix of companies you know, then places it in one tap. Gas-free on Base, and signed on-chain.</p>
               <div className="video-ctas">
                 <Link className="btn btn-glass" href="/app">Open the app <Arrow size={16} /></Link>
                 <button className="btn btn-glass" onClick={() => setFilmOpen(true)}>
@@ -411,7 +423,7 @@ export function SiteLanding() {
         <div className="site-wrap">
           <div className="hero-head">
             <h1 className="serif reveal" data-d="1">Own the world&apos;s <em className="hero-em">best companies</em>.</h1>
-            <p className="hero-sub reveal" data-d="2">Buy fractional shares of global stocks, directly onchain.</p>
+            <p className="hero-sub reveal" data-d="2">Buy fractional shares of real US stocks, directly on Base.</p>
             <div className="hero-cta reveal" data-d="3">
               <Link className="btn btn-primary" href="/app">Start Investing <Arrow /></Link>
               <Link className="btn btn-glass" href="/demo">Try the live demo</Link>
@@ -421,7 +433,7 @@ export function SiteLanding() {
           <div className="hero-showcase reveal" data-d="2">
             <div className="hero-feat hf-tl">
               <div className="hero-feat-k">Real shares</div>
-              <div className="hero-feat-d">Actual companies, tokenized on-chain.</div>
+              <div className="hero-feat-d">Issued by Coinbase, held by you.</div>
             </div>
             <div className="hero-feat hf-bl">
               <div className="hero-feat-k">Self-custody</div>
@@ -498,8 +510,8 @@ export function SiteLanding() {
         <div className="trust-band reveal">
           <div className="trust-item"><span className="ic"><KeyRound size={18} /></span><div><b>Non-custodial</b><span>Your assets, your keys</span></div></div>
           <div className="trust-item"><span className="ic"><Zap size={18} /></span><div><b>Gas-free</b><span>We cover every network fee</span></div></div>
-          <div className="trust-item"><span className="ic ic-img"><MantleLogo size={20} /></span><div><b>On Mantle</b><span>A fast, low-cost network</span></div></div>
-          <div className="trust-item"><span className="ic"><BadgeCheck size={18} /></span><div><b>Real shares</b><span>Tokenized by Backed</span></div></div>
+          <div className="trust-item"><span className="ic ic-img"><ChainLogo chain="base" size={20} /></span><div><b>On Base</b><span>Built by Coinbase</span></div></div>
+          <div className="trust-item"><span className="ic"><BadgeCheck size={18} /></span><div><b>Real shares</b><span>Issued by Coinbase</span></div></div>
         </div>
       </section>
 
@@ -531,9 +543,9 @@ export function SiteLanding() {
 
             <div className="feat-item">
               <h3>Real shares, held by you</h3>
-              <p>Actual stakes in Apple, Nvidia, the S&amp;P 500 and more, never a synthetic copy.</p>
+              <p>Actual stakes in Apple, Nvidia, SpaceX and more, never a synthetic copy.</p>
               <div className="feat-proof bc-stack">
-                {["AAPL", "NVDA", "SPY", "GOOGL"].map((s) => <Tile key={s} sym={s} />)}
+                {BASE_STOCKS_LIVE.slice(0, 4).map((s) => <Tile key={s} sym={s} />)}
               </div>
             </div>
 
@@ -551,21 +563,32 @@ export function SiteLanding() {
         <div className="reveal">
           <div className="builton">
             <span className="builton-label">Built on</span>
+            <a className="builton-logo" href="https://base.org" target="_blank" rel="noreferrer" aria-label="Base">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/brand/partners/base.svg" alt="" decoding="async" style={{ borderRadius: "50%" }} />
+              <b>Base</b>
+            </a>
+            <a className="builton-logo" href="https://www.coinbase.com" target="_blank" rel="noreferrer" aria-label="Coinbase tokenized stocks">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={displayFor("COIN").logo} alt="" decoding="async" style={{ borderRadius: 7 }} />
+              <b>Coinbase</b>
+            </a>
+            <span className="builton-div" aria-hidden />
             <a className="builton-logo" href="https://www.mantle.xyz" target="_blank" rel="noreferrer" aria-label="Mantle Network">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/brand/partners/mantle.png" alt="" decoding="async" />
               <b>Mantle</b>
             </a>
-            <span className="builton-div" aria-hidden />
             <a className="builton-logo" href="https://backed.fi" target="_blank" rel="noreferrer" aria-label="Backed">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/brand/partners/backed.svg" alt="Backed" className="logo-mono" decoding="async" />
             </a>
           </div>
           <p className="builton-note">
-            It settles on <b>Mantle</b>, a fast, low-cost Ethereum network. Each stock is issued by{" "}
-            <b>Backed</b>, a regulated firm that holds the real share in custody and tokenizes it one-to-one,
-            so what you own tracks the actual company and can be redeemed for it.
+            It settles on <b>Base</b>, the fast, low-cost Ethereum network built by Coinbase. Each stock is issued
+            by <b>Coinbase</b>, which holds the real share in custody and tokenizes it one-to-one, so what you own
+            tracks the actual company. Your earlier investments stay on <b>Mantle</b>, where stocks are issued by{" "}
+            <b>Backed</b>. Tokenized stocks are for eligible people outside the US.
           </p>
         </div>
       </section>
@@ -578,7 +601,7 @@ export function SiteLanding() {
             <p>Straight answers, in the same plain words Vera uses.</p>
           </div>
           <div className="faq reveal">
-            {FAQ.map((item) => (
+            {FAQ_ITEMS.map((item) => (
               <details key={item.q} className="faq-item">
                 <summary>
                   <span className="faq-q">{item.q}</span>
@@ -629,8 +652,9 @@ export function SiteLanding() {
             </div>
             <div>
               <h4>Built on</h4>
-              <a href="https://www.mantle.xyz" target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><MantleLogo size={15} /> Mantle Network</a>
-              <span style={{ display: "block", color: "var(--s-ink-3)", fontSize: 14.5 }}>Tokenized by Backed</span>
+              <a href="https://base.org" target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><ChainLogo chain="base" size={15} /> Base</a>
+              <a href="https://www.mantle.xyz" target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><ChainLogo chain="mantle" size={15} /> Mantle</a>
+              <span style={{ display: "block", color: "var(--s-ink-3)", fontSize: 14.5 }}>Stocks by Coinbase and Backed</span>
             </div>
             <div>
               <h4>Connect</h4>

@@ -1,18 +1,19 @@
 # Stax
 
-> Stax is a mobile-first app for investing in real companies through tokenized stocks on the Mantle network, guided by Vera, an AI investing assistant. You describe a goal in plain words; Vera turns it into a portfolio of tokenized shares and places it in one tap.
+> Stax is a mobile-first app for investing in real companies through tokenized stocks on Base (with Mantle as a second network), guided by Vera, an AI investing assistant. You describe a goal in plain words; Vera turns it into a portfolio of tokenized shares and places it in one tap.
 
-Stax is built for people who are new to investing and to crypto. There is no seed phrase and no gas: you sign in with email, and Stax covers the fees. Holdings are real tokenized shares (issued 1:1 by Backed), held in self-custody and recorded on-chain, with settlement in USDC. Because every action is signed on-chain, your track record can't be edited.
+Stax is built for people who are new to investing and to crypto. There is no seed phrase and no gas: you sign in with email, and Stax covers the fees. Holdings are real tokenized shares, issued one-to-one by Coinbase on Base (and by Backed on Mantle), held in self-custody and recorded on-chain, with settlement in USDC. Because every action is signed on-chain, your track record can't be edited.
 
 ## Key facts
 
 - Invest by describing a goal in plain language to Vera, an AI investing assistant.
-- Buy fractional, tokenized shares of well-known global companies (for example NVDA, AAPL, TSLA, GOOGL, META, and the S&P 500 via SPY).
-- Email login — no seed phrase, no browser extension, no manual wallet setup.
-- Gasless, with fees on us: no gas costs and no account fees.
-- Real shares: tokenized 1:1 by Backed, held in self-custody, recorded on-chain.
+- Buy fractional, tokenized shares of well-known US companies (for example NVDA, GOOGL, AAPL, META, and SpaceX), plus Bitcoin (cbBTC) and Ether, and "Safe Dollars" (USDC earning a variable rate on Aave).
+- Email login: no seed phrase, no browser extension, no manual wallet setup.
+- Gasless, with fees on us: no gas costs and no account fees. A flat 25 bps on what you invest.
+- Real shares: issued one-to-one by Coinbase on Base and by Backed on Mantle, held in self-custody, recorded on-chain.
+- Available to eligible people outside the United States.
 - Autopilot: optional automated, recurring investing (dollar-cost averaging).
-- Built on Mantle. You can start from as little as $1.
+- Built on Base, Coinbase's Ethereum network; Mantle is kept as a second network for earlier investments. You can start from as little as $1.
 
 ## Pages
 

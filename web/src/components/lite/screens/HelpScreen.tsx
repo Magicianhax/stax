@@ -6,7 +6,10 @@ import { useState } from "react";
 import { Icon } from "@/components/design";
 import { haptic } from "@/lib/haptics";
 import { FAQ } from "@/lib/faq";
+import { ELIGIBILITY_FAQ } from "@/components/shared/faqExtras";
 import { iconBtn } from "./primitives";
+
+const ITEMS = [...FAQ, ELIGIBILITY_FAQ];
 
 // One expandable question. Collapses with a grid-rows 0fr→1fr height animation
 // (no JS measurement) so the answer eases open instead of snapping.
@@ -102,7 +105,7 @@ export function HelpScreen({
           she’s built to explain.
         </p>
         <div className="card" style={{ padding: "4px 16px" }}>
-          {FAQ.map((item, i) => (
+          {ITEMS.map((item, i) => (
             <FaqRow
               key={item.q}
               q={item.q}

@@ -8,16 +8,18 @@ import { useEffect, useState, useCallback } from "react";
 import { useSessionSigners, usePrivy } from "@privy-io/react-auth";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { useUsdcBalance } from "@/hooks/useBalances";
-import { useToast, Icon, Seal, BottomSheet } from "@/components/design";
+import { useToast, Icon, Seal, BottomSheet, ChainLaunching, ChainMark } from "@/components/design";
 import { TokenLogo } from "@/components/lite/TokenLogo";
 import { displayFor } from "@/lib/displayAssets";
-import { authHeader } from "@/lib/authedFetch";
+import { authedFetch } from "@/lib/authedFetch";
 import { CADENCE_LABEL, type Cadence, type AutopilotConfig } from "@/lib/autopilot";
-import { usd, txUrl } from "@/lib/format";
-import { useChain } from "@/lib/chains/active";
+import { getChain, explorerTx, type ChainKey } from "@/lib/chains";
+import { useChainKey } from "@/lib/chains/active";
+import { usd } from "@/lib/format";
 import { STAX_FEE_LABEL } from "@/lib/fees";
 import { haptic } from "@/lib/haptics";
-import { iconBtn, Spinner } from "./primitives";
+import { iconBtn, Spinner, sectionLabel } from "./primitives";
+import { useChainReady } from "../useChainReady";
 
 const CADENCES: Cadence[] = ["daily", "weekly", "biweekly", "monthly"];
 const RISK_TIERS: { label: string; bps: number }[] = [
@@ -46,6 +48,8 @@ type RunRow = {
   reason?: string;
   txHash?: string;
   holdings?: { symbol: string; weightPct: number; amountUsd: number }[];
+  /** Network the run was placed on (older rows may lack it → the config's chain). */
+  chain?: ChainKey;
 };
 
 export function AutopilotScreen({
@@ -55,7 +59,8 @@ export function AutopilotScreen({
 }) {
   const { user } = usePrivy();
   const { address: smartAccount } = useSmartAccount();
-  const chain = useChain();
+  const { chain, ready } = useChainReady();
+  const [, setChainKey] = useChainKey();
   const { data: bal } = useUsdcBalance(smartAccount ?? undefined);
   const cash = bal?.value ?? 0;
   const { addSessionSigners, removeSessionSigners } = useSessionSigners();
@@ -91,7 +96,7 @@ export function AutopilotScreen({
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/autopilot", { headers: { ...(await authHeader()) } });
+        const res = await authedFetch("/api/autopilot");
         const json = await res.json();
         if (cancelled) return;
         const ap = json?.autopilot as AutopilotConfig | null;
@@ -115,6 +120,10 @@ export function AutopilotScreen({
 
   const amountNum = Number(amount) || 0;
   const active = Boolean(config?.active);
+  // The autopilot runs on the network it was saved on, not the one the UI is
+  // showing. Receipts link to that chain's explorer.
+  const apChain = getChain(config?.chain ?? chain.key);
+  const elsewhere = active && apChain.key !== chain.key;
 
   const applyTemplate = (t: (typeof TEMPLATES)[number]) => {
     setGoal(t.goal);
@@ -128,7 +137,7 @@ export function AutopilotScreen({
   // Load Vera's run history (audit trail) when an autopilot is active.
   const loadRuns = useCallback(async () => {
     try {
-      const r = await fetch("/api/autopilot/runs", { headers: { ...(await authHeader()) } });
+      const r = await authedFetch("/api/autopilot/runs");
       const j = await r.json();
       if (Array.isArray(j?.runs)) setRuns(j.runs as RunRow[]);
     } catch {
@@ -141,7 +150,7 @@ export function AutopilotScreen({
     let cancelled = false;
     (async () => {
       try {
-        const r = await fetch("/api/autopilot/runs", { headers: { ...(await authHeader()) } });
+        const r = await authedFetch("/api/autopilot/runs");
         const j = await r.json();
         if (!cancelled && Array.isArray(j?.runs)) setRuns(j.runs as RunRow[]);
       } catch {
@@ -184,10 +193,11 @@ export function AutopilotScreen({
     }
     setBusy(true);
     try {
-      const res = await fetch("/api/autopilot", {
+      const res = await authedFetch("/api/autopilot", {
         method: "POST",
-        headers: { "content-type": "application/json", ...(await authHeader()) },
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({
+          chain: chain.key,
           walletId,
           owner: ownerAddress,
           smartAccount,
@@ -212,7 +222,7 @@ export function AutopilotScreen({
   const stop = async () => {
     setBusy(true);
     try {
-      await fetch("/api/autopilot", { method: "DELETE", headers: { ...(await authHeader()) } });
+      await authedFetch("/api/autopilot", { method: "DELETE" });
       try {
         if (ownerAddress) await removeSessionSigners({ address: ownerAddress });
       } catch {
@@ -231,7 +241,7 @@ export function AutopilotScreen({
   const runNow = async () => {
     setBusy(true);
     try {
-      const res = await fetch("/api/autopilot/run", { method: "POST", headers: { ...(await authHeader()) } });
+      const res = await authedFetch("/api/autopilot/run", { method: "POST" });
       const json = await res.json();
       if (!res.ok || json?.ok === false) {
         notify(json?.reason ?? json?.error ?? "The run didn't go through.", "info");
@@ -239,7 +249,7 @@ export function AutopilotScreen({
         haptic.success();
         notify("Vera invested for you", "check");
         try {
-          const r = await fetch("/api/autopilot", { headers: { ...(await authHeader()) } });
+          const r = await authedFetch("/api/autopilot");
           const j = await r.json();
           if (j?.autopilot) setConfig(j.autopilot as AutopilotConfig);
         } catch {
@@ -271,13 +281,56 @@ export function AutopilotScreen({
         </p>
       </div>
 
-      {loading ? (
-        <div style={{ padding: "40px", display: "grid", placeItems: "center" }}><Spinner /></div>
+      {!ready ? (
+        <div className="anim-rise" style={{ padding: "18px 22px 0" }}>
+          <ChainLaunching
+            chain={chain}
+            action={
+              <button className="btn btn-ghost btn-block tap" onClick={() => go("market")}>
+                Browse the market
+              </button>
+            }
+          />
+        </div>
+      ) : loading ? (
+        // Content is loading (not an action) → skeleton, like every other list.
+        <div style={{ padding: "18px 22px 0" }}>
+          <div className="skeleton" style={{ width: 96, height: 13, borderRadius: 6, marginBottom: 10 }} />
+          <div className="card" style={{ padding: 16, display: "flex", alignItems: "center", gap: 12 }}>
+            <div className="skeleton" style={{ width: 36, height: 36, borderRadius: "50%", flex: "none" }} />
+            <div style={{ flex: 1 }}>
+              <div className="skeleton" style={{ width: "58%", height: 14, borderRadius: 6 }} />
+              <div className="skeleton" style={{ width: "40%", height: 11, borderRadius: 6, marginTop: 8 }} />
+            </div>
+          </div>
+        </div>
       ) : (
         <>
           {/* ACTIVE: status + plan summary + run history (the dashboard) */}
           {active && config && (
             <>
+              {elsewhere && (
+                <div style={{ padding: "14px 22px 0" }}>
+                  <div
+                    role="status"
+                    style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 14, background: "var(--surface-2)", fontSize: 13, color: "var(--ink-2)", lineHeight: 1.4 }}
+                  >
+                    <ChainMark chain={apChain} size={18} />
+                    <span style={{ flex: 1, minWidth: 0 }}>This autopilot runs on {apChain.name}.</span>
+                    <button
+                      className="tap"
+                      onClick={() => {
+                        haptic.select();
+                        setChainKey(apChain.key);
+                        notify(`Switched to ${apChain.name}`, "check");
+                      }}
+                      style={{ flex: "none", minHeight: 36, padding: "0 10px", borderRadius: 10, fontWeight: 700, color: "var(--primary)" }}
+                    >
+                      Switch to {apChain.name}
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="anim-rise" style={{ padding: "16px 22px 0" }}>
                 <div className="card" style={{ padding: 16, display: "flex", alignItems: "center", gap: 12 }}>
                   <Seal size={36} />
@@ -291,7 +344,7 @@ export function AutopilotScreen({
               </div>
 
               <div style={{ padding: "20px 22px 0" }}>
-                <div className="label-eyebrow" style={{ marginBottom: 8, textAlign: "center" }}>Your plan</div>
+                <div style={sectionLabel}>Your plan</div>
                 <div className="card" style={{ padding: 18 }}>
                   <div style={{ fontWeight: 700, fontSize: 16.5, textAlign: "center", letterSpacing: "-.01em" }}>{config.goal}</div>
                   <div style={{ display: "flex", marginTop: 16, textAlign: "center" }}>
@@ -315,7 +368,7 @@ export function AutopilotScreen({
               </div>
 
               <div style={{ padding: "20px 22px 0" }}>
-                <div className="label-eyebrow" style={{ marginBottom: 8, textAlign: "center" }}>Activity</div>
+                <div style={sectionLabel}>Activity</div>
                 {runs.length === 0 ? (
                   <div className="card" style={{ padding: "26px 18px", textAlign: "center", color: "var(--ink-2)", fontSize: 13.5, lineHeight: 1.5 }}>
                     No runs yet. Vera&apos;s actions will appear here, each one tappable.
@@ -367,7 +420,7 @@ export function AutopilotScreen({
           {!active && (
           <>
           <div style={{ padding: "18px 22px 0" }}>
-            <div className="label-eyebrow" style={{ marginBottom: 8 }}>Authorization</div>
+            <div style={sectionLabel}>Authorization</div>
             <div className="card" style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 }}>
               <Icon name={delegated ? "shield" : "lock"} size={20} style={{ color: delegated ? "var(--primary)" : "var(--ink-3)", flex: "none" }} />
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -386,7 +439,7 @@ export function AutopilotScreen({
 
           {/* quick-start templates — tap to fill the plan below */}
           <div style={{ padding: "20px 22px 0" }}>
-            <div className="label-eyebrow" style={{ marginBottom: 8, textAlign: "center" }}>Start from a template</div>
+            <div style={sectionLabel}>Start from a template</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               {TEMPLATES.map((t) => {
                 const on = activeTemplate === t.name;
@@ -409,7 +462,7 @@ export function AutopilotScreen({
 
           {/* config form */}
           <div style={{ padding: "20px 22px 0" }}>
-            <div className="label-eyebrow" style={{ marginBottom: 8 }}>Your plan</div>
+            <div style={sectionLabel}>Your plan</div>
             <div className="card" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 16 }}>
               <label style={{ display: "block" }}>
                 <span style={{ fontSize: 13, color: "var(--ink-2)" }}>Goal</span>
@@ -548,11 +601,14 @@ export function AutopilotScreen({
                   </div>
                 )}
 
-                {ok && r.txHash && (
-                  <a href={txUrl(r.txHash, chain)} target="_blank" rel="noopener noreferrer" className="btn btn-glass btn-block tap" style={{ height: 46, marginTop: 18, fontSize: 14.5, textDecoration: "none" }}>
-                    View on Mantlescan <Icon name="arrowUR" size={16} />
-                  </a>
-                )}
+                {ok && r.txHash && (() => {
+                  const runChain = getChain(r.chain ?? apChain.key);
+                  return (
+                    <a href={explorerTx(runChain, r.txHash)} target="_blank" rel="noopener noreferrer" className="btn btn-glass btn-block tap" style={{ height: 46, marginTop: 18, fontSize: 14.5, textDecoration: "none" }}>
+                      View on {runChain.explorer.name} <Icon name="arrowUR" size={16} />
+                    </a>
+                  );
+                })()}
               </div>
             );
           })()}

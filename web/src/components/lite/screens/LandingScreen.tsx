@@ -13,7 +13,7 @@ import { displayFor } from "@/lib/displayAssets";
 type Method = "email" | "google" | "x" | "wallet";
 
 // A handful of recognisable names for the floating proof tiles.
-const PROOF = ["AAPL", "NVDA", "GOOGL", "SPY", "META"].map((s) => displayFor(s));
+const PROOF = ["AAPL", "NVDA", "GOOGL", "META", "SPCX"].map((s) => displayFor(s));
 
 function Spinner({ small }: { small?: boolean }) {
   const s = small ? 18 : 22;
@@ -107,7 +107,7 @@ export function LandingScreen() {
           <div className="body-sm" style={{ display: "flex", alignItems: "center", paddingLeft: 4 }}>
             Apple, Nvidia,
             <br />
-            the S&amp;P 500 &amp; more
+            SpaceX &amp; more
           </div>
         </div>
       </div>

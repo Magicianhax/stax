@@ -1,7 +1,7 @@
 "use client";
 
-// Send — move USDC or any held token out of the smart account to a Mantle
-// address. Pick an asset, enter amount + recipient, confirm, and it goes as one
+// Send — move USDC or any held token out of the smart account to an address on
+// the active network (Base / Mantle). Pick an asset, enter amount + recipient, confirm, and it goes as one
 // gasless transfer (useTransfer). Real funds: address is validated, amount is
 // capped to the balance, and a confirm step guards against accidental sends.
 import { useMemo, useState } from "react";
@@ -117,7 +117,7 @@ export function SendScreen({
             </p>
           </div>
           <a className="caption" href={txUrl(r.txHash, chain)} target="_blank" rel="noreferrer" style={{ color: "var(--primary)", display: "inline-flex", alignItems: "center", gap: 6 }}>
-            View on Mantlescan <Icon name="arrowUR" size={14} />
+            View on {chain.explorer.name} <Icon name="arrowUR" size={14} />
           </a>
         </div>
         <div style={{ padding: "0 22px calc(20px + env(safe-area-inset-bottom))" }}>
@@ -184,11 +184,12 @@ export function SendScreen({
               placeholder="0"
               value={amount}
               onChange={(e) => { setAmount(e.target.value.replace(/[^0-9.]/g, "")); setConfirming(false); }}
+              aria-label={`Amount of ${asset.symbol} to send`}
               className="tnum"
               style={{ flex: 1, minWidth: 0, border: "none", background: "transparent", outline: "none", fontSize: 34, fontWeight: 700, letterSpacing: "-.03em", color: "var(--ink)" }}
             />
             <span style={{ fontWeight: 700, fontSize: 16, color: "var(--ink-2)" }}>{asset.symbol}</span>
-            <button onClick={setMax} className="tap" style={{ padding: "6px 11px", borderRadius: 10, background: "var(--surface-2)", color: "var(--primary)", fontWeight: 700, fontSize: 13 }}>
+            <button onClick={setMax} className="tap" style={{ minHeight: 40, padding: "0 13px", borderRadius: 11, background: "var(--surface-2)", color: "var(--primary)", fontWeight: 700, fontSize: 13 }}>
               Max
             </button>
           </div>
@@ -207,7 +208,8 @@ export function SendScreen({
         <div className="label-eyebrow" style={{ margin: "18px 0 8px" }}>To</div>
         <div className="card" style={{ padding: "4px 16px", display: "flex", alignItems: "center", gap: 10 }}>
           <input
-            placeholder="Mantle address (0x…)"
+            placeholder={`${chain.name} address (0x…)`}
+            aria-label={`Recipient ${chain.name} address`}
             value={to}
             onChange={(e) => { setTo(e.target.value); setConfirming(false); }}
             spellCheck={false}
@@ -230,7 +232,7 @@ export function SendScreen({
         <div style={{ display: "flex", alignItems: "flex-start", gap: 9, padding: "11px 13px", marginTop: 16, borderRadius: 14, background: "var(--accent-soft)", color: "var(--ink-2)", fontSize: 12.5, lineHeight: 1.5 }}>
           <Icon name="info" size={16} stroke={2} style={{ flex: "none", marginTop: 1, color: "var(--accent)" }} />
           <span>
-            Double-check the address, on the <b style={{ color: "var(--ink)" }}>Mantle</b> network. Transfers can&apos;t be undone.
+            Double-check the address, on the <b style={{ color: "var(--ink)" }}>{chain.name}</b> network. Transfers can&apos;t be undone.
           </span>
         </div>
 

@@ -11,12 +11,13 @@
 //   - Nudge chips   -> re-run allocate() with an adjusted goal/riskTolerance and
 //                      visibly rebuild the plan (the "rethinking" state)
 //   - big button    -> onInvest() (useInvest.invest → /api/invest-plan + send)
-import { Icon, VeraOrb, AssetTile, RiskMeter, VerifiedBadge, Crossfade } from "@/components/design";
+import { Icon, VeraOrb, AssetTile, RiskMeter, VerifiedBadge, Crossfade, ChainLaunchingLine } from "@/components/design";
 import { toTile, catFor } from "@/lib/displayAssets";
 import { usd } from "@/lib/format";
 import { STAX_FEE_LABEL, feeUsd } from "@/lib/fees";
 import type { AllocateResult } from "@/lib/invest-types";
 import { iconBtn, Spinner, ThinkingDots } from "./primitives";
+import { useChainReady } from "../useChainReady";
 
 type Tone = "balanced" | "safer" | "bolder" | "simple";
 
@@ -57,6 +58,7 @@ export function PlanScreen({
   onInvest: () => void;
 }) {
   const risk = riskMeta(allocation.riskScore);
+  const { chain, ready } = useChainReady();
 
   // While Vera recomposes (a nudge), blur + soften the basket so it reads as one
   // morphing object — transform/filter only, interruptible, GPU-friendly.
@@ -244,10 +246,16 @@ export function PlanScreen({
           background: "linear-gradient(to top, var(--paper), var(--paper) 62%, transparent)",
         }}
       >
-        <div style={{ textAlign: "center", fontSize: 12.5, color: "var(--ink-2)", marginBottom: 10 }}>
-          {STAX_FEE_LABEL} fee ({usd(feeUsd(amount))}) · gas on us
-        </div>
-        <button className="btn btn-primary btn-block btn-lg tap" disabled={rethinking || busy} onClick={onInvest}>
+        {ready ? (
+          <div style={{ textAlign: "center", fontSize: 12.5, color: "var(--ink-2)", marginBottom: 10 }}>
+            {STAX_FEE_LABEL} fee ({usd(feeUsd(amount))}) · gas on us
+          </div>
+        ) : (
+          <div style={{ marginBottom: 10 }}>
+            <ChainLaunchingLine chain={chain} />
+          </div>
+        )}
+        <button className="btn btn-primary btn-block btn-lg tap" disabled={rethinking || busy || !ready} onClick={onInvest}>
           <Crossfade
             showFirst={busy && !rethinking}
             style={{ alignItems: "center" }}

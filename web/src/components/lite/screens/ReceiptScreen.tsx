@@ -1,7 +1,8 @@
 "use client";
 
 // Receipt — Pro on-chain record (screens_pro.jsx · Receipt) framed in plain
-// words. For real buys/invests we receive a live txHash and link to Mantlescan;
+// words. For real buys/invests we receive a live txHash and link to the chain's
+// explorer (Basescan / Mantlescan);
 // for Vera's sample recorded recommendations we show the illustrative reference.
 import { Icon, Seal } from "@/components/design";
 import { usd, txUrl } from "@/lib/format";
@@ -72,6 +73,7 @@ export function ReceiptScreen({
               ["Network cost", <span key="n" style={{ color: "var(--pos)", fontWeight: 600 }}>Free</span>],
               ["Paid from", "Your Stax balance"],
               ["Ownership", "Real shares, held by you"],
+              ["Network", chain.name],
             ] as const
           ).map(([k, v], i, arr) => (
             <div
@@ -111,7 +113,7 @@ export function ReceiptScreen({
               className="btn btn-glass btn-block tap"
               style={{ height: 46, fontSize: 14.5, textDecoration: "none" }}
             >
-              View on Mantlescan <Icon name="arrowUR" size={16} />
+              View on {chain.explorer.name} <Icon name="arrowUR" size={16} />
             </a>
           ) : (
             <div style={{ fontSize: 12.5, color: "var(--ink-3)", textAlign: "center" }}>

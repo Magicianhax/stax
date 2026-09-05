@@ -2,7 +2,7 @@
 
 // Success — faithful re-skin of the design (screens_invest.jsx · Success) wired
 // to the REAL invest result (InvestSuccess: txHash, holdings, amountUsd). Confetti
-// burst, what you now own, and a Mantlescan receipt link (the on-chain record).
+// burst, what you now own, and an explorer receipt link (the on-chain record).
 import { useEffect } from "react";
 import { Confetti, SectionTitle, HoldingRow, Icon } from "@/components/design";
 import { toTile, catFor } from "@/lib/displayAssets";
@@ -146,7 +146,7 @@ export function SuccessScreen({
                 className="tap"
                 style={{ fontSize: 13, fontWeight: 600, color: "var(--primary)", display: "inline-flex", alignItems: "center", gap: 5, textDecoration: "none" }}
               >
-                View on Mantlescan <Icon name="arrowUR" size={14} />
+                View on {chain.explorer.name} <Icon name="arrowUR" size={14} />
               </a>
             </div>
           </div>
@@ -163,8 +163,8 @@ export function SuccessScreen({
             </span>
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 600, fontSize: 15.5 }}>Vera recorded this plan</div>
-              <div className="mono" style={{ fontSize: 11.5, color: "var(--accent)", marginTop: 2 }}>
-                View the receipt on Mantlescan →
+              <div className="mono" style={{ fontSize: 11.5, color: "var(--ink-2)", marginTop: 2 }}>
+                View the receipt on {chain.explorer.name} →
               </div>
             </div>
           </a>

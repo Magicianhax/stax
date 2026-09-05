@@ -69,3 +69,11 @@ Emil-Kowalski easing, transform/opacity/filter only. `--ease-out` `cubic-bezier(
 ## Chrome
 
 `.stax-backdrop` (page backdrop) → `IOSFrame` (frosted status bar, `backdrop-filter: blur(16px)`, translucent paper/dark) → `.stax[data-mode]` content → `ToastProvider`. Desktop ≥520px renders the centered device with bezel, dynamic island, and home indicator.
+
+## Network
+
+Stax runs on Base (default) and Mantle (earlier investments). The chain is a product setting, never a wallet-style picker; the pattern lives in `components/design/Network.tsx`.
+- **Switch:** `NetworkSwitch` in Settings reuses the sliding-thumb `.seg` control (44px items) with each network's mark (`chain.brand.logo`) beside its name. One plain sentence under it: "Base is the default. Mantle holds your earlier investments." Switching writes `useChainKey()`, fires a "Switched to Base" toast, and every chain-keyed query refetches on its own; no confirmation, no spinner.
+- **Chip:** `NetworkChip` (mark + name, `.chip` at 44px) sits in the Home top bar beside the icon buttons and opens Settings. It is the only place the chain shows on Home.
+- **Undeployed chain:** when `chain.contracts.deployed` is false, `ChainLaunching` (card: mark, "Stax on Base is being switched on", "You can still browse prices. Investing opens shortly.", optional next-step button) replaces the Invest CTA, Autopilot setup and Vera's record; `ChainLaunchingLine` is the one-line form for pinned bars. Manual Pro buy/sell stays enabled (it doesn't need the executor). `useChainReady()` in `components/lite` treats the demo as ready so landing phones never show the state.
+- **Copy:** chain names and explorers always come from the registry (`chain.name`, `chain.explorer.name`, `chain.issuer`, `explorerTx/explorerAddress`); never hardcode "Mantle" or "Mantlescan". "Coming soon" tags use `--surface-2` + `--ink-2` (AA), never the terracotta accent, which stays reserved for trust signals.

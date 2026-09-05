@@ -9,7 +9,7 @@
 //   • plan nudge chips        -> re-run allocate() with an adjusted riskTolerance
 //   • plan "Invest $X · free" -> useInvest.invest (POST /api/invest-plan +
 //                                sendSponsoredCalls); <Placing> follows real phase
-//   • success                 -> confetti + holdings + Mantlescan receipt
+//   • success                 -> confetti + holdings + on-chain receipt (chain explorer)
 //
 // Browse / own / trade (Pro depth, always available here):
 //   portfolio · market → asset → trade → receipt · activity · vera
@@ -22,6 +22,7 @@ import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { haptic } from "@/lib/haptics";
 import { TabBar, type TabId, useToast } from "@/components/design";
 import { InstallPrompt } from "@/components/app/InstallPrompt";
+import { useDemo } from "@/components/demo/DemoProvider";
 import { HomeScreen } from "./screens/HomeScreen";
 import { GoalScreen } from "./screens/GoalScreen";
 import { ThinkingScreen } from "./screens/ThinkingScreen";
@@ -94,6 +95,7 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
   const invest = useInvest();
   const { address } = useSmartAccount();
   const { notify } = useToast();
+  const demo = useDemo();
 
   const [stack, setStack] = useState<Route[]>([{ screen: "home", params: {} }]);
   const current = stack[stack.length - 1];
@@ -261,8 +263,10 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
     }
   }, [invest.phase, invest.success, screen]);
 
-  // Each screen names the browser tab (e.g. "Market · Stax").
+  // Each screen names the browser tab (e.g. "Market · Stax") — in the real app
+  // only; the demo phones embedded on the marketing page leave the page's title alone.
   useEffect(() => {
+    if (demo) return;
     const NAMES: Record<Screen, string> = {
       home: "Your money",
       wallet: "Wallet",
@@ -284,7 +288,7 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
       help: "Help",
     };
     document.title = `${NAMES[screen] ?? "Stax"} · Stax`;
-  }, [screen]);
+  }, [screen, demo]);
 
   const onTab = (id: TabId) => {
     haptic.select();

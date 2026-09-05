@@ -4,20 +4,22 @@
 // her verifiable identity (agentId 1 in the IdentityRegistry, useAgentIdentity) AND
 // her actual track record read from the StaxExecutor event log (useVeraRecord):
 // total recommendations, executed volume, and the most recent recorded plans (each
-// linking to its real Mantlescan tx). Empty history degrades to an honest 0-state.
+// linking to its real explorer tx on the active chain). Empty history degrades to
+// an honest 0-state; a chain whose contracts aren't deployed yet shows the calm
+// "being switched on" state instead of zeros.
 import { useAgentIdentity } from "@/hooks/useAgentIdentity";
 import { useVeraRecord } from "@/hooks/useVeraRecord";
 import { VERA } from "@/lib/veraData";
-import { Icon, VeraOrb, SectionTitle, Seal, type IconName } from "@/components/design";
+import { Icon, VeraOrb, SectionTitle, Seal, ChainLaunching, type IconName } from "@/components/design";
 import { addressUrl, shortAddress, usd, riskLabel } from "@/lib/format";
-import { useChain } from "@/lib/chains/active";
+import { useChainReady } from "../useChainReady";
 
 export function VeraScreen({
   go,
 }: {
   go: (target: string | number, params?: Record<string, unknown>) => void;
 }) {
-  const chain = useChain();
+  const { chain, ready } = useChainReady();
   const { data: identity } = useAgentIdentity();
   const { data: record, isLoading: recordLoading } = useVeraRecord();
 
@@ -54,13 +56,13 @@ export function VeraScreen({
               №{identity ? identity.agentId.toString() : "1"}
             </span>
           </div>
-          {identity && (
+          {identity && chain.contracts.deployed && (
             <a
               href={addressUrl(identity.registry, chain)}
               target="_blank"
               rel="noopener noreferrer"
               className="tap"
-              style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--ink-3)" }}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 4px", fontSize: 12.5, color: "var(--ink-2)" }}
             >
               IdentityRegistry <span className="mono">{shortAddress(identity.registry)}</span>
               <Icon name="arrowUR" size={12} />
@@ -69,8 +71,12 @@ export function VeraScreen({
         </div>
       </div>
 
-      {/* stat band — REAL, from the on-chain executor log */}
+      {/* stat band — REAL, from the on-chain executor log. On a chain that isn't
+          switched on yet there's no log to read, so we say that instead of showing zeros. */}
       <div className="anim-rise" style={{ animationDelay: ".05s", padding: "22px 22px 0" }}>
+        {!ready ? (
+          <ChainLaunching chain={chain} />
+        ) : (
         <div className="card" style={{ padding: 18, display: "flex", textAlign: "center" }}>
           <div style={{ flex: 1, borderRight: "1px solid var(--line-2)" }}>
             <div className="tnum" style={{ fontSize: 24, fontWeight: 700 }}>
@@ -109,6 +115,7 @@ export function VeraScreen({
             </div>
           </div>
         </div>
+        )}
       </div>
 
       {/* primary actions — build a plan, or hand it to Autopilot. Matching cards:
@@ -200,7 +207,9 @@ export function VeraScreen({
         </div>
       </div>
 
-      {/* recorded recommendations — REAL, from the on-chain log */}
+      {/* recorded recommendations — REAL, from the on-chain log (none to read
+          until the chain's contracts are switched on) */}
+      {ready && (
       <div style={{ padding: "22px 22px 0" }}>
         <SectionTitle>Recorded recommendations</SectionTitle>
         {recordLoading && recents.length === 0 ? (
@@ -307,6 +316,7 @@ export function VeraScreen({
           fact. Past results don&apos;t promise future ones.
         </p>
       </div>
+      )}
 
     </div>
   );

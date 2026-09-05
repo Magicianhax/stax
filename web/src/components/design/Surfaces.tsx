@@ -121,8 +121,9 @@ export function BottomSheet({ open, onClose, title, children }: BottomSheetProps
               aria-label="Close"
               className="tap"
               style={{
-                width: 34,
-                height: 34,
+                width: 44, // ≥44px touch target; the negative margin keeps the header line tight
+                height: 44,
+                margin: "-5px -6px -5px 0",
                 borderRadius: 99,
                 background: "var(--surface-2)",
                 display: "grid",
@@ -214,7 +215,18 @@ export function HoldingRow({
     >
       <AssetTile asset={asset} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 600, fontSize: 16.5, letterSpacing: "-.01em" }}>{asset.name}</div>
+        <div
+          style={{
+            fontWeight: 600,
+            fontSize: 16.5,
+            letterSpacing: "-.01em",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {asset.name}
+        </div>
         {sub !== undefined && (
           <div
             style={{
@@ -229,7 +241,7 @@ export function HoldingRow({
           </div>
         )}
       </div>
-      {showSpark && asset.spark && (
+      {showSpark && asset.spark && asset.kind !== "safe" && (
         <Sparkline data={asset.spark} color={up ? "var(--pos)" : "var(--neg)"} />
       )}
       <div style={{ textAlign: "right", minWidth: 64 }}>

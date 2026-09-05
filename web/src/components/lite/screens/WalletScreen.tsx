@@ -3,7 +3,7 @@
 // Wallet — the account's money in one place: total balance, quick Send / Receive
 // / Buy, spendable cash (USDC), holdings (live price · qty · value), and the full
 // incoming/outgoing transaction history. Receive is an in-place sheet (QR +
-// address); each transaction opens a detail sheet with a Mantlescan link.
+// address); each transaction opens a detail sheet with an explorer link.
 import { useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { useUsdcBalance, usePortfolio, type Holding } from "@/hooks/useBalances";
@@ -205,13 +205,22 @@ export function WalletScreen({
       <div style={{ padding: "22px 22px 0" }}>
         <SectionTitle>Transactions</SectionTitle>
         {txLoading && !txs ? (
-          <div className="card" style={{ padding: "24px 18px", display: "grid", placeItems: "center" }}>
-            <Spinner small />
+          <div className="card" style={{ padding: "4px 14px" }}>
+            {[0, 1, 2].map((i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: i < 2 ? "1px solid var(--line-2)" : "none" }}>
+                <div className="skeleton" style={{ width: 38, height: 38, borderRadius: "50%", flex: "none" }} />
+                <div style={{ flex: 1 }}>
+                  <div className="skeleton" style={{ width: "46%", height: 13, borderRadius: 6 }} />
+                  <div className="skeleton" style={{ width: "34%", height: 11, borderRadius: 6, marginTop: 7 }} />
+                </div>
+                <div className="skeleton" style={{ width: 64, height: 15, borderRadius: 6 }} />
+              </div>
+            ))}
           </div>
         ) : !txs || txs.length === 0 ? (
           <div className="card" style={{ padding: "26px 18px", textAlign: "center", color: "var(--ink-2)" }}>
             <div style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)" }}>No transactions yet</div>
-            <div style={{ fontSize: 13.5, marginTop: 4 }}>Money moving in and out of your wallet will show up here.</div>
+            <div style={{ fontSize: 13.5, marginTop: 4, lineHeight: 1.5 }}>Money moving in and out on {chain.name} will show up here.</div>
           </div>
         ) : (
           <div className="card" style={{ padding: "4px 14px" }}>
@@ -251,7 +260,7 @@ export function WalletScreen({
       <BottomSheet open={receiveOpen} onClose={() => setReceiveOpen(false)} title="Receive">
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16, padding: "4px 4px 8px" }}>
           <p style={{ margin: 0, fontSize: 14, color: "var(--ink-2)", textAlign: "center", lineHeight: 1.5 }}>
-            Send <b style={{ color: "var(--ink)" }}>USDC on Mantle</b> to this address. It arrives in under a minute.
+            Send <b style={{ color: "var(--ink)" }}>USDC on {chain.name}</b> to this address. It arrives in under a minute.
           </p>
           {addrLoading || !address ? (
             <div style={{ width: 196, height: 196, display: "grid", placeItems: "center" }}><Spinner /></div>
@@ -267,7 +276,7 @@ export function WalletScreen({
           <button onClick={copyAddress} disabled={!address} className="btn btn-primary btn-block tap" style={{ height: 50 }}>Copy address</button>
           <div style={{ display: "flex", alignItems: "flex-start", gap: 9, padding: "11px 13px", borderRadius: 14, background: "var(--accent-soft)", color: "var(--ink-2)", fontSize: 12.5, lineHeight: 1.5 }}>
             <Icon name="info" size={16} stroke={2} style={{ flex: "none", marginTop: 1, color: "var(--accent)" }} />
-            <span>Only send <b style={{ color: "var(--ink)" }}>USDC</b> on the <b style={{ color: "var(--ink)" }}>Mantle</b> network. Other tokens or networks may be lost.</span>
+            <span>Only send <b style={{ color: "var(--ink)" }}>USDC</b> on the <b style={{ color: "var(--ink)" }}>{chain.name}</b> network. Other tokens or networks may be lost.</span>
           </div>
         </div>
       </BottomSheet>
@@ -285,14 +294,14 @@ export function WalletScreen({
             <div className="card" style={{ padding: "4px 16px" }}>
               <DetailRow label="Status" value="Confirmed" />
               <DetailRow label={tx.direction === "in" ? "From" : "To"} value={shortAddress(tx.counterparty)} mono borderTop />
-              <DetailRow label="Network" value="Mantle" borderTop />
+              <DetailRow label="Network" value={chain.name} borderTop />
               {tx.timestamp && (
                 <DetailRow label="When" value={new Date(tx.timestamp * 1000).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })} borderTop />
               )}
               <DetailRow label="Transaction" value={`${tx.hash.slice(0, 10)}…${tx.hash.slice(-8)}`} mono borderTop />
             </div>
             <a href={txUrl(tx.hash, chain)} target="_blank" rel="noreferrer" className="btn btn-ghost btn-block tap" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-              View on Mantlescan <Icon name="arrowUR" size={16} />
+              View on {chain.explorer.name} <Icon name="arrowUR" size={16} />
             </a>
           </div>
         )}

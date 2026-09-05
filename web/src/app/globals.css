@@ -552,7 +552,7 @@
   border-radius: 12px;
   background: var(--surface);
   box-shadow: var(--shadow);
-  transition: transform 0.34s var(--ease-out), width 0.34s var(--ease-out);
+  transition: transform 0.34s var(--ease-out);
   z-index: 0;
 }
 
@@ -1062,7 +1062,7 @@ body {
   --s-r-xl: 36px;
   --s-maxw: 1200px;
   --s-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
-  --s-ease-soft: cubic-bezier(0.34, 1.2, 0.64, 1);
+  --s-ease-soft: cubic-bezier(0.22, 1, 0.36, 1); /* exponential ease-out; no overshoot */
   --s-ease-expo: cubic-bezier(0.16, 1, 0.3, 1); /* soothing decel for scroll reveals */
 
   color: var(--s-ink);
@@ -1705,7 +1705,7 @@ body {
   display: grid;
   place-items: center;
   cursor: pointer;
-  transition: background 0.2s, transform 0.2s cubic-bezier(0.34, 1.2, 0.64, 1);
+  transition: background 0.2s, transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .film-lb-x:hover { background: rgba(255, 255, 255, 0.22); transform: scale(1.05); }
 @keyframes filmIn { from { opacity: 0; } to { opacity: 1; } }
@@ -1989,18 +1989,28 @@ body {
 .site .goal-built-t { font-size: 14.5px; color: var(--s-ink-2); }
 .site .goal-built-t b { color: var(--s-ink); font-weight: 700; }
 .site .quotes-foot { margin-top: 30px; display: flex; align-items: center; justify-content: center; gap: 24px; }
-.site .quotes-dots { display: flex; gap: 8px; }
+.site .quotes-dots { display: flex; gap: 0; }
 .site .qdot {
-  width: 8px;
   height: 8px;
   border-radius: 99px;
   border: none;
   padding: 0;
-  background: color-mix(in srgb, var(--s-ink) 20%, transparent);
   cursor: pointer;
-  transition: background 0.25s, width 0.3s var(--s-ease);
+  position: relative;
+  width: 24px;
+  background: transparent;
 }
-.site .qdot.on { width: 24px; background: var(--s-primary); }
+.site .qdot::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--s-ink) 20%, transparent);
+  transform: scaleX(0.3334);
+  transform-origin: 50% 50%;
+  transition: background 0.25s, transform 0.3s var(--s-ease);
+}
+.site .qdot.on::before { transform: scaleX(1); background: var(--s-primary); }
 .site .quotes-cta { display: inline-flex; align-items: center; gap: 7px; font-weight: 700; font-size: 15px; color: var(--s-primary-d); transition: filter 0.2s; }
 .site[data-mode="dark"] .quotes-cta { color: var(--s-primary); }
 .site .quotes-cta:hover { filter: brightness(1.1); }

@@ -19,10 +19,12 @@ import {
   HoldingRow,
   SectionTitle,
   VerifiedBadge,
+  NetworkChip,
 } from "@/components/design";
 import { toTile, catFor } from "@/lib/displayAssets";
 import { usd, tokenQty } from "@/lib/format";
 import { iconBtn } from "./primitives";
+import { useChainReady } from "../useChainReady";
 
 const DOTS = "••••••";
 
@@ -32,6 +34,7 @@ export function HomeScreen({
   go: (screen: string, params?: Record<string, unknown>) => void;
 }) {
   const { address } = useSmartAccount();
+  const { chain, ready } = useChainReady();
   // Cash, invested, and total all arrive pre-computed from /api/portfolio —
   // this screen renders them verbatim (no client-side money math).
   const { data: port, isLoading: portLoading } = usePortfolio(address ?? undefined);
@@ -66,6 +69,8 @@ export function HomeScreen({
           <h1 className="serif" style={{ margin: 0, fontSize: 26, letterSpacing: "-.01em" }}>Your money</h1>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* quiet network chip — the only place the chain shows on Home */}
+          <NetworkChip chain={chain} onClick={() => go("settings")} />
           <button onClick={() => go("activity")} style={iconBtn} className="tap" aria-label="Activity">
             <Icon name="bell" size={21} />
           </button>
@@ -217,7 +222,9 @@ export function HomeScreen({
               Invest with Vera
             </div>
             <div style={{ fontSize: 13.5, opacity: 0.85, marginTop: 1 }}>
-              Tell me a goal, and I&apos;ll build the plan.
+              {ready
+                ? "Tell me a goal, and I’ll build the plan."
+                : `Opening shortly on ${chain.name}. Browse prices meanwhile.`}
             </div>
           </div>
           <Icon name="arrowUR" size={22} stroke={2.2} style={{ position: "relative" }} />
@@ -235,8 +242,10 @@ export function HomeScreen({
             <div style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)" }}>
               Nothing here yet
             </div>
-            <div style={{ fontSize: 13.5, marginTop: 4 }}>
-              Tell Vera a goal and place your first plan in one tap.
+            <div style={{ fontSize: 13.5, marginTop: 4, lineHeight: 1.5 }}>
+              {ready
+                ? "Tell Vera a goal and place your first plan in one tap."
+                : `Nothing on ${chain.name} yet. Earlier investments live under Mantle in Settings.`}
             </div>
           </div>
         ) : (

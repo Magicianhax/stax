@@ -1,7 +1,7 @@
 "use client";
 
 // Activity & receipts — a user's REAL on-chain Stax history (useActivity),
-// newest first, each row opening its Mantlescan receipt. Reached from Settings.
+// newest first, each row opening its on-chain receipt. Reached from Settings.
 import { useState } from "react";
 import { useActivity } from "@/hooks/useActivity";
 import { useSmartAccount } from "@/hooks/useSmartAccount";

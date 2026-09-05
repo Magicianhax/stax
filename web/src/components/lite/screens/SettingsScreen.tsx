@@ -3,14 +3,15 @@
 // Settings — faithful re-skin of the design's Settings screen, wired to REAL
 // state: profile identity from Privy + the smart-account address, Appearance from
 // useTheme, and a real sign-out via useLogout.
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { usePrivy, useLogout } from "@privy-io/react-auth";
-import { Icon, type IconName } from "@/components/design";
+import { Icon, NetworkSwitch, type IconName } from "@/components/design";
 import { useTheme } from "@/hooks/useTheme";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { useHaptics, haptic } from "@/lib/haptics";
 import { shortAddress } from "@/lib/format";
-import { iconBtn } from "./primitives";
+import { iconBtn, sectionLabel } from "./primitives";
+import { useChainReady } from "../useChainReady";
 
 // ── Toggle ────────────────────────────────────────────────────────────────────
 function Toggle({ on, onChange, label }: { on: boolean; onChange: () => void; label: string }) {
@@ -105,16 +106,6 @@ function Row({
   );
 }
 
-// Quiet sentence-case section label — NOT an uppercase tracked eyebrow (that
-// reads as AI section-scaffolding when stacked on every group).
-const sectionLabel: CSSProperties = {
-  padding: "0 4px 9px",
-  fontSize: 13,
-  fontWeight: 600,
-  letterSpacing: "-.005em",
-  color: "var(--ink-2)",
-};
-
 export function SettingsScreen({
   go,
 }: {
@@ -124,6 +115,7 @@ export function SettingsScreen({
   const { logout } = useLogout();
   const { address } = useSmartAccount();
   const { colorMode, toggle } = useTheme();
+  const { chain, ready } = useChainReady();
   const { on: hapticsOn, supported: hapticsSupported, toggle: toggleHaptics } = useHaptics();
 
   // Identity — prefer a human handle, fall back to the smart-account address.
@@ -190,6 +182,24 @@ export function SettingsScreen({
               {identity || "—"}
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Network — Base is the default; Mantle keeps earlier investments. One
+          segmented control, one sentence, no chain-picker jargon. */}
+      <div style={{ padding: "24px 22px 0" }}>
+        <div style={sectionLabel}>Network</div>
+        <div className="card" style={{ padding: 16 }}>
+          <NetworkSwitch />
+          <p style={{ margin: "12px 2px 0", fontSize: 13, lineHeight: 1.5, color: "var(--ink-2)" }}>
+            Base is the default. Mantle holds your earlier investments.
+            {!ready && (
+              <>
+                {" "}
+                Investing on {chain.name} opens shortly; you can browse prices meanwhile.
+              </>
+            )}
+          </p>
         </div>
       </div>
 
@@ -283,6 +293,7 @@ export function SettingsScreen({
             sub="Updates and support on X"
             onClick={() => window.open("https://x.com/stax_market", "_blank", "noopener")}
             right={<Icon name="arrowUR" size={16} style={{ color: "var(--ink-3)" }} />}
+            borderTop
           />
         </div>
       </div>
