@@ -70,9 +70,10 @@ function useDrawOnScroll(
       raf = 0;
       const r = node.getBoundingClientRect();
       const vh = window.innerHeight || 1;
-      // starts when the diagram's top clears the lower 12% of the viewport,
-      // finishes once it has travelled a little past its own height
-      const p = (vh * 0.88 - r.top) / (r.height + vh * 0.22);
+      // starts when the diagram's top clears the lower 12% of the viewport and
+      // finishes while it is still on screen: over ~90% of its own height, but
+      // never faster than 30% of a viewport of scrolling (the desktop strip is short)
+      const p = (vh * 0.88 - r.top) / Math.max(r.height * 0.9, vh * 0.3);
       const next = Math.min(1, Math.max(0, p));
       if (next <= best) return;
       best = next;
