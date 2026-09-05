@@ -6,7 +6,7 @@ export const SITE_NAME = "Stax";
 
 export const SITE_TAGLINE = "Invest in plain words";
 export const SITE_DESCRIPTION =
-  "Invest in real companies with Vera, your investing assistant. Email login, no seed phrase, fees on us. Tokenized stocks on Mantle, gasless.";
+  "Invest in real companies with Vera, your investing assistant. Email login, no seed phrase, fees on us. Tokenized stocks on Base (Mantle too), gasless.";
 
 export const TWITTER_HANDLE = "@stax_market";
 

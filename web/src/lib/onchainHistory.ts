@@ -1,6 +1,6 @@
 // Reads Vera's REAL track record + a user's REAL activity straight from the
-// StaxExecutor event log on Mantle. No off-chain database — the chain IS the
-// record, which is exactly Vera's trust claim.
+// StaxExecutor event log on a given chain. No off-chain database — the chain IS
+// the record, which is exactly Vera's trust claim.
 //
 // Events (mirror the deployed StaxExecutor):
 //   RecommendationCommitted(planId indexed, user indexed, recHash, riskScore, agentId)
@@ -8,27 +8,12 @@
 //   LegFilled(planId indexed, tokenOut indexed, usdcIn, received)
 //
 // Vera's global record = every RecommendationCommitted + AllocationExecuted (she
-// is the only advising agent, agentId 1). Per-user history filters by the indexed
-// `user` topic. Everything degrades gracefully to a 0-state on empty history.
+// is the only advising agent). Per-user history filters by the indexed `user`
+// topic. Everything degrades gracefully to a 0-state on empty history, and to an
+// empty result when the executor is not deployed on the chain yet.
 import type { PublicClient } from "viem";
 import { parseAbiItem } from "viem";
-
-const STAX_EXECUTOR = (process.env.NEXT_PUBLIC_STAX_EXECUTOR ||
-  "0x3411196abdc3dbe59c5e2878c44d1931a975af12") as `0x${string}`;
-
-// First block the executor existed (contract creation) — bounds the log scan.
-// Required via env (no hardcoded default): a redeploy that forgets to update this
-// would otherwise silently scan from a stale block and under-report history.
-const DEPLOY_BLOCK = process.env.NEXT_PUBLIC_STAX_EXECUTOR_BLOCK
-  ? BigInt(process.env.NEXT_PUBLIC_STAX_EXECUTOR_BLOCK)
-  : null;
-
-function deployBlock(): bigint {
-  if (DEPLOY_BLOCK === null) {
-    throw new Error("NEXT_PUBLIC_STAX_EXECUTOR_BLOCK is not set — refusing to scan from an unknown block.");
-  }
-  return DEPLOY_BLOCK;
-}
+import type { StaxChain } from "./chains/types";
 
 export const RECOMMENDATION_COMMITTED = parseAbiItem(
   "event RecommendationCommitted(bytes32 indexed planId, address indexed user, bytes32 recHash, uint16 riskScore, uint256 agentId)",
@@ -69,20 +54,29 @@ export interface VeraRecord {
   }[];
 }
 
+export interface ActivityRow {
+  kind: "invest";
+  usdc: number;
+  legCount: number;
+  txHash: `0x${string}`;
+  blockNumber: bigint;
+}
+
 function usdcToNumber(raw: bigint): number {
   return Number(raw) / 1e6;
 }
 
 /** Read all RecommendationCommitted logs (optionally for one user). */
 async function readRecommendations(
+  chain: StaxChain,
   client: PublicClient,
   user?: `0x${string}`,
 ): Promise<RecommendationRow[]> {
   const logs = await client.getLogs({
-    address: STAX_EXECUTOR,
+    address: chain.contracts.executor,
     event: RECOMMENDATION_COMMITTED,
     args: user ? { user } : undefined,
-    fromBlock: deployBlock(),
+    fromBlock: chain.contracts.executorBlock,
     toBlock: "latest",
   });
   return logs.map((l) => ({
@@ -96,14 +90,15 @@ async function readRecommendations(
 
 /** Read all AllocationExecuted logs (optionally for one user). */
 async function readExecutions(
+  chain: StaxChain,
   client: PublicClient,
   user?: `0x${string}`,
 ): Promise<ExecutionRow[]> {
   const logs = await client.getLogs({
-    address: STAX_EXECUTOR,
+    address: chain.contracts.executor,
     event: ALLOCATION_EXECUTED,
     args: user ? { user } : undefined,
-    fromBlock: deployBlock(),
+    fromBlock: chain.contracts.executorBlock,
     toBlock: "latest",
   });
   return logs.map((l) => ({
@@ -163,44 +158,38 @@ export function toActivityRows(execs: ExecutionRow[]): ActivityRow[] {
 }
 
 /**
- * Vera's verifiable global track record (or scoped to `user` if provided).
- * Empty history yields a clean 0-state, never an error.
+ * Vera's verifiable track record on `chain` (or scoped to `user` if provided).
+ * Empty history — or an undeployed executor — yields a clean 0-state, never an error.
  *
  * NOTE: scans the FULL block range in one eth_getLogs — public RPCs cap that
  * range (rpc.mantle.xyz: 10k blocks), so browsers should use /api/vera-record
  * instead (Etherscan-indexed, cached). Kept for tooling/server use.
  */
 export async function getVeraRecord(
+  chain: StaxChain,
   client: PublicClient,
   user?: `0x${string}`,
 ): Promise<VeraRecord> {
+  if (!chain.contracts.deployed) return aggregateVeraRecord([], []);
   const [recs, execs] = await Promise.all([
-    readRecommendations(client, user),
-    readExecutions(client, user),
+    readRecommendations(chain, client, user),
+    readExecutions(chain, client, user),
   ]);
   return aggregateVeraRecord(recs, execs);
 }
 
-export interface ActivityRow {
-  kind: "invest";
-  usdc: number;
-  legCount: number;
-  txHash: `0x${string}`;
-  blockNumber: bigint;
-}
-
 /**
- * A user's Stax on-chain activity (AllocationExecuted = AI invests), newest first.
- * Direct manual swaps go to the Fluxion/Agni router (not the executor) and aren't
- * attributable from the executor log, so they're intentionally not listed here —
- * the receipt screen still links a manual buy's own tx directly.
+ * A user's Stax on-chain activity on `chain` (AllocationExecuted = AI invests),
+ * newest first. Direct manual swaps go to the DEX router (not the executor) and
+ * aren't attributable from the executor log, so they're intentionally not listed
+ * here — the receipt screen still links a manual buy's own tx directly.
  */
 export async function getUserActivity(
+  chain: StaxChain,
   client: PublicClient,
   user: `0x${string}`,
 ): Promise<ActivityRow[]> {
-  const execs = await readExecutions(client, user);
+  if (!chain.contracts.deployed) return [];
+  const execs = await readExecutions(chain, client, user);
   return toActivityRows(execs);
 }
-
-export { STAX_EXECUTOR };

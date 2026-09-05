@@ -1,13 +1,15 @@
-// Server-side proxy to the Pimlico ERC-4337 bundler + paymaster for Mantle.
+// Server-side proxy to the Pimlico ERC-4337 bundler + paymaster, per chain.
 //
 // The browser NEVER sees PIMLICO_API_KEY. The smart-account client (lib/aa.ts)
-// points its bundler/paymaster transport at this route; we forward the raw
-// JSON-RPC body to Pimlico with the key attached and stream the response back.
+// points its bundler/paymaster transport at `/api/pimlico?chain=base|mantle`;
+// we forward the raw JSON-RPC body to Pimlico's endpoint for that chain with
+// the key attached and stream the response back.
 //
 // Hardened: requires a valid Privy session (no open gas-sponsorship relay),
 // only forwards whitelisted ERC-4337/paymaster methods, and is rate limited so
 // a single account can't burn the paymaster deposit.
 import type { NextRequest } from "next/server";
+import { chainFromRequest } from "@/lib/server/chain";
 import { verifyRequest } from "@/lib/server/privyAuth";
 import { rateLimit } from "@/lib/server/rateLimit";
 import { unauthorized, badRequest, tooManyRequests, serverError } from "@/lib/server/respond";
@@ -15,7 +17,6 @@ import { unauthorized, badRequest, tooManyRequests, serverError } from "@/lib/se
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const CHAIN_ID = process.env.NEXT_PUBLIC_CHAIN_ID || "5000";
 const PIMLICO_API_KEY = process.env.PIMLICO_API_KEY;
 
 // H-6: surface misconfiguration at module load (server startup), not first request.
@@ -57,6 +58,9 @@ export async function POST(req: NextRequest) {
   const limit = rateLimit(`pimlico:${user.userId}`, 600, 60_000);
   if (!limit.ok) return tooManyRequests(limit.retryAfter);
 
+  // Which chain's bundler to hit (?chain= from the transport URL, or the header).
+  const chain = chainFromRequest(req);
+
   let body: unknown;
   try {
     body = await req.json();
@@ -71,7 +75,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const upstream = await fetch(`https://api.pimlico.io/v2/${CHAIN_ID}/rpc?apikey=${PIMLICO_API_KEY}`, {
+    const upstream = await fetch(`https://api.pimlico.io/v2/${chain.id}/rpc?apikey=${PIMLICO_API_KEY}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),

@@ -1,16 +1,20 @@
 "use client";
 
-// Client-side spot quote for the Pro manual-buy panel.
-// Reads the asset's Fluxion pool slot0 and estimates token-out for a USDC-in,
-// mirroring the backend leg builder's math. minOut is derived from a slippage
-// buffer; the on-chain amountOutMinimum is the real protection.
+// Client-side quotes for the Pro manual buy/sell panel, on the active chain.
+//
+//   useQuote(asset, amountUsd)     -> USDC in  -> asset out
+//   useSellQuote(asset, tokenRaw)  -> asset in -> USDC out
+//
+// Base: Uniswap QuoterV2 simulation (real price impact), slot0 spot fallback.
+// Mantle: Fluxion pool spot for stocks, chained Agni hops for routed assets.
+// Aave "safe dollars": 1:1 (aBasUSDC and USDC are both 6 dec).
+// minOut is derived by the caller from a slippage buffer; the on-chain
+// amountOutMinimum is the real protection.
 import { useQuery } from "@tanstack/react-query";
-import { publicClient } from "@/lib/wagmi";
-import { V3_POOL_ABI } from "@/lib/abis";
-import { USDC, ASSET_ROUTES, reverseRoute, type Asset, type RouteHop } from "@/lib/mantle";
+import { isRoutable, reverseRoute, type Asset } from "@/lib/chains";
+import { useChain } from "@/lib/chains/active";
 import { fromUnits } from "@/lib/format";
-
-const Q192 = (BigInt(2) ** BigInt(96)) ** BigInt(2);
+import { quoteAlongRoute, quoteSingleHop } from "@/lib/swapRouting";
 
 export interface Quote {
   amountInRaw: bigint; // USDC, 6dp
@@ -19,67 +23,34 @@ export interface Quote {
   pricePerToken: number; // USDC per whole token
 }
 
-function expectedOut(sqrtPriceX96: bigint, amountInRaw: bigint, usdcIsToken0: boolean): bigint {
-  const priceX192 = sqrtPriceX96 * sqrtPriceX96;
-  if (usdcIsToken0) return (amountInRaw * priceX192) / Q192;
-  if (priceX192 === BigInt(0)) return BigInt(0);
-  return (amountInRaw * Q192) / priceX192;
-}
-
 /**
- * Chain the spot price across a multi-hop route to get expected final-token out.
- * Direction-agnostic: works for buys (USDC -> asset) and reversed sells
- * (asset -> USDC) — each hop infers its own direction from the pool's token0.
- */
-async function expectedOutAlongRoute(hops: RouteHop[], amountInRaw: bigint): Promise<bigint> {
-  const states = await Promise.all(
-    hops.map((h) =>
-      Promise.all([
-        publicClient.readContract({ address: h.pool, abi: V3_POOL_ABI, functionName: "slot0" }),
-        publicClient.readContract({ address: h.pool, abi: V3_POOL_ABI, functionName: "token0" }),
-      ]),
-    ),
-  );
-  let amount = amountInRaw;
-  for (let i = 0; i < hops.length; i++) {
-    const h = hops[i];
-    const sqrtPriceX96 = (states[i][0] as readonly bigint[])[0];
-    const tokenInIsToken0 = (states[i][1] as string).toLowerCase() === h.tokenIn.toLowerCase();
-    amount = expectedOut(sqrtPriceX96, amount, tokenInIsToken0);
-    if (amount === BigInt(0)) return BigInt(0);
-  }
-  return amount;
-}
-
-/**
- * Quote `amountUsd` of USDC into `asset`. Stocks quote off their Fluxion pool;
- * routed SAFE/CRYPTO assets (sUSDe/mETH) chain their validated Agni hops. Debounced
- * via react-query keying on the rounded amount. Returns null while disabled/loading.
+ * Quote `amountUsd` of USDC into `asset`. Debounced via react-query keying on the
+ * rounded amount; keyed by chain so a network switch re-quotes. Returns no data
+ * while disabled/loading.
  */
 export function useQuote(asset: Asset | null, amountUsd: number) {
-  const route = asset ? ASSET_ROUTES[asset.symbol] : undefined;
-  const enabled = Boolean(
-    asset?.address && asset?.decimals && amountUsd > 0 && (asset?.pool || route),
-  );
+  const chain = useChain();
+  const enabled = Boolean(asset && asset.decimals && amountUsd > 0 && isRoutable(chain, asset.symbol));
   return useQuery({
-    queryKey: ["quote", asset?.symbol, Math.round(amountUsd * 100)],
+    queryKey: ["quote", chain.key, asset?.symbol, Math.round(amountUsd * 100)],
     enabled,
     staleTime: 10_000,
     refetchInterval: 15_000,
     queryFn: async (): Promise<Quote> => {
       const a = asset!;
       const amountInRaw = BigInt(Math.round(amountUsd * 1_000_000));
+      const route = chain.routes[a.symbol];
       let expectedOutRaw: bigint;
-      if (route) {
-        expectedOutRaw = await expectedOutAlongRoute(route.hops, amountInRaw);
+      if (a.via === "aave_v3") {
+        expectedOutRaw = amountInRaw; // supply(USDC) mints aUSDC 1:1
+      } else if (route) {
+        expectedOutRaw = await quoteAlongRoute(chain, route.hops, amountInRaw);
       } else {
-        const [slot0, token0] = await Promise.all([
-          publicClient.readContract({ address: a.pool!, abi: V3_POOL_ABI, functionName: "slot0" }),
-          publicClient.readContract({ address: a.pool!, abi: V3_POOL_ABI, functionName: "token0" }),
-        ]);
-        const sqrtPriceX96 = (slot0 as readonly bigint[])[0];
-        const usdcIsToken0 = (token0 as string).toLowerCase() === USDC.address.toLowerCase();
-        expectedOutRaw = expectedOut(sqrtPriceX96, amountInRaw, usdcIsToken0);
+        expectedOutRaw = await quoteSingleHop(
+          chain,
+          { tokenIn: chain.usdc.address, tokenOut: a.address!, fee: a.feeTier ?? 3000, pool: a.pool! },
+          amountInRaw,
+        );
       }
       const expectedOutQty = fromUnits(expectedOutRaw, a.decimals!);
       const pricePerToken = expectedOutQty > 0 ? amountUsd / expectedOutQty : 0;
@@ -95,37 +66,34 @@ export interface SellQuote {
 }
 
 /**
- * Quote selling `tokenQtyRaw` raw units of `asset` into USDC. Stocks quote off
- * their Fluxion pool spot; routed SAFE/CRYPTO assets (sUSDe/mETH) chain their
- * validated Agni hops in REVERSE (asset -> ... -> USDC). Returns null while
+ * Quote selling `tokenQtyRaw` raw units of `asset` into USDC. Routed assets quote
+ * their route in REVERSE (asset -> ... -> USDC). Returns no data while
  * disabled/loading.
  */
 export function useSellQuote(asset: Asset | null, tokenQtyRaw: bigint) {
-  const route = asset ? ASSET_ROUTES[asset.symbol] : undefined;
-  const enabled = Boolean(
-    asset?.address && asset?.decimals && tokenQtyRaw > BigInt(0) && (asset?.pool || route),
-  );
+  const chain = useChain();
+  const enabled = Boolean(asset && asset.decimals && tokenQtyRaw > BigInt(0) && isRoutable(chain, asset.symbol));
   return useQuery({
-    queryKey: ["sell-quote", asset?.symbol, tokenQtyRaw.toString()],
+    queryKey: ["sell-quote", chain.key, asset?.symbol, tokenQtyRaw.toString()],
     enabled,
     staleTime: 10_000,
     refetchInterval: 15_000,
     queryFn: async (): Promise<SellQuote> => {
       const a = asset!;
+      const route = chain.routes[a.symbol];
       let expectedUsdcRaw: bigint;
-      if (route) {
-        expectedUsdcRaw = await expectedOutAlongRoute(reverseRoute(route.hops), tokenQtyRaw);
+      if (a.via === "aave_v3") {
+        expectedUsdcRaw = tokenQtyRaw; // withdraw returns USDC 1:1
+      } else if (route) {
+        expectedUsdcRaw = await quoteAlongRoute(chain, reverseRoute(route.hops), tokenQtyRaw);
       } else {
-        const [slot0, token0] = await Promise.all([
-          publicClient.readContract({ address: a.pool!, abi: V3_POOL_ABI, functionName: "slot0" }),
-          publicClient.readContract({ address: a.pool!, abi: V3_POOL_ABI, functionName: "token0" }),
-        ]);
-        const sqrtPriceX96 = (slot0 as readonly bigint[])[0];
-        const usdcIsToken0 = (token0 as string).toLowerCase() === USDC.address.toLowerCase();
-        // Selling the asset = USDC is the OUTPUT, so invert the buy-side branch.
-        expectedUsdcRaw = expectedOut(sqrtPriceX96, tokenQtyRaw, !usdcIsToken0);
+        expectedUsdcRaw = await quoteSingleHop(
+          chain,
+          { tokenIn: a.address!, tokenOut: chain.usdc.address, fee: a.feeTier ?? 3000, pool: a.pool! },
+          tokenQtyRaw,
+        );
       }
-      const expectedUsd = fromUnits(expectedUsdcRaw, USDC.decimals);
+      const expectedUsd = fromUnits(expectedUsdcRaw, chain.usdc.decimals);
       return { amountInRaw: tokenQtyRaw, expectedUsdcRaw, expectedUsd };
     },
   });

@@ -1,24 +1,31 @@
 "use client";
 
-// useSwap — Pro manual buy: a direct, gasless Fluxion swap.
+// useSwap — Pro manual buy/sell: a direct, gasless swap on the active chain.
 //
-// Two batched calls, sent as one sponsored UserOp:
-//   [ USDC.approve(router, amountIn),
-//     router.exactInputSingle({ ..., recipient: USER }) ]
+// Buy = one sponsored UserOp:
+//   [ fee -> treasury, USDC.approve(venue, net), venue.swap({ ..., recipient: USER }) ]
+// Sell = one sponsored UserOp:
+//   [ asset.approve(venue, amt), venue.swap({ ..., recipient: USER }) ]
+//
+// Venue by `chain.routers.v3Kind` / `Asset.via` / `chain.routes[symbol]`:
+//   fluxion     (Mantle)  exactInputSingle WITH deadline on chain.routers.v3
+//   uniswap_v3  (Base)    SwapRouter02 exactInputSingle, NO deadline
+//   agni route  (Mantle)  exactInput(path) WITH deadline, multi-hop
+//   aave_v3     (Base)    Pool.supply(USDC) -> aUSDC / Pool.withdraw(USDC) (no approval on sell)
 //
 // Unlike the AI invest flow (which routes through StaxExecutor), here the
 // smart account swaps directly and the bought tokens land in the user's account.
 import { useCallback, useState } from "react";
-import { concatHex, encodeFunctionData, numberToHex } from "viem";
+import { encodeFunctionData } from "viem";
 import { useActiveWallet } from "@/hooks/useActiveWallet";
 import { sendSponsoredCalls, type Call } from "@/lib/aa";
 import { asViemProvider } from "@/lib/provider";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { useRefreshBalances } from "@/hooks/useBalances";
-import { AGNI_ROUTER_ABI, ERC20_ABI, FLUXION_ROUTER_ABI, V3_POOL_ABI } from "@/lib/abis";
-import { USDC, FLUXION_ROUTER, ASSET_ROUTES, reverseRoute, type Asset, type RouteHop } from "@/lib/mantle";
-import { publicClient } from "@/lib/wagmi";
-import { priceLimitSqrtX96 } from "@/lib/swapGuards";
+import { AAVE_POOL_ABI, AGNI_ROUTER_ABI, ERC20_ABI, FLUXION_ROUTER_ABI, UNISWAP_ROUTER02_ABI } from "@/lib/abis";
+import { isRoutable, reverseRoute, type Asset, type RouteHop, type StaxChain } from "@/lib/chains";
+import { useChain } from "@/lib/chains/active";
+import { encodeV3Path, singleHopSqrtLimit } from "@/lib/swapRouting";
 import { feeOf, STAX_TREASURY } from "@/lib/fees";
 
 type Phase = "idle" | "swapping" | "done" | "error";
@@ -26,38 +33,71 @@ type Phase = "idle" | "swapping" | "done" | "error";
 const BPS = BigInt(10000);
 const DEADLINE_SECONDS = 15 * 60;
 
-/**
- * Best-effort price-impact ceiling for a single-hop Fluxion swap. Reads the
- * pool's current price; on any failure returns 0n (no limit — today's behavior),
- * so this can never make a swap worse than before. amountOutMinimum stays the
- * precise floor (see swapGuards.ts).
- */
-async function singleHopSqrtLimit(pool: `0x${string}`, tokenIn: `0x${string}`): Promise<bigint> {
-  try {
-    const [slot0, token0] = await Promise.all([
-      publicClient.readContract({ address: pool, abi: V3_POOL_ABI, functionName: "slot0" }),
-      publicClient.readContract({ address: pool, abi: V3_POOL_ABI, functionName: "token0" }),
-    ]);
-    const sqrtPriceX96 = (slot0 as readonly bigint[])[0];
-    const zeroForOne = (token0 as string).toLowerCase() === tokenIn.toLowerCase();
-    return priceLimitSqrtX96(sqrtPriceX96, zeroForOne);
-  } catch {
-    return BigInt(0);
-  }
-}
-
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 // Canned receipt hash for demo-mode buys/sells (never broadcast on-chain).
 const DEMO_SWAP_TX = ("0x" + "5a7c2b41".repeat(32).slice(0, 64)) as `0x${string}`;
 
-/** Encode a Uniswap/Agni V3 `exactInput` path: token + fee(3b) + token + ... */
-function encodeV3Path(hops: RouteHop[]): `0x${string}` {
-  const parts: `0x${string}`[] = [hops[0].tokenIn];
-  for (const h of hops) {
-    parts.push(numberToHex(h.fee, { size: 3 }));
-    parts.push(h.tokenOut);
+const approve = (token: `0x${string}`, spender: `0x${string}`, amount: bigint): Call => ({
+  to: token,
+  data: encodeFunctionData({ abi: ERC20_ABI, functionName: "approve", args: [spender, amount] }),
+});
+
+/** Multi-hop exactInput on the route's router (Agni has a deadline, Uniswap SwapRouter02 doesn't). */
+function routeSwapCall(
+  chain: StaxChain,
+  symbol: string,
+  hops: RouteHop[],
+  recipient: `0x${string}`,
+  amountIn: bigint,
+  amountOutMinimum: bigint,
+): Call {
+  const route = chain.routes[symbol];
+  const path = encodeV3Path(hops);
+  if (route.kind === "agni_v3") {
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + DEADLINE_SECONDS);
+    return {
+      to: route.router,
+      data: encodeFunctionData({
+        abi: AGNI_ROUTER_ABI,
+        functionName: "exactInput",
+        args: [{ path, recipient, deadline, amountIn, amountOutMinimum }],
+      }),
+    };
   }
-  return concatHex(parts);
+  return {
+    to: route.router,
+    data: encodeFunctionData({
+      abi: UNISWAP_ROUTER02_ABI,
+      functionName: "exactInput",
+      args: [{ path, recipient, amountIn, amountOutMinimum }],
+    }),
+  };
+}
+
+/** Single-hop exactInputSingle on `chain.routers.v3` (Fluxion has a deadline, SwapRouter02 doesn't). */
+function singleHopSwapCall(
+  chain: StaxChain,
+  p: {
+    tokenIn: `0x${string}`;
+    tokenOut: `0x${string}`;
+    fee: number;
+    recipient: `0x${string}`;
+    amountIn: bigint;
+    amountOutMinimum: bigint;
+    sqrtPriceLimitX96: bigint;
+  },
+): Call {
+  if (chain.routers.v3Kind === "fluxion") {
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + DEADLINE_SECONDS);
+    return {
+      to: chain.routers.v3,
+      data: encodeFunctionData({ abi: FLUXION_ROUTER_ABI, functionName: "exactInputSingle", args: [{ ...p, deadline }] }),
+    };
+  }
+  return {
+    to: chain.routers.v3,
+    data: encodeFunctionData({ abi: UNISWAP_ROUTER02_ABI, functionName: "exactInputSingle", args: [p] }),
+  };
 }
 
 export interface SwapResult {
@@ -70,6 +110,7 @@ export interface SwapResult {
 
 export function useSwap() {
   const activeWallet = useActiveWallet();
+  const chain = useChain();
   // In demo mode (landing phones + /demo) the app must never broadcast a real
   // swap — even when a real Privy wallet is connected from a prior /app login.
   const demo = useDemo();
@@ -96,7 +137,8 @@ export function useSwap() {
       slippageBps: number;
       recipient: string;
     }) => {
-      const { asset, amountUsd, expectedOutRaw, slippageBps, recipient } = params;
+      const { asset, amountUsd, expectedOutRaw, slippageBps, recipient: rcpt } = params;
+      const recipient = rcpt as `0x${string}`;
       setError(null);
       setResult(null);
       // Demo mode: simulate a successful buy without ever touching the chain.
@@ -110,8 +152,11 @@ export function useSwap() {
       try {
         const wallet = activeWallet;
         if (!wallet) throw new Error("No account found. Please sign in again.");
-        if (!asset.address) throw new Error(`${asset.symbol} isn't buyable yet.`);
+        if (!asset.address || !isRoutable(chain, asset.symbol)) {
+          throw new Error(`${asset.symbol} isn't buyable on ${chain.name} yet.`);
+        }
 
+        const usdc = chain.usdc.address;
         const amountIn = BigInt(Math.round(amountUsd * 1_000_000));
         if (amountIn <= BigInt(0)) throw new Error("Enter an amount first.");
         // Platform fee skimmed to the treasury (gasless, batched below); the rest
@@ -121,69 +166,50 @@ export function useSwap() {
         const netIn = amountIn - feeRaw;
         const expectedNet = (expectedOutRaw * netIn) / amountIn;
         const minOut = (expectedNet * (BPS - BigInt(slippageBps))) / BPS;
-        const deadline = BigInt(Math.floor(Date.now() / 1000) + DEADLINE_SECONDS);
 
-        // Routed SAFE/CRYPTO assets (sUSDe/mETH) buy via Agni exactInput(path);
-        // stocks buy via the Fluxion single-hop. recipient = user in both cases.
-        const route = ASSET_ROUTES[asset.symbol];
-        const router = route ? route.router : (FLUXION_ROUTER as `0x${string}`);
-        // Single-hop (Fluxion) gets a price-impact ceiling; the multi-hop Agni
-        // exactInput(path) has no per-hop limit param, so minOut guards it alone.
-        const sqrtLimit = route || !asset.pool ? BigInt(0) : await singleHopSqrtLimit(asset.pool, USDC.address as `0x${string}`);
-
-        const approveCall: Call = {
-          to: USDC.address as `0x${string}`,
-          data: encodeFunctionData({
-            abi: ERC20_ABI,
-            functionName: "approve",
-            args: [router, netIn],
-          }),
-        };
-        const swapCall: Call = route
-          ? {
-              to: router,
-              data: encodeFunctionData({
-                abi: AGNI_ROUTER_ABI,
-                functionName: "exactInput",
-                args: [
-                  {
-                    path: encodeV3Path(route.hops),
-                    recipient: recipient as `0x${string}`,
-                    deadline,
-                    amountIn: netIn,
-                    amountOutMinimum: minOut,
-                  },
-                ],
-              }),
-            }
-          : {
-              to: router,
-              data: encodeFunctionData({
-                abi: FLUXION_ROUTER_ABI,
-                functionName: "exactInputSingle",
-                args: [
-                  {
-                    tokenIn: USDC.address as `0x${string}`,
-                    tokenOut: asset.address,
-                    fee: asset.feeTier ?? 3000,
-                    recipient: recipient as `0x${string}`,
-                    deadline,
-                    amountIn: netIn,
-                    amountOutMinimum: minOut,
-                    sqrtPriceLimitX96: sqrtLimit,
-                  },
-                ],
-              }),
-            };
+        let calls: Call[];
+        const route = chain.routes[asset.symbol];
+        if (asset.via === "aave_v3") {
+          // Safe dollars: supply USDC to Aave, aUSDC lands in the user's account 1:1.
+          const pool = chain.routers.aavePool!;
+          calls = [
+            approve(usdc, pool, netIn),
+            {
+              to: pool,
+              data: encodeFunctionData({ abi: AAVE_POOL_ABI, functionName: "supply", args: [usdc, netIn, recipient, 0] }),
+            },
+          ];
+        } else if (route) {
+          // Multi-hop exactInput(path) has no per-hop price limit; minOut guards it alone.
+          calls = [approve(usdc, route.router, netIn), routeSwapCall(chain, asset.symbol, route.hops, recipient, netIn, minOut)];
+        } else {
+          // Single-hop gets a price-impact ceiling on top of the minOut floor.
+          const sqrtPriceLimitX96 = await singleHopSqrtLimit(chain, asset.pool!, usdc);
+          calls = [
+            approve(usdc, chain.routers.v3, netIn),
+            singleHopSwapCall(chain, {
+              tokenIn: usdc,
+              tokenOut: asset.address,
+              fee: asset.feeTier ?? 3000,
+              recipient,
+              amountIn: netIn,
+              amountOutMinimum: minOut,
+              sqrtPriceLimitX96,
+            }),
+          ];
+        }
 
         // Fee transfer (if any) goes first, batched into the same sponsored UserOp.
-        const feeCall: Call | null = feeRaw > BigInt(0)
-          ? { to: USDC.address as `0x${string}`, data: encodeFunctionData({ abi: ERC20_ABI, functionName: "transfer", args: [STAX_TREASURY, feeRaw] }) }
-          : null;
+        if (feeRaw > BigInt(0)) {
+          calls.unshift({
+            to: usdc,
+            data: encodeFunctionData({ abi: ERC20_ABI, functionName: "transfer", args: [STAX_TREASURY, feeRaw] }),
+          });
+        }
 
         setPhase("swapping");
         const provider = asViemProvider(await wallet.getEthereumProvider());
-        const receipt = await sendSponsoredCalls(provider, feeCall ? [feeCall, approveCall, swapCall] : [approveCall, swapCall]);
+        const receipt = await sendSponsoredCalls(provider, calls, chain);
         setResult({
           txHash: receipt.receipt.transactionHash as `0x${string}`,
           asset,
@@ -197,15 +223,13 @@ export function useSwap() {
         setPhase("error");
       }
     },
-    [activeWallet, demo, refreshBalances],
+    [activeWallet, chain, demo, refreshBalances],
   );
 
   /**
-   * Sell `amountIn` raw units of a held `asset` back to USDC, batched as one
-   * sponsored UserOp: [ asset.approve(router, amountIn), router.swap ].
-   * Stocks sell through their Fluxion pool (exactInputSingle); routed
-   * SAFE/CRYPTO assets (sUSDe/mETH) sell through their validated Agni route in
-   * REVERSE (exactInput, asset -> ... -> USDC). recipient = user in both cases.
+   * Sell `amountIn` raw units of a held `asset` back to USDC as one sponsored
+   * UserOp. Routed assets sell through their route in REVERSE; Aave safe dollars
+   * withdraw straight from the pool (no approval needed). recipient = user.
    * `minUsdcOut` is the slippage-guarded floor (raw 6dp).
    */
   const sell = useCallback(
@@ -216,7 +240,8 @@ export function useSwap() {
       estUsdcValue: number; // for the receipt headline
       recipient: string;
     }) => {
-      const { asset, amountIn, minUsdcOut, estUsdcValue, recipient } = params;
+      const { asset, amountIn, minUsdcOut, estUsdcValue, recipient: rcpt } = params;
+      const recipient = rcpt as `0x${string}`;
       setError(null);
       setResult(null);
       // Demo mode: simulate a successful sell without ever touching the chain.
@@ -230,66 +255,45 @@ export function useSwap() {
       try {
         const wallet = activeWallet;
         if (!wallet) throw new Error("No account found. Please sign in again.");
-        const route = ASSET_ROUTES[asset.symbol];
-        if (!asset.address || (!asset.pool && !route))
-          throw new Error(`${asset.symbol} can't be sold here yet.`);
+        const route = chain.routes[asset.symbol];
+        const sellable = asset.address && (asset.via === "aave_v3" ? Boolean(chain.routers.aavePool) : asset.pool || route);
+        if (!sellable) throw new Error(`${asset.symbol} can't be sold here yet.`);
         if (amountIn <= BigInt(0)) throw new Error("Nothing to sell.");
 
-        const deadline = BigInt(Math.floor(Date.now() / 1000) + DEADLINE_SECONDS);
-        const router = route ? route.router : (FLUXION_ROUTER as `0x${string}`);
-        // Single-hop (Fluxion) gets a price-impact ceiling on top of the
-        // minUsdcOut floor; the multi-hop Agni exactInput(path) has no per-hop
-        // limit param, so minUsdcOut guards it alone (same as the buy side).
-        const sqrtLimit = route ? BigInt(0) : await singleHopSqrtLimit(asset.pool!, asset.address);
-
-        const approveCall: Call = {
-          to: asset.address,
-          data: encodeFunctionData({
-            abi: ERC20_ABI,
-            functionName: "approve",
-            args: [router, amountIn],
-          }),
-        };
-        const swapCall: Call = route
-          ? {
-              to: router,
-              data: encodeFunctionData({
-                abi: AGNI_ROUTER_ABI,
-                functionName: "exactInput",
-                args: [
-                  {
-                    path: encodeV3Path(reverseRoute(route.hops)),
-                    recipient: recipient as `0x${string}`,
-                    deadline,
-                    amountIn,
-                    amountOutMinimum: minUsdcOut,
-                  },
-                ],
-              }),
-            }
-          : {
-              to: router,
-              data: encodeFunctionData({
-                abi: FLUXION_ROUTER_ABI,
-                functionName: "exactInputSingle",
-                args: [
-                  {
-                    tokenIn: asset.address,
-                    tokenOut: USDC.address as `0x${string}`,
-                    fee: asset.feeTier ?? 3000,
-                    recipient: recipient as `0x${string}`,
-                    deadline,
-                    amountIn,
-                    amountOutMinimum: minUsdcOut,
-                    sqrtPriceLimitX96: sqrtLimit,
-                  },
-                ],
-              }),
-            };
+        const usdc = chain.usdc.address;
+        let calls: Call[];
+        if (asset.via === "aave_v3") {
+          // aUSDC balance is the USDC amount (1:1, 6 dec); withdraw burns it from the caller.
+          calls = [
+            {
+              to: chain.routers.aavePool!,
+              data: encodeFunctionData({ abi: AAVE_POOL_ABI, functionName: "withdraw", args: [usdc, amountIn, recipient] }),
+            },
+          ];
+        } else if (route) {
+          calls = [
+            approve(asset.address!, route.router, amountIn),
+            routeSwapCall(chain, asset.symbol, reverseRoute(route.hops), recipient, amountIn, minUsdcOut),
+          ];
+        } else {
+          const sqrtPriceLimitX96 = await singleHopSqrtLimit(chain, asset.pool!, asset.address!);
+          calls = [
+            approve(asset.address!, chain.routers.v3, amountIn),
+            singleHopSwapCall(chain, {
+              tokenIn: asset.address!,
+              tokenOut: usdc,
+              fee: asset.feeTier ?? 3000,
+              recipient,
+              amountIn,
+              amountOutMinimum: minUsdcOut,
+              sqrtPriceLimitX96,
+            }),
+          ];
+        }
 
         setPhase("swapping");
         const provider = asViemProvider(await wallet.getEthereumProvider());
-        const receipt = await sendSponsoredCalls(provider, [approveCall, swapCall]);
+        const receipt = await sendSponsoredCalls(provider, calls, chain);
         setResult({
           txHash: receipt.receipt.transactionHash as `0x${string}`,
           asset,
@@ -303,7 +307,7 @@ export function useSwap() {
         setPhase("error");
       }
     },
-    [activeWallet, demo, refreshBalances],
+    [activeWallet, chain, demo, refreshBalances],
   );
 
   return { phase, error, result, busy: phase === "swapping", buy, sell, reset };

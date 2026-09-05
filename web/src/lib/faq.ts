@@ -10,11 +10,11 @@ export interface FaqItem {
 export const FAQ: FaqItem[] = [
   {
     q: "What exactly am I buying?",
-    a: "Real shares — not a bet on a price. A regulated firm called Backed buys the actual stock, holds it with a custodian, and issues you a token worth one share. You can redeem it for the real thing.",
+    a: "Real shares — not a bet on a price. A regulated issuer buys the actual stock, holds it with a custodian, and issues you a token that tracks one share. On Base that issuer is Coinbase; on Mantle it's Backed.",
   },
   {
-    q: "Who is Backed?",
-    a: "A regulated European firm that puts real stocks and funds on-chain (the “xStocks”). Every token is matched one-to-one by a share held in custody — provable on-chain, not promised in fine print.",
+    q: "Who issues the stocks?",
+    a: "On Base, Coinbase — the largest US crypto exchange — puts real US stocks on-chain as tokens that track one share each. On Mantle, a regulated European firm called Backed does the same (the “xStocks”). Either way, every token is matched by a share held in custody — provable on-chain, not promised in fine print.",
   },
   {
     q: "Who is Vera, and do I stay in control?",
@@ -30,7 +30,7 @@ export const FAQ: FaqItem[] = [
   },
   {
     q: "Where does my money actually live?",
-    a: "In a wallet only you control — Stax never holds your funds. Everything settles on Mantle, a fast, low-cost Ethereum network, and every move leaves a public receipt you can check yourself.",
+    a: "In a wallet only you control — Stax never holds your funds. Everything settles on Base, a fast, low-cost Ethereum network built by Coinbase (Mantle is supported too), and every move leaves a public receipt you can check yourself.",
   },
   {
     q: "Can I sell or cash out anytime?",
@@ -38,6 +38,6 @@ export const FAQ: FaqItem[] = [
   },
   {
     q: "What can I invest in?",
-    a: "Names you already know — Apple, Nvidia, Tesla — broad funds like the S&P 500, and stable “Safe Dollars” for the cash side of a plan. More, including US Treasuries, is on the way.",
+    a: "Names you already know — Apple, Nvidia, Google, Meta, even SpaceX — plus Bitcoin and Ether, and “Safe Dollars” that earn a steady rate for the cash side of a plan. Switch to Mantle for broad funds like the S&P 500. More is on the way.",
   },
 ];

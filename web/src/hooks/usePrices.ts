@@ -1,21 +1,26 @@
 "use client";
 
-// usePrices — live USD spot for every asset, from /api/prices (DEX-pool reads,
-// cached server-side). Use `usePrice(symbol)` for a single headline price.
+// usePrices — live USD spot for every asset on the active chain, from
+// /api/prices (DEX-pool reads, cached server-side). Use `usePrice(symbol)` for a
+// single headline price.
 //
-// The returned price is the REAL on-chain spot (Fluxion for stocks, Agni route
-// for sUSDe/mETH). Assets with no live source return undefined — callers should
-// fall back honestly (e.g. show the indicative reference or a dash), never fake.
+// The returned price is the REAL on-chain spot (Uniswap pools on Base; Fluxion
+// for stocks and the Agni route for mETH on Mantle). Assets with no live source
+// return undefined — callers should fall back honestly (e.g. show the indicative
+// reference or a dash), never fake.
 import { useQuery } from "@tanstack/react-query";
 import type { AssetPrice } from "@/lib/prices";
+import { useChain } from "@/lib/chains/active";
+import { authedFetch } from "@/lib/authedFetch";
 
 export interface PricesResponse {
   prices: Record<string, AssetPrice>;
   asOf: string;
 }
 
+/** Fetch live prices for the ACTIVE chain (the chain header is attached by authedFetch). */
 export async function fetchPrices(): Promise<PricesResponse> {
-  const res = await fetch("/api/prices");
+  const res = await authedFetch("/api/prices");
   const json = await res.json();
   if (!res.ok) {
     throw new Error(typeof json?.error === "string" ? json.error : "Couldn't load prices.");
@@ -23,10 +28,11 @@ export async function fetchPrices(): Promise<PricesResponse> {
   return json as PricesResponse;
 }
 
-/** All live asset prices (symbol -> AssetPrice). Refreshes every 30s. */
+/** All live asset prices (symbol -> AssetPrice). Refreshes every 30s; re-keyed on chain switch. */
 export function usePrices() {
+  const chain = useChain();
   return useQuery({
-    queryKey: ["prices"],
+    queryKey: ["prices", chain.key],
     queryFn: fetchPrices,
     staleTime: 20_000,
     refetchInterval: 30_000,

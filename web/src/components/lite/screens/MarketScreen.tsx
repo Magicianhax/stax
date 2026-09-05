@@ -6,7 +6,7 @@
 // day moves + sparklines are real market data (/api/market). Safe/crypto tiers
 // that the executor can't route as one-tap manual buys yet are dimmed + "Soon".
 import { useMemo, useState } from "react";
-import { ALL_ASSETS } from "@/lib/mantle";
+import { useChain } from "@/lib/chains/active";
 import { displayFor } from "@/lib/displayAssets";
 import { usePrices } from "@/hooks/usePrices";
 import { useMarketSummary } from "@/hooks/useMarket";
@@ -22,12 +22,13 @@ export function MarketScreen({
 }) {
   const [q, setQ] = useState("");
   const [cat, setCat] = useState<(typeof CATS)[number]>("All");
+  const chain = useChain();
   const { data: prices } = usePrices();
   const { data: marketData } = useMarketSummary();
 
   const list = useMemo(() => {
     const query = q.trim().toLowerCase();
-    return ALL_ASSETS.map((asset) => ({ asset, d: displayFor(asset.symbol, asset.name) }))
+    return chain.assets.all.map((asset) => ({ asset, d: displayFor(asset.symbol, asset.name) }))
       .filter(
         ({ asset, d }) =>
           (cat === "All" || d.cat === cat) &&
@@ -37,7 +38,7 @@ export function MarketScreen({
       // Buyable assets first; "coming soon" ones sink to the bottom (stable sort
       // keeps each group's original order, so available items aren't sandwiched).
       .sort((a, b) => Number(Boolean(a.d.coming)) - Number(Boolean(b.d.coming)));
-  }, [q, cat]);
+  }, [q, cat, chain]);
 
   return (
     <div className="screen screen-pad-top" style={{ paddingBottom: 110 }}>

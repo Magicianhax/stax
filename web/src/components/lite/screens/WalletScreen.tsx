@@ -13,6 +13,7 @@ import { Icon, type IconName, HoldingRow, CountUp, SectionTitle, BottomSheet, us
 import { TokenLogo } from "@/components/lite/TokenLogo";
 import { toTile, catFor } from "@/lib/displayAssets";
 import { usd, tokenQty, shortAddress, txUrl } from "@/lib/format";
+import { useChain } from "@/lib/chains/active";
 import { haptic } from "@/lib/haptics";
 import type { WalletTx } from "@/lib/walletTx";
 import { iconBtn, Spinner, Pager } from "./primitives";
@@ -54,6 +55,7 @@ export function WalletScreen({
   go: (target: string | number, params?: Record<string, unknown>) => void;
 }) {
   const { address, loading: addrLoading } = useSmartAccount();
+  const chain = useChain();
   const { data: bal, isLoading: balLoading } = useUsdcBalance(address ?? undefined);
   const { data: port, isLoading: portLoading } = usePortfolio(address ?? undefined);
   const { data: txs, isLoading: txLoading } = useTransactions(address ?? undefined);
@@ -289,7 +291,7 @@ export function WalletScreen({
               )}
               <DetailRow label="Transaction" value={`${tx.hash.slice(0, 10)}…${tx.hash.slice(-8)}`} mono borderTop />
             </div>
-            <a href={txUrl(tx.hash)} target="_blank" rel="noreferrer" className="btn btn-ghost btn-block tap" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+            <a href={txUrl(tx.hash, chain)} target="_blank" rel="noreferrer" className="btn btn-ghost btn-block tap" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
               View on Mantlescan <Icon name="arrowUR" size={16} />
             </a>
           </div>

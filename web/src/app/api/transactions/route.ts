@@ -1,9 +1,10 @@
-// GET /api/transactions?address=0x… — a wallet's incoming + outgoing transfers,
-// newest first. Uses Alchemy (better infra) when ALCHEMY_API_KEY is set, with an
-// on-chain log-scan fallback. Public chain data, so no auth — but rate limited
-// per IP since it can drive RPC cost.
+// GET /api/transactions?address=0x… — a wallet's incoming + outgoing transfers
+// on the request chain, newest first. Etherscan V2 (indexed) when
+// ETHERSCAN_API_KEY is set, with an Alchemy log-scan fallback. Public chain
+// data, so no auth — but rate limited per IP since it can drive RPC cost.
 import type { NextRequest } from "next/server";
 import { isAddress } from "viem";
+import { chainFromRequest } from "@/lib/server/chain";
 import { getWalletTransfers, TXN_SOURCE } from "@/lib/server/walletTransfers";
 import { rateLimit, clientIp } from "@/lib/server/rateLimit";
 import { badRequest, tooManyRequests, serverError } from "@/lib/server/respond";
@@ -17,10 +18,12 @@ export async function GET(req: NextRequest) {
   const address = req.nextUrl.searchParams.get("address") ?? "";
   if (!isAddress(address)) return badRequest("A valid wallet address is required.");
 
+  const chain = chainFromRequest(req);
+
   try {
-    const transactions = await getWalletTransfers(address);
+    const transactions = await getWalletTransfers(chain, address);
     return Response.json(
-      { transactions, source: TXN_SOURCE },
+      { chain: chain.key, explorer: chain.explorer.url, transactions, source: TXN_SOURCE },
       { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30" } },
     );
   } catch (err) {

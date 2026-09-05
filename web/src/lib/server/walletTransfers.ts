@@ -1,36 +1,47 @@
 import "server-only";
 
-// Wallet transaction history (incoming + outgoing token transfers).
+// Wallet transaction history (incoming + outgoing token transfers), per chain.
 //
-// Mantle reality check: Alchemy's enhanced getAssetTransfers is NOT enabled on
-// Mantle, and its FREE-tier eth_getLogs is capped at a 10-block range — so logs
-// can't reconstruct history without a paid plan. The right tool is an indexed
-// explorer API: Etherscan V2 (chainid 5000, the engine behind mantlescan.xyz)
-// returns a wallet's full ERC-20 transfer history in one fast call.
+// Reality check: Alchemy's enhanced getAssetTransfers is NOT enabled on Mantle,
+// and its FREE-tier eth_getLogs is capped at a 10-block range — so logs can't
+// reconstruct history without a paid plan. The right tool is an indexed explorer
+// API: Etherscan V2 (`chainid=${chain.etherscanChainId}`, the engine behind
+// basescan.org / mantlescan.xyz) returns a wallet's full ERC-20 transfer history
+// in one fast call.
 //
 // Order of preference:
 //   1. Etherscan V2 `account/tokentx`  (ETHERSCAN_API_KEY — free, recommended)
 //   2. Alchemy eth_getLogs scan         (only works on a PAYG Alchemy plan)
-import { createPublicClient, http, getAddress, formatUnits, parseAbiItem, isAddress } from "viem";
-import { MANTLE_CHAIN, USDC, ALL_ASSETS } from "@/lib/mantle";
+import { createPublicClient, http, getAddress, formatUnits, parseAbiItem, isAddress, type PublicClient } from "viem";
+import type { ChainKey, StaxChain } from "@/lib/chains/types";
 import type { WalletTx } from "@/lib/walletTx";
 
 const ETHERSCAN_KEY = process.env.ETHERSCAN_API_KEY;
 const ALCHEMY_KEY = process.env.ALCHEMY_API_KEY;
-const ALCHEMY_RPC = ALCHEMY_KEY ? `https://mantle-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}` : null;
-const RPC = ALCHEMY_RPC || process.env.NEXT_PUBLIC_MANTLE_RPC_URL || "https://rpc.mantle.xyz";
-const DEPLOY_BLOCK = BigInt(process.env.NEXT_PUBLIC_STAX_EXECUTOR_BLOCK || "96098605");
 const MAX = 50;
 
 /** Which data source the history will use (surfaced in the API response). */
 export const TXN_SOURCE: "etherscan" | "alchemy-logs" | "none" =
-  ETHERSCAN_KEY ? "etherscan" : ALCHEMY_RPC ? "alchemy-logs" : "none";
+  ETHERSCAN_KEY ? "etherscan" : ALCHEMY_KEY ? "alchemy-logs" : "none";
 
-// Known tokens: address(lowercase) -> { symbol, decimals } so transfers get our labels.
-const TOKENS = new Map<string, { symbol: string; decimals: number }>();
-TOKENS.set(USDC.address.toLowerCase(), { symbol: USDC.symbol, decimals: USDC.decimals });
-for (const a of ALL_ASSETS) {
-  if (a.address && a.decimals) TOKENS.set(a.address.toLowerCase(), { symbol: a.symbol, decimals: a.decimals });
+/** Alchemy RPC for `chain` (network slug derives from the chain key: base-mainnet / mantle-mainnet). */
+function alchemyRpc(chain: StaxChain): string | null {
+  return ALCHEMY_KEY ? `https://${chain.key}-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}` : null;
+}
+
+// Known tokens per chain: address(lowercase) -> { symbol, decimals } so transfers get our labels.
+const tokenMaps = new Map<ChainKey, Map<string, { symbol: string; decimals: number }>>();
+function knownTokens(chain: StaxChain) {
+  let m = tokenMaps.get(chain.key);
+  if (!m) {
+    m = new Map();
+    m.set(chain.usdc.address.toLowerCase(), { symbol: chain.usdc.symbol, decimals: chain.usdc.decimals });
+    for (const a of chain.assets.all) {
+      if (a.address && a.decimals) m.set(a.address.toLowerCase(), { symbol: a.symbol, decimals: a.decimals });
+    }
+    tokenMaps.set(chain.key, m);
+  }
+  return m;
 }
 
 function dedupeSort(txs: WalletTx[]): WalletTx[] {
@@ -58,9 +69,10 @@ interface EsTransfer {
   timeStamp: string;
 }
 
-async function viaEtherscan(address: string): Promise<WalletTx[]> {
+async function viaEtherscan(chain: StaxChain, address: string): Promise<WalletTx[]> {
+  const tokens = knownTokens(chain);
   const url =
-    `https://api.etherscan.io/v2/api?chainid=${MANTLE_CHAIN.id}&module=account&action=tokentx` +
+    `https://api.etherscan.io/v2/api?chainid=${chain.etherscanChainId}&module=account&action=tokentx` +
     `&address=${address}&page=1&offset=${MAX}&sort=desc&apikey=${ETHERSCAN_KEY}`;
   const res = await fetch(url);
   const json = (await res.json()) as { status: string; message: string; result: EsTransfer[] | string };
@@ -74,7 +86,7 @@ async function viaEtherscan(address: string): Promise<WalletTx[]> {
   const txs = json.result.map((t): WalletTx => {
     const out = t.from?.toLowerCase() === lc;
     const tokenAddr = t.contractAddress?.toLowerCase() ?? "";
-    const known = TOKENS.get(tokenAddr);
+    const known = tokens.get(tokenAddr);
     const decimals = known?.decimals ?? (Number(t.tokenDecimal) || 18);
     let amount = 0;
     try {
@@ -99,21 +111,29 @@ async function viaEtherscan(address: string): Promise<WalletTx[]> {
 
 // ── 2) Alchemy eth_getLogs (PAYG plans only — free tier caps at 10 blocks) ─────
 const TRANSFER = parseAbiItem("event Transfer(address indexed from, address indexed to, uint256 value)");
-const client = createPublicClient({
-  chain: { id: MANTLE_CHAIN.id, name: MANTLE_CHAIN.name, nativeCurrency: MANTLE_CHAIN.nativeCurrency, rpcUrls: MANTLE_CHAIN.rpcUrls },
-  transport: http(RPC),
-});
+const alchemyClients = new Map<ChainKey, PublicClient>();
+function alchemyClient(chain: StaxChain, rpc: string): PublicClient {
+  let c = alchemyClients.get(chain.key);
+  if (!c) {
+    c = createPublicClient({ chain: chain.chain, transport: http(rpc) }) as PublicClient;
+    alchemyClients.set(chain.key, c);
+  }
+  return c;
+}
 
-async function viaLogs(address: string): Promise<WalletTx[]> {
+async function viaLogs(chain: StaxChain, rpc: string, address: string): Promise<WalletTx[]> {
+  const client = alchemyClient(chain, rpc);
+  const tokens = knownTokens(chain);
   const owner = getAddress(address);
-  const tokenAddrs = [...TOKENS.keys()].map((a) => getAddress(a));
+  const tokenAddrs = [...tokens.keys()].map((a) => getAddress(a));
+  const fromBlock = chain.contracts.executorBlock;
 
   const [outLogs, inLogs] = await Promise.all([
-    client.getLogs({ address: tokenAddrs, event: TRANSFER, args: { from: owner }, fromBlock: DEPLOY_BLOCK, toBlock: "latest" }),
-    client.getLogs({ address: tokenAddrs, event: TRANSFER, args: { to: owner }, fromBlock: DEPLOY_BLOCK, toBlock: "latest" }),
+    client.getLogs({ address: tokenAddrs, event: TRANSFER, args: { from: owner }, fromBlock, toBlock: "latest" }),
+    client.getLogs({ address: tokenAddrs, event: TRANSFER, args: { to: owner }, fromBlock, toBlock: "latest" }),
   ]);
   const mapLog = (l: (typeof outLogs)[number], direction: "in" | "out"): WalletTx => {
-    const meta = TOKENS.get(l.address.toLowerCase());
+    const meta = tokens.get(l.address.toLowerCase());
     return {
       hash: (l.transactionHash ?? "0x") as `0x${string}`,
       direction,
@@ -141,19 +161,20 @@ async function viaLogs(address: string): Promise<WalletTx[]> {
   return txs.map((t) => ({ ...t, timestamp: tsByBlock.get(t.blockNumber) }));
 }
 
-/** Incoming + outgoing transfers for `address`, newest first. */
-export async function getWalletTransfers(address: string): Promise<WalletTx[]> {
+/** Incoming + outgoing transfers for `address` on `chain`, newest first. */
+export async function getWalletTransfers(chain: StaxChain, address: string): Promise<WalletTx[]> {
   if (!isAddress(address)) return [];
   if (ETHERSCAN_KEY) {
     try {
-      return await viaEtherscan(address);
+      return await viaEtherscan(chain, address);
     } catch {
       /* fall through */
     }
   }
-  if (ALCHEMY_RPC) {
+  const rpc = alchemyRpc(chain);
+  if (rpc) {
     try {
-      return await viaLogs(address);
+      return await viaLogs(chain, rpc, address);
     } catch {
       /* free-tier 10-block cap / unsupported — give up gracefully */
     }

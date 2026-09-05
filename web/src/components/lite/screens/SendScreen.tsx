@@ -11,7 +11,7 @@ import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { useTransfer } from "@/hooks/useTransfer";
 import { Icon } from "@/components/design";
 import { TokenLogo } from "@/components/lite/TokenLogo";
-import { USDC } from "@/lib/mantle";
+import { useChain } from "@/lib/chains/active";
 import { usd, tokenQty, fromUnits, shortAddress, txUrl } from "@/lib/format";
 import { iconBtn, Spinner } from "./primitives";
 
@@ -32,6 +32,7 @@ export function SendScreen({
   symbol?: string;
 }) {
   const { address } = useSmartAccount();
+  const chain = useChain();
   const { data: bal } = useUsdcBalance(address ?? undefined);
   const { data: port } = usePortfolio(address ?? undefined);
   const transfer = useTransfer();
@@ -41,8 +42,8 @@ export function SendScreen({
     const cash: Sendable = {
       symbol: "USDC",
       name: "US Dollar",
-      address: USDC.address as `0x${string}`,
-      decimals: USDC.decimals,
+      address: chain.usdc.address,
+      decimals: chain.usdc.decimals,
       raw: bal?.raw ?? BigInt(0),
       priceUsd: 1,
     };
@@ -57,7 +58,7 @@ export function SendScreen({
         priceUsd: h.priceUsd,
       }));
     return [cash, ...held];
-  }, [bal?.raw, port?.holdings]);
+  }, [bal?.raw, port?.holdings, chain]);
 
   const [sel, setSel] = useState(() => {
     const i = assets.findIndex((a) => a.symbol === initialSymbol);
@@ -115,7 +116,7 @@ export function SendScreen({
               <b className="mono" style={{ color: "var(--ink)" }}>{shortAddress(r.to)}</b>
             </p>
           </div>
-          <a className="caption" href={txUrl(r.txHash)} target="_blank" rel="noreferrer" style={{ color: "var(--primary)", display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <a className="caption" href={txUrl(r.txHash, chain)} target="_blank" rel="noreferrer" style={{ color: "var(--primary)", display: "inline-flex", alignItems: "center", gap: 6 }}>
             View on Mantlescan <Icon name="arrowUR" size={14} />
           </a>
         </div>

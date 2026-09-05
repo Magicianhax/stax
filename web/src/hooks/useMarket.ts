@@ -1,7 +1,8 @@
 "use client";
 
 // useMarket — REAL price history from /api/market (Yahoo Finance for the
-// equities our xStocks track, CoinGecko for the token tier; cached server-side).
+// equities our tokenized stocks track, CoinGecko for the token tier; cached
+// server-side). Keyed by the active chain: each network lists its own assets.
 //
 //   useMarketHistory(symbol, range) -> { series, changePct } for the detail chart
 //   useMarketSummary()              -> 1D change + spark per symbol (market rows)
@@ -9,6 +10,8 @@
 // series/changePct are null when the asset has no live source or the upstream
 // is down — callers fall back to the presentational reference, never blank.
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
+import { useChain } from "@/lib/chains/active";
+import { authedFetch } from "@/lib/authedFetch";
 
 export type MarketRange = "1D" | "1W" | "1M" | "1Y" | "All";
 
@@ -24,7 +27,7 @@ export interface MarketSummaryResponse {
 }
 
 async function getJson<T>(url: string, fallbackError: string): Promise<T> {
-  const res = await fetch(url);
+  const res = await authedFetch(url);
   const json = await res.json();
   if (!res.ok) {
     throw new Error(typeof json?.error === "string" ? json.error : fallbackError);
@@ -34,8 +37,9 @@ async function getJson<T>(url: string, fallbackError: string): Promise<T> {
 
 /** Real chart series for one asset + range. keepPreviousData makes range switches seamless. */
 export function useMarketHistory(symbol: string | undefined, range: MarketRange) {
+  const chain = useChain();
   return useQuery({
-    queryKey: ["market-history", symbol, range],
+    queryKey: ["market-history", chain.key, symbol, range],
     enabled: Boolean(symbol),
     staleTime: 60_000,
     placeholderData: keepPreviousData,
@@ -47,10 +51,11 @@ export function useMarketHistory(symbol: string | undefined, range: MarketRange)
   });
 }
 
-/** Real 1D change + sparkline for every asset (market list rows). */
+/** Real 1D change + sparkline for every asset on the active chain (market list rows). */
 export function useMarketSummary() {
+  const chain = useChain();
   return useQuery({
-    queryKey: ["market-summary"],
+    queryKey: ["market-summary", chain.key],
     staleTime: 4 * 60_000,
     refetchInterval: 5 * 60_000,
     queryFn: () =>

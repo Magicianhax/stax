@@ -1,9 +1,15 @@
 import type { NextRequest } from "next/server";
 import { timingSafeEqual } from "node:crypto";
+import type { ChainKey } from "@/lib/chains";
+import type { AutopilotConfig } from "@/lib/autopilot";
 import { claimDueAutopilots } from "@/lib/server/autopilotStore";
 import { runAutopilot } from "@/lib/server/autopilotExecutor";
 
 // Scheduled, autonomous runs — never cache. Allow up to 5 min for a batch.
+// Every due config is claimed atomically, then grouped by chain: chains run in
+// parallel, configs within a chain sequentially (one bundler queue per chain).
+// (No per-chain filter: the claim is atomic and global, so filtering after it
+// would silently skip already-advanced rows.)
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
@@ -20,21 +26,42 @@ function authorized(req: NextRequest): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+type RunRow = { id: string; chain: ChainKey; ok: boolean; txHash?: string; reason?: string };
+
+async function runGroup(cfgs: AutopilotConfig[], now: number): Promise<RunRow[]> {
+  const rows: RunRow[] = [];
+  for (const cfg of cfgs) {
+    try {
+      const r = await runAutopilot(cfg, { nowSeconds: now });
+      rows.push({ id: cfg.id, chain: cfg.chain, ...r });
+    } catch (e) {
+      rows.push({ id: cfg.id, chain: cfg.chain, ok: false, reason: e instanceof Error ? e.message : "run failed" });
+    }
+  }
+  return rows;
+}
+
 export async function GET(req: NextRequest) {
   if (!authorized(req)) return new Response("Unauthorized", { status: 401 });
 
   const now = Math.floor(Date.now() / 1000);
   const due = await claimDueAutopilots(now);
 
-  const results: Array<{ id: string; ok: boolean; txHash?: string; reason?: string }> = [];
+  const byChain = new Map<ChainKey, AutopilotConfig[]>();
   for (const cfg of due) {
-    try {
-      const r = await runAutopilot(cfg, { nowSeconds: now });
-      results.push({ id: cfg.id, ...r });
-    } catch (e) {
-      results.push({ id: cfg.id, ok: false, reason: e instanceof Error ? e.message : "run failed" });
-    }
+    const list = byChain.get(cfg.chain) ?? [];
+    list.push(cfg);
+    byChain.set(cfg.chain, list);
   }
 
-  return Response.json({ checkedAt: now, due: due.length, ran: results.length, results });
+  const groups = await Promise.all([...byChain.values()].map((cfgs) => runGroup(cfgs, now)));
+  const results = groups.flat();
+
+  return Response.json({
+    checkedAt: now,
+    chains: [...byChain.keys()],
+    due: due.length,
+    ran: results.length,
+    results,
+  });
 }

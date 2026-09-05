@@ -2,18 +2,22 @@
 // believable values without auth, chain reads, or AI calls. Only ever used under
 // <DemoProvider> (the /demo route + landing phones); the production app never
 // imports the provider, so this has zero effect on real behaviour.
+//
+// The demo shows the Base universe (Coinbase tokenized stocks + Aave safe dollars).
 import { parseUnits } from "viem";
-import { ALL_ASSETS, type Asset } from "@/lib/mantle";
+import { getChain, type Asset } from "@/lib/chains";
 import { displayFor } from "@/lib/displayAssets";
 import type { Holding } from "@/hooks/useBalances";
 import type { ActivityRow, VeraRecord } from "@/lib/onchainHistory";
 import type { AllocateResult, InvestSuccess } from "@/lib/invest-types";
 import type { Allocation } from "@/lib/allocation-schema";
 
+const DEMO_CHAIN = getChain("base");
+
 export const DEMO_ADDRESS = "0x5742a0d3b9c8417be5d8ae7c6cb0f2f3a1b2c3d4" as const;
 
 function assetOf(symbol: string): Asset {
-  const a = ALL_ASSETS.find((x) => x.symbol === symbol);
+  const a = DEMO_CHAIN.assets.all.find((x) => x.symbol === symbol);
   if (!a) throw new Error(`demo: unknown asset ${symbol}`);
   return a;
 }
@@ -21,7 +25,7 @@ function assetOf(symbol: string): Asset {
 function holding(symbol: string, valueUsd: number): Holding {
   const asset = assetOf(symbol);
   const dec = asset.decimals ?? 18;
-  const d = displayFor(symbol);
+  const d = displayFor(symbol, asset.name);
   const priceUsd = d.price ?? 1;
   const qty = valueUsd / priceUsd;
   const raw = parseUnits(qty.toFixed(Math.min(dec, 6)), dec);
@@ -30,10 +34,10 @@ function holding(symbol: string, valueUsd: number): Holding {
 
 // ~$2,512 invested across four holdings + ~$240 spendable cash.
 const DEMO_HOLDINGS: Holding[] = [
-  holding("SPY", 880.05),
+  holding("GOOGL", 880.05),
   holding("AAPL", 642.18),
   holding("NVDA", 511.4),
-  holding("sUSDe", 478.37),
+  holding("aUSDC", 478.37),
 ];
 
 const DEMO_INVESTED = DEMO_HOLDINGS.reduce((s, h) => s + (h.valueUsd ?? 0), 0);
@@ -72,23 +76,23 @@ export function demoAllocate(goal: string, amountUsd: number, risk?: string): Al
   const base =
     risk === "conservative"
       ? [
-          { symbol: "SPY", weightPct: 35, reason: "The whole US market in one steady holding." },
+          { symbol: "GOOGL", weightPct: 35, reason: "A steady giant with search, YouTube, and cloud." },
           { symbol: "AAPL", weightPct: 20, reason: "A profitable giant that holds up well." },
           { symbol: "NVDA", weightPct: 15, reason: "A measured slice of the AI leader." },
-          { symbol: "sUSDe", weightPct: 30, reason: "A calm dollar cushion that still earns." },
+          { symbol: "aUSDC", weightPct: 30, reason: "A calm dollar cushion that still earns." },
         ]
       : risk === "aggressive"
         ? [
             { symbol: "NVDA", weightPct: 40, reason: "Leads the AI boom, with bigger swings." },
             { symbol: "AAPL", weightPct: 25, reason: "A profitable anchor for the basket." },
-            { symbol: "SPY", weightPct: 25, reason: "Broad market to spread the risk." },
-            { symbol: "sUSDe", weightPct: 10, reason: "A small safety cushion." },
+            { symbol: "GOOGL", weightPct: 25, reason: "Search, YouTube, and cloud in one name." },
+            { symbol: "aUSDC", weightPct: 10, reason: "A small safety cushion." },
           ]
         : [
             { symbol: "NVDA", weightPct: 30, reason: "Leads the AI boom." },
             { symbol: "AAPL", weightPct: 25, reason: "A steady, profitable giant." },
-            { symbol: "SPY", weightPct: 25, reason: "The whole US market in one holding." },
-            { symbol: "sUSDe", weightPct: 20, reason: "A calm dollar cushion that still earns." },
+            { symbol: "GOOGL", weightPct: 25, reason: "Search, YouTube, and cloud in one name." },
+            { symbol: "aUSDC", weightPct: 20, reason: "A calm dollar cushion that still earns." },
           ];
   const riskScore = risk === "conservative" ? 2600 : risk === "aggressive" ? 6200 : 4200;
   return {
@@ -99,6 +103,7 @@ export function demoAllocate(goal: string, amountUsd: number, risk?: string): Al
     allocations: base,
     amountUsd,
     model: "demo",
+    chain: DEMO_CHAIN.key,
   };
 }
 

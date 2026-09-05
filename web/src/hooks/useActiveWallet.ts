@@ -10,6 +10,9 @@
 // Fix: always prefer the Privy EMBEDDED wallet (email/social login,
 // walletClientType "privy"). Only fall back to the first wallet for
 // bring-your-own-wallet users, who have no embedded wallet at all.
+//
+// The owner wallet is chain-agnostic; the smart account it controls on the
+// ACTIVE chain comes from useSmartAccount() (re-derived on every chain switch).
 import { useWallets, type ConnectedWallet } from "@privy-io/react-auth";
 
 export function useActiveWallet(): ConnectedWallet | undefined {

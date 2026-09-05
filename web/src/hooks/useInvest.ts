@@ -1,26 +1,30 @@
 "use client";
 
-// useInvest — the heart of the Lite happy-path.
+// useInvest — the heart of the Lite happy-path, on the active chain.
 //
 //   allocate(goal, amount)  -> AI builds an allocation (POST /api/allocate)
 //   invest(allocation, ...) -> server signs a plan (POST /api/invest-plan),
 //                              then we send ONE batched gasless UserOp:
-//                                [ USDC.approve(executor, total),
+//                                [ fee -> treasury,
+//                                  USDC.approve(executor, total),
 //                                  executor.investWithAI(plan, inf, legs, total) ]
 //
 // All signing of the risk inference happens server-side with the agent key;
-// the browser only relays the already-signed plan to the smart account.
+// the browser only relays the already-signed plan to the smart account. The
+// `x-stax-chain` header (authedFetch) tells the server which network to plan
+// for; the chain's executor must be deployed (`chain.contracts.deployed`) or we
+// stop with a friendly message before any network call.
 import { useCallback, useState } from "react";
 import { encodeFunctionData } from "viem";
 import { useActiveWallet } from "@/hooks/useActiveWallet";
 import { sendSponsoredCalls, type Call } from "@/lib/aa";
 import { asViemProvider } from "@/lib/provider";
 import { ERC20_ABI, STAX_EXECUTOR_ABI } from "@/lib/abis";
-import { USDC } from "@/lib/mantle";
+import { useChain } from "@/lib/chains/active";
 import { STAX_TREASURY } from "@/lib/fees";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { useRefreshBalances } from "@/hooks/useBalances";
-import { authHeader } from "@/lib/authedFetch";
+import { authedFetch } from "@/lib/authedFetch";
 import type { Allocation } from "@/lib/allocation-schema";
 import type { AllocateResult, InvestPlanResult, InvestSuccess } from "@/lib/invest-types";
 
@@ -41,9 +45,9 @@ export interface UseInvest {
 }
 
 async function postJson<T>(url: string, body: unknown): Promise<T> {
-  const res = await fetch(url, {
+  const res = await authedFetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json", ...(await authHeader()) },
+    headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
   const json = await res.json();
@@ -55,6 +59,7 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
 
 export function useInvest(): UseInvest {
   const demo = useDemo();
+  const chain = useChain();
   const activeWallet = useActiveWallet();
   const refreshBalances = useRefreshBalances();
   const [phase, setPhase] = useState<Phase>("idle");
@@ -71,6 +76,9 @@ export function useInvest(): UseInvest {
 
   const clearError = useCallback(() => setError(null), []);
 
+  // Calm, honest stop when the chain's executor isn't live yet (Base pre-deploy).
+  const notLiveMessage = `${chain.name} is being switched on. Investing there opens soon — you can switch networks in Settings meanwhile.`;
+
   const allocate = useCallback(
     async (goal: string, amountUsd: number, riskTolerance?: string) => {
       setError(null);
@@ -83,6 +91,11 @@ export function useInvest(): UseInvest {
         setAllocation(result);
         setPhase("idle");
         return result;
+      }
+      if (!chain.contracts.deployed) {
+        setError(notLiveMessage);
+        setPhase("error");
+        return null;
       }
       try {
         const result = await postJson<AllocateResult>("/api/allocate", {
@@ -99,7 +112,7 @@ export function useInvest(): UseInvest {
         return null;
       }
     },
-    [demo],
+    [demo, chain, notLiveMessage],
   );
 
   const invest = useCallback(
@@ -115,17 +128,30 @@ export function useInvest(): UseInvest {
         setPhase("done");
         return;
       }
+      if (!chain.contracts.deployed) {
+        setError(notLiveMessage);
+        setPhase("error");
+        return;
+      }
       try {
         const wallet = activeWallet;
         if (!wallet) throw new Error("No account found. Please sign in again.");
 
-        // 1. Server signs the plan.
+        // 1. Server signs the plan for the active chain.
         setPhase("planning");
         const plan = await postJson<InvestPlanResult>("/api/invest-plan", {
           address,
           allocation: alloc,
           amountUsd,
         });
+        // Never relay a plan built for another network / executor.
+        if (plan.chain !== chain.key) {
+          throw new Error("That plan was built for a different network. Please try again.");
+        }
+        const executor = chain.contracts.executor;
+        if (plan.executor.toLowerCase() !== executor.toLowerCase()) {
+          throw new Error("That plan doesn't match this network. Please try again.");
+        }
 
         const usdcTotal = BigInt(plan.usdcTotal);
         const legs = plan.legs.map((l) => ({
@@ -137,16 +163,17 @@ export function useInvest(): UseInvest {
         }));
 
         // 2. Encode the two calls: approve USDC, then invest.
+        const usdc = chain.usdc.address;
         const approveCall: Call = {
-          to: USDC.address as `0x${string}`,
+          to: usdc,
           data: encodeFunctionData({
             abi: ERC20_ABI,
             functionName: "approve",
-            args: [plan.executor, usdcTotal],
+            args: [executor, usdcTotal],
           }),
         };
         const investCall: Call = {
-          to: plan.executor,
+          to: executor,
           data: encodeFunctionData({
             abi: STAX_EXECUTOR_ABI,
             functionName: "investWithAI",
@@ -174,18 +201,19 @@ export function useInvest(): UseInvest {
         const grossRaw = BigInt(Math.round(amountUsd * 1_000_000));
         const feeRaw = grossRaw - usdcTotal;
         const feeCall: Call | null = feeRaw > BigInt(0)
-          ? { to: USDC.address as `0x${string}`, data: encodeFunctionData({ abi: ERC20_ABI, functionName: "transfer", args: [STAX_TREASURY, feeRaw] }) }
+          ? { to: usdc, data: encodeFunctionData({ abi: ERC20_ABI, functionName: "transfer", args: [STAX_TREASURY, feeRaw] }) }
           : null;
 
-        // 4. Send the batched, sponsored UserOp.
+        // 4. Send the batched, sponsored UserOp on the active chain.
         setPhase("investing");
         const provider = asViemProvider(await wallet.getEthereumProvider());
         const receipt = await sendSponsoredCalls(
           provider,
           feeCall ? [feeCall, approveCall, investCall] : [approveCall, investCall],
+          chain,
         );
 
-        // 4. Build a success summary from the allocation (USD by weight).
+        // 5. Build a success summary from the allocation (USD by weight).
         const holdings = alloc.allocations.map((a) => ({
           symbol: a.symbol,
           name: a.symbol,
@@ -212,7 +240,7 @@ export function useInvest(): UseInvest {
         setPhase("error");
       }
     },
-    [demo, activeWallet, refreshBalances],
+    [demo, chain, activeWallet, refreshBalances, notLiveMessage],
   );
 
   return {

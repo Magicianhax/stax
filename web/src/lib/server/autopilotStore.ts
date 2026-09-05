@@ -10,11 +10,17 @@ import "server-only";
 // autopilot twice. recordRun() therefore never touches next_run_at; the claim owns
 // the schedule. See supabase/migrations/*_autopilot.sql.
 import type { AutopilotConfig } from "@/lib/autopilot";
+import { DEFAULT_CHAIN_KEY, isChainKey, type ChainKey } from "@/lib/chains";
 import { supabaseAdmin } from "@/lib/server/supabase";
 
 const TABLE = "autopilots";
 
 type Row = Record<string, unknown>;
+
+/** Rows written before the multi-chain migration have no `chain` → Base (the default). */
+function chainOf(v: unknown): ChainKey {
+  return isChainKey(v) ? v : DEFAULT_CHAIN_KEY;
+}
 
 function rowToConfig(r: Row): AutopilotConfig {
   return {
@@ -23,6 +29,7 @@ function rowToConfig(r: Row): AutopilotConfig {
     walletId: String(r.wallet_id),
     owner: r.owner as `0x${string}`,
     smartAccount: r.smart_account as `0x${string}`,
+    chain: chainOf(r.chain),
     goal: String(r.goal),
     amountUsd: Number(r.amount_usd),
     cadence: r.cadence as AutopilotConfig["cadence"],
@@ -44,6 +51,7 @@ function configToRow(c: AutopilotConfig) {
     wallet_id: c.walletId,
     owner: c.owner,
     smart_account: c.smartAccount,
+    chain: c.chain,
     goal: c.goal,
     amount_usd: c.amountUsd,
     cadence: c.cadence,
@@ -110,6 +118,8 @@ export interface RunHolding {
 
 export interface RunLog {
   userId: string;
+  /** Chain the run executed on. */
+  chain: ChainKey;
   ranAt: number;
   amountUsd: number;
   assessedRiskBps?: number;
@@ -130,6 +140,7 @@ export async function listRuns(userId: string, limit = 20): Promise<RunLog[]> {
   if (error) throw new Error(error.message);
   return ((data as Row[]) ?? []).map((r) => ({
     userId: String(r.user_id),
+    chain: chainOf(r.chain),
     ranAt: Number(r.ran_at),
     amountUsd: Number(r.amount_usd),
     assessedRiskBps: r.assessed_risk_bps == null ? undefined : Number(r.assessed_risk_bps),
@@ -145,6 +156,7 @@ export async function logRun(entry: RunLog): Promise<void> {
   try {
     const { error } = await supabaseAdmin().from("autopilot_runs").insert({
       user_id: entry.userId,
+      chain: entry.chain,
       ran_at: entry.ranAt,
       amount_usd: entry.amountUsd,
       assessed_risk_bps: entry.assessedRiskBps ?? null,

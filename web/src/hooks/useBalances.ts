@@ -1,6 +1,6 @@
 "use client";
 
-// Money reads.
+// Money reads (chain-aware).
 //
 //   useUsdcBalance(address)   -> spendable dollars (USDC, 6dp; one batched RPC read)
 //   usePortfolio(address)     -> fully-valued holdings from /api/portfolio
@@ -9,11 +9,16 @@
 // + real 1D market moves) and rendered verbatim here — the browser does no
 // balance fan-out and no qty×price math. That keeps RPC traffic to ~one request
 // per poll and makes every screen agree on the same numbers.
+//
+// Every query is keyed by the active chain, so switching networks in Settings
+// refetches against the right USDC / asset set (and never mixes the two).
 import { useCallback } from "react";
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
-import { publicClient } from "@/lib/wagmi";
+import { getPublicClient } from "@/lib/wagmi";
 import { ERC20_ABI } from "@/lib/abis";
-import { USDC, STOCKS, ALL_ASSETS, type Asset } from "@/lib/mantle";
+import { assetBySymbol, type Asset, type StaxChain } from "@/lib/chains";
+import { useChain } from "@/lib/chains/active";
+import { authedFetch } from "@/lib/authedFetch";
 import { fromUnits } from "@/lib/format";
 import { useDemo } from "@/components/demo/DemoProvider";
 
@@ -54,22 +59,23 @@ export interface Portfolio {
   totalUsd: number;
 }
 
-/** Spendable USDC balance (number, dollars). */
+/** Spendable USDC balance (number, dollars) on the active chain. */
 export function useUsdcBalance(address?: string) {
   const demo = useDemo();
+  const chain = useChain();
   const query = useQuery({
-    queryKey: ["usdc-balance", address],
+    queryKey: ["usdc-balance", chain.key, address],
     enabled: !demo && Boolean(address),
     refetchInterval: 30_000,
     ...LIVE_BALANCE_OPTS,
     queryFn: async (): Promise<{ raw: bigint; value: number }> => {
-      const raw = (await publicClient.readContract({
-        address: USDC.address as `0x${string}`,
+      const raw = (await getPublicClient(chain).readContract({
+        address: chain.usdc.address,
         abi: ERC20_ABI,
         functionName: "balanceOf",
         args: [address as `0x${string}`],
       })) as bigint;
-      return { raw, value: fromUnits(raw, USDC.decimals) };
+      return { raw, value: fromUnits(raw, chain.usdc.decimals) };
     },
   });
   if (demo) return { ...query, data: demo.usdc, isLoading: false, isPending: false } as typeof query;
@@ -93,16 +99,17 @@ interface PortfolioApiResponse {
   holdings: PortfolioApiHolding[];
 }
 
-/** The user's holdings, valued server-side. See /api/portfolio. */
+/** The user's holdings on the active chain, valued server-side. See /api/portfolio. */
 export function usePortfolio(address?: string) {
   const demo = useDemo();
+  const chain = useChain();
   const query = useQuery({
-    queryKey: ["portfolio", address],
+    queryKey: ["portfolio", chain.key, address],
     enabled: !demo && Boolean(address),
     refetchInterval: 30_000,
     ...LIVE_BALANCE_OPTS,
     queryFn: async (): Promise<Portfolio> => {
-      const res = await fetch(`/api/portfolio?address=${address}`);
+      const res = await authedFetch(`/api/portfolio?address=${address}`);
       const json = await res.json();
       if (!res.ok) {
         throw new Error(typeof json?.error === "string" ? json.error : "Couldn't load portfolio.");
@@ -110,10 +117,11 @@ export function usePortfolio(address?: string) {
       const api = json as PortfolioApiResponse;
       const holdings: Holding[] = [];
       for (const h of api.holdings) {
-        const asset = ALL_ASSETS.find((a) => a.symbol === h.symbol);
+        const asset = assetBySymbol(chain, h.symbol);
         if (!asset) continue;
         holdings.push({
           asset,
+          // Raw units in the asset's own decimals (Base stocks 8, aBasUSDC 6, Mantle xStocks 18).
           raw: BigInt(h.raw),
           qty: h.qty,
           valueUsd: h.valueUsd ?? undefined,
@@ -134,9 +142,9 @@ export function usePortfolio(address?: string) {
   return query;
 }
 
-/** True if `symbol` is a buyable stock-tier xStock (the only tier the executor routes today). */
-export function isBuyableStock(symbol: string): boolean {
-  return STOCKS.some((s) => s.symbol === symbol);
+/** True if `symbol` is a stock-tier asset on `chain` (not necessarily routable yet — see isRoutable). */
+export function isBuyableStock(chain: StaxChain, symbol: string): boolean {
+  return chain.assets.stocks.some((s) => s.symbol === symbol);
 }
 
 /**

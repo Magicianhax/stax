@@ -1,13 +1,14 @@
 "use client";
 
-// useTransfer — send a held token out of the smart account to any address, as a
-// single gasless UserOp: [ token.transfer(to, amount) ]. Works for USDC and any
-// xStock the user holds. Demo mode never touches the chain.
+// useTransfer — send a held token out of the smart account to any address on the
+// active chain, as a single gasless UserOp: [ token.transfer(to, amount) ]. Works
+// for USDC and any token the user holds. Demo mode never touches the chain.
 import { useCallback, useState } from "react";
 import { encodeFunctionData, isAddress } from "viem";
 import { useActiveWallet } from "@/hooks/useActiveWallet";
 import { sendSponsoredCalls, type Call } from "@/lib/aa";
 import { asViemProvider } from "@/lib/provider";
+import { useChain } from "@/lib/chains/active";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { useRefreshBalances } from "@/hooks/useBalances";
 import { ERC20_ABI } from "@/lib/abis";
@@ -27,6 +28,7 @@ export interface TransferResult {
 
 export function useTransfer() {
   const activeWallet = useActiveWallet();
+  const chain = useChain();
   const demo = useDemo();
   const refreshBalances = useRefreshBalances();
   const [phase, setPhase] = useState<Phase>("idle");
@@ -54,7 +56,7 @@ export function useTransfer() {
 
       // Validate before any chain/demo work.
       if (!isAddress(to)) {
-        setError("That doesn't look like a valid Mantle address.");
+        setError(`That doesn't look like a valid ${chain.name} address.`);
         setPhase("error");
         return;
       }
@@ -88,7 +90,7 @@ export function useTransfer() {
 
         setPhase("sending");
         const provider = asViemProvider(await wallet.getEthereumProvider());
-        const receipt = await sendSponsoredCalls(provider, [transferCall]);
+        const receipt = await sendSponsoredCalls(provider, [transferCall], chain);
         setResult({
           txHash: receipt.receipt.transactionHash as `0x${string}`,
           symbol,
@@ -102,7 +104,7 @@ export function useTransfer() {
         setPhase("error");
       }
     },
-    [activeWallet, demo, refreshBalances],
+    [activeWallet, chain, demo, refreshBalances],
   );
 
   return { phase, error, result, busy: phase === "sending", send, reset };

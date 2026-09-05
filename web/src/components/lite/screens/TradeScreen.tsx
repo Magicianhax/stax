@@ -8,7 +8,8 @@
 // to 50 / 100 / 300 bps (the on-chain amountOutMinimum is the real protection).
 // On success we route to the plain-words receipt.
 import { useEffect, useState } from "react";
-import { ALL_ASSETS, isRoutable, type Asset } from "@/lib/mantle";
+import { isRoutable, type Asset } from "@/lib/chains";
+import { useChain } from "@/lib/chains/active";
 import { useQuote, useSellQuote } from "@/hooks/useQuote";
 import { useSwap } from "@/hooks/useSwap";
 import { useUsdcBalance, usePortfolio } from "@/hooks/useBalances";
@@ -36,12 +37,13 @@ export function TradeScreen({
   symbol: string;
   initialSide?: "buy" | "sell";
 }) {
-  const asset: Asset = ALL_ASSETS.find((a) => a.symbol === symbol) ?? ALL_ASSETS[0];
+  const chain = useChain();
+  const asset: Asset = chain.assets.all.find((a) => a.symbol === symbol) ?? chain.assets.all[0];
   const d = displayFor(asset.symbol, asset.name);
   // Sellable = anything with a validated swap route (stocks via Fluxion,
   // mETH via its reversed Agni route). `coming` assets (e.g. sUSDe, whose pool
   // lost liquidity) are never buyable or sellable, even if a route entry exists.
-  const sellable = isRoutable(asset.symbol) && !d.coming;
+  const sellable = isRoutable(chain, asset.symbol) && !d.coming;
   // Real market context: live on-chain spot + real 1D move/series, with the
   // presentational reference as the offline fallback.
   const { priceUsd: livePrice } = usePrice(asset.symbol);

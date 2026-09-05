@@ -1,9 +1,11 @@
 import type { NextRequest } from "next/server";
 import { AllocateRequestSchema } from "@/lib/allocation-schema";
 import { buildAllocation, ALLOCATE_MODEL } from "@/lib/server/allocate";
+import { chainFromRequest } from "@/lib/server/chain";
 import { verifyRequest } from "@/lib/server/privyAuth";
 import { rateLimit } from "@/lib/server/rateLimit";
 import { unauthorized, badRequest, tooManyRequests, serverError } from "@/lib/server/respond";
+import type { AllocateResult } from "@/lib/invest-types";
 
 // Uses the Anthropic API + user input — never cache.
 export const dynamic = "force-dynamic";
@@ -22,6 +24,9 @@ export async function POST(req: NextRequest) {
   const limit = rateLimit(`allocate:${user.userId}`, 12, 60_000);
   if (!limit.ok) return tooManyRequests(limit.retryAfter);
 
+  // The chain decides the investable universe Vera may allocate across.
+  const chain = chainFromRequest(req);
+
   let body: ReturnType<typeof AllocateRequestSchema.parse>;
   try {
     body = AllocateRequestSchema.parse(await req.json());
@@ -30,12 +35,14 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const allocation = await buildAllocation(body.goal, body.amountUsd, body.riskTolerance);
-    return Response.json({
+    const allocation = await buildAllocation(chain, body.goal, body.amountUsd, body.riskTolerance);
+    const result: AllocateResult = {
       ...allocation,
       amountUsd: body.amountUsd,
       model: ALLOCATE_MODEL,
-    });
+      chain: chain.key,
+    };
+    return Response.json(result);
   } catch (err) {
     return serverError("allocate", err);
   }

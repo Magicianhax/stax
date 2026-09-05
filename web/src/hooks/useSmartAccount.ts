@@ -1,16 +1,22 @@
 "use client";
 
-// Resolves the user's smart-account (ERC-4337) address — the address that
-// actually holds funds and executes invests, NOT the Privy EOA owner.
-// This is the address we show, fund, and read balances for.
+// Resolves the user's smart-account (ERC-4337) address on the ACTIVE chain —
+// the address that actually holds funds and executes invests, NOT the Privy EOA
+// owner. This is the address we show, fund, and read balances for.
+//
+// SimpleAccount v0.7 derives the same address on every chain for the same owner
+// + salt, but we still re-derive per chain (and invalidate on switch) so the
+// per-chain client wiring in lib/aa.ts is warmed up for the network in use.
 import { useEffect, useRef, useState } from "react";
 import { getSmartAccountClient } from "@/lib/aa";
 import { asViemProvider } from "@/lib/provider";
+import { useChain } from "@/lib/chains/active";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { useActiveWallet } from "@/hooks/useActiveWallet";
 
 export function useSmartAccount() {
   const demo = useDemo();
+  const chain = useChain();
   const wallet = useActiveWallet();
   const [address, setAddress] = useState<`0x${string}` | null>(null);
   const [loading, setLoading] = useState(false);
@@ -20,8 +26,8 @@ export function useSmartAccount() {
   // on many internal updates, so `wallet` is a new reference almost every render.
   // Keying the derivation on that object made this effect re-run constantly —
   // toggling loading/address and flickering the balance. Key on the STABLE owner
-  // address instead (only re-derive when the user/wallet actually changes), and
-  // read the latest wallet object through a ref.
+  // address + chain key instead (only re-derive when the user/wallet/network
+  // actually changes), and read the latest wallet object through a ref.
   const ownerAddress = wallet?.address;
   const walletRef = useRef(wallet);
   useEffect(() => {
@@ -46,7 +52,7 @@ export function useSmartAccount() {
       }
       try {
         const provider = asViemProvider(await w.getEthereumProvider());
-        const { account } = await getSmartAccountClient(provider);
+        const { account } = await getSmartAccountClient(provider, chain);
         if (!cancelled) setAddress(account.address as `0x${string}`);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Couldn't load your account.");
@@ -58,8 +64,8 @@ export function useSmartAccount() {
     return () => {
       cancelled = true;
     };
-  }, [ownerAddress]);
+  }, [ownerAddress, chain]);
 
-  if (demo) return { address: demo.address, loading: false, error: null };
-  return { address, loading, error };
+  if (demo) return { address: demo.address, loading: false, error: null, chain };
+  return { address, loading, error, chain };
 }

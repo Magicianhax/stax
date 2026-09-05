@@ -5,20 +5,22 @@ import "server-only";
 // embedded wallet), not by a browser EIP-1193 provider. Same SimpleAccount owner
 // address ⇒ same smart-account address the user funds and sees in the app.
 //
+// Chain-aware: the bundler/paymaster, public client, and viem chain all come from
+// the `StaxChain` the autopilot config is stored for.
+//
 // Requires: PRIVY_APP_SECRET (+ app id), PRIVY_AUTHORIZATION_KEY (the wallet-API
 // authorization private key, base64 PKCS8), and PIMLICO_API_KEY.
-import { createPublicClient, http, type Address } from "viem";
-import { mantle } from "viem/chains";
+import { http, type Address } from "viem";
 import { entryPoint07Address } from "viem/account-abstraction";
 import { createSmartAccountClient } from "permissionless";
 import { toSimpleSmartAccount } from "permissionless/accounts";
 import { createPimlicoClient } from "permissionless/clients/pimlico";
 import { PrivyClient } from "@privy-io/node";
 import { createViemAccount } from "@privy-io/node/viem";
+import type { StaxChain } from "@/lib/chains/types";
+import { serverClient } from "@/lib/server/chain";
 
 const ENTRY_POINT = { address: entryPoint07Address, version: "0.7" } as const;
-const RPC_URL = process.env.NEXT_PUBLIC_MANTLE_RPC_URL || "https://rpc.mantle.xyz";
-const publicClient = createPublicClient({ chain: mantle, transport: http(RPC_URL) });
 
 let privyClient: PrivyClient | null = null;
 function privy(): PrivyClient {
@@ -35,19 +37,20 @@ function authorizationContext() {
   return { authorization_private_keys: [key] };
 }
 
-function bundlerUrl(): string {
+/** Pimlico bundler + paymaster endpoint for `chain` (server-side, key attached). */
+export function bundlerUrl(chain: StaxChain): string {
   const key = process.env.PIMLICO_API_KEY;
   if (!key) throw new Error("PIMLICO_API_KEY is not configured.");
-  return `https://api.pimlico.io/v2/${mantle.id}/rpc?apikey=${key}`;
+  return `https://api.pimlico.io/v2/${chain.id}/rpc?apikey=${key}`;
 }
 
 /**
- * Build the smart-account client for a delegated wallet. `owner` is the embedded
- * EOA address; `walletId` is the Privy wallet id the server is authorized to sign
- * for. Gas is sponsored by the Pimlico paymaster.
+ * Build the smart-account client for a delegated wallet on `chain`. `owner` is
+ * the embedded EOA address; `walletId` is the Privy wallet id the server is
+ * authorized to sign for. Gas is sponsored by the Pimlico paymaster.
  */
-export async function getServerSmartAccountClient(walletId: string, owner: Address) {
-  const url = bundlerUrl();
+export async function getServerSmartAccountClient(chain: StaxChain, walletId: string, owner: Address) {
+  const url = bundlerUrl(chain);
 
   // Privy-signed owner: signMessage / signTypedData go to the Privy wallet API,
   // authorized by PRIVY_AUTHORIZATION_KEY — no browser, no user interaction.
@@ -58,20 +61,20 @@ export async function getServerSmartAccountClient(walletId: string, owner: Addre
   });
 
   const pimlico = createPimlicoClient({
-    chain: mantle,
+    chain: chain.chain,
     transport: http(url),
     entryPoint: ENTRY_POINT,
   });
 
   const account = await toSimpleSmartAccount({
-    client: publicClient,
+    client: serverClient(chain),
     owner: ownerAccount,
     entryPoint: ENTRY_POINT,
   });
 
   const smartAccountClient = createSmartAccountClient({
     account,
-    chain: mantle,
+    chain: chain.chain,
     bundlerTransport: http(url),
     paymaster: pimlico,
     userOperation: {

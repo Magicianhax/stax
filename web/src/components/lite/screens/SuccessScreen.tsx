@@ -7,6 +7,7 @@ import { useEffect } from "react";
 import { Confetti, SectionTitle, HoldingRow, Icon } from "@/components/design";
 import { toTile, catFor } from "@/lib/displayAssets";
 import { usd, txUrl } from "@/lib/format";
+import { useChain } from "@/lib/chains/active";
 import { haptic } from "@/lib/haptics";
 import type { InvestSuccess } from "@/lib/invest-types";
 
@@ -18,6 +19,7 @@ export function SuccessScreen({
   onDone: () => void;
 }) {
   const { amountUsd, holdings, txHash } = success;
+  const chain = useChain();
 
   // Celebrate the moment with a short success buzz (once, on arrival).
   useEffect(() => {
@@ -138,7 +140,7 @@ export function SuccessScreen({
                 sig {success.verification.signature.slice(0, 8)}…{success.verification.signature.slice(-6)}
               </span>
               <a
-                href={txUrl(txHash)}
+                href={txUrl(txHash, chain)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="tap"
@@ -150,7 +152,7 @@ export function SuccessScreen({
           </div>
         ) : (
           <a
-            href={txUrl(txHash)}
+            href={txUrl(txHash, chain)}
             target="_blank"
             rel="noopener noreferrer"
             className="card tap"

@@ -7,7 +7,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "Stax · AI broker for tokenized stocks",
     short_name: "Stax",
     description:
-      "Invest in tokenized stocks on Mantle with an AI copilot. Email login, no seed phrase, gasless.",
+      "Invest in tokenized stocks on Base with an AI copilot. Email login, no seed phrase, gasless. Mantle supported too.",
     start_url: "/app",
     scope: "/",
     display: "standalone",

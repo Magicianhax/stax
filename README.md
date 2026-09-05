@@ -7,7 +7,7 @@
 
 **Own the world's best companies — onchain, in one tap.**
 
-Buy fractional shares of real tokenized stocks on Mantle, guided by **Vera**, an AI agent
+Buy fractional shares of real tokenized stocks on Base and Mantle, guided by **Vera**, an AI agent
 whose every recommendation is **signed and verified on-chain before a cent moves**.
 
 An AI agent that turns plain-language goals into risk-managed, verifiable RWA portfolios — built for the **Mantle Turing Test Hackathon 2026**.
@@ -16,7 +16,7 @@ An AI agent that turns plain-language goals into risk-managed, verifiable RWA po
 
 ### [▶ Live at stax.best](https://stax.best)
 
-[Watch the full demo](web/public/stax.mp4) · [Contracts on Mantlescan ↓](#deployed-contracts-mantle-mainnet--chainid-5000--verified-on-mantlescan)
+[Watch the full demo](web/public/stax.mp4) · [Contracts on Base ↓](#deployed-contracts-base-mainnet--chainid-8453) · [Contracts on Mantlescan ↓](#deployed-contracts-mantle-mainnet--chainid-5000--verified-on-mantlescan)
 
 </div>
 
@@ -54,6 +54,19 @@ No off-chain DB. `StaxExecutor` emits an event on every action; the app reads th
 
 Vera's reputation comes from `IdentityRegistry.reputationScore(agentId)`. Anyone can audit her
 entire history on-chain — nothing is editable after the fact.
+
+## Deployed contracts (Base mainnet · chainId 8453)
+
+Base is the default chain (Coinbase tokenized stocks · Uniswap V3 · Aave v3). Same three contracts,
+same source; deployed with `npm run deploy:base` (see [Deploy to Base](#deploy-to-base)).
+
+| Contract | Address | Role |
+|---|---|---|
+| **StaxExecutor** | _pending deploy_ | Commits the recommendation, calls the verifier, runs the swaps (non-custodial), emits the tracking events. Whitelists: Uniswap V3 SwapRouter02 + Aave v3 Pool; Coinbase stocks (NVDAc, GOOGLc, AAPLc, METAc, SPCXc + the coming TSLAc, AMZNc, MSFTc, MSTRc, COINc, CRCLc), cbBTC, WETH, aBasUSDC. |
+| **InferenceVerifier** | _pending deploy_ | EIP-712 gate: `verify()` reverts unless the signature recovers to the agent signer, `assessedRisk ≤ maxRisk`, and `block.timestamp ≤ expiry`. |
+| **IdentityRegistry** | _pending deploy_ | ERC-8004-style agent identity (Vera = **agentId 1**) + reputation/feedback. |
+
+Agent signer _pending deploy_ · executor deploy block _pending deploy_ · verified on Basescan _pending deploy_.
 
 ## Deployed contracts (Mantle mainnet · chainId 5000 · verified on Mantlescan)
 
@@ -99,13 +112,14 @@ subscription. (`web/src/lib/fees.ts`, configurable via `NEXT_PUBLIC_STAX_FEE_BPS
 
 Next.js 16 (App Router, PWA) · Tailwind v4 · **Privy** (email/passkey embedded wallet,
 delegated session signers) · **Pimlico + permissionless** (gasless ERC-4337, SimpleAccount v0.7)
-· viem / wagmi · **Anthropic** via the AI SDK (Vera) · Fluxion / Agni / Merchant Moe (Mantle
-DEXes) · Backed xStocks · Alchemy RPC + Etherscan V2 (tx history) · Hardhat contracts.
+· viem / wagmi · **Anthropic** via the AI SDK (Vera) · Uniswap V3 + Aave v3 (Base) · Fluxion /
+Agni / Merchant Moe (Mantle DEXes) · Coinbase tokenized stocks + Backed xStocks · Alchemy RPC +
+Etherscan V2 (tx history) · Hardhat contracts.
 
 ## Run it locally
 
 ```bash
-# contracts are already deployed + verified on mainnet; only needed to redeploy
+# contracts are already deployed + verified on Mantle; Base needs a one-time deploy (below)
 cd contracts && npm install
 
 cd ../web && npm install
@@ -121,6 +135,19 @@ inferences), `ETHERSCAN_API_KEY`, the deployed contract addresses, and
 
 > Funds live on the **smart-account** address (the ERC-4337 account), not the Privy embedded EOA
 > that owns it. The app always derives and shows the smart account.
+
+### Deploy to Base
+
+```bash
+cd contracts && cp .env.example .env   # PRIVATE_KEY (a little ETH on Base), AGENT_SIGNER_ADDRESS, ETHERSCAN_API_KEY
+npm run check:base                     # read-only: tokens, decimals, router factory, Aave aToken, pools
+npm run deploy:base                    # deploys the 3 contracts, whitelists venues + assets, registers Vera
+```
+
+`deploy:base` prints the `NEXT_PUBLIC_*_BASE` lines for `web/.env.local` and the three
+`npx hardhat verify --network base ...` commands (Etherscan V2 key covers Basescan). Later, when a
+"coming soon" stock gets its USDC pool: set `STAX_EXECUTOR_BASE` (and optionally `EXTRA_ASSETS`)
+in `contracts/.env` and run `npm run enable:base`. `npm run deploy:base-sepolia` targets Base Sepolia.
 
 ## Repo layout
 

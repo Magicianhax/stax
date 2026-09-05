@@ -1,5 +1,6 @@
 // Small, jargon-free formatting helpers for the Stax UI.
 // Copy rule: we say "free" not "gas", "account" not "wallet".
+import { explorerAddress, explorerTx, type StaxChain } from "@/lib/chains";
 
 const USD = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -68,12 +69,12 @@ export function riskLabel(bps: number): { label: string; value: number; tone: "s
   return { label: "Spicy", value, tone: "danger" };
 }
 
-/** Mantlescan tx link. */
-export function txUrl(hash: string): string {
-  return `https://mantlescan.xyz/tx/${hash}`;
+/** Block-explorer tx link on `chain` (Basescan / Mantlescan). */
+export function txUrl(hash: string, chain: StaxChain): string {
+  return explorerTx(chain, hash);
 }
 
-/** Mantlescan address/token link. */
-export function addressUrl(addr: string): string {
-  return `https://mantlescan.xyz/address/${addr}`;
+/** Block-explorer address/token link on `chain`. */
+export function addressUrl(addr: string, chain: StaxChain): string {
+  return explorerAddress(chain, addr);
 }

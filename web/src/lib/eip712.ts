@@ -7,21 +7,22 @@
 // The `server-only` import is a build-time guard: if this module is ever pulled
 // into a client bundle (which would risk leaking AGENT_SIGNER_PRIVATE_KEY), the
 // build fails loudly instead of silently shipping it.
+//
+// Multi-chain: the EIP-712 domain is per chain (chainId + that chain's verifier),
+// so every signer entrypoint takes the `StaxChain` explicitly.
 import "server-only";
 import { keccak256, toHex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { INFERENCE_VERIFIER as VERIFIER_ADDRESS } from "./mantle";
+import type { StaxChain } from "./chains/types";
 import type { Allocation } from "./allocation-schema";
 
-const CHAIN_ID = 5000;
-
-/** EIP-712 domain — MUST match the deployed InferenceVerifier exactly. */
-export function inferenceDomain() {
+/** EIP-712 domain — MUST match the InferenceVerifier deployed on `chain` exactly. */
+export function inferenceDomain(chain: StaxChain) {
   return {
     name: "StaxInferenceVerifier",
     version: "1",
-    chainId: CHAIN_ID,
-    verifyingContract: VERIFIER_ADDRESS,
+    chainId: chain.id,
+    verifyingContract: chain.contracts.verifier,
   } as const;
 }
 
@@ -66,11 +67,14 @@ export function recHash(allocation: Allocation): `0x${string}` {
   return keccak256(toHex(JSON.stringify(allocation)));
 }
 
-/** Sign a RiskInference; returns the 65-byte ECDSA signature as 0x-hex. */
-export async function signRiskInference(input: RiskInferenceInput): Promise<`0x${string}`> {
+/** Sign a RiskInference for `chain`; returns the 65-byte ECDSA signature as 0x-hex. */
+export async function signRiskInference(
+  chain: StaxChain,
+  input: RiskInferenceInput,
+): Promise<`0x${string}`> {
   const account = agentAccount();
   return account.signTypedData({
-    domain: inferenceDomain(),
+    domain: inferenceDomain(chain),
     types: RISK_INFERENCE_TYPES,
     primaryType: "RiskInference",
     message: {

@@ -2,7 +2,7 @@
 
 // Client-side provider stack for Stax.
 //
-//   <PrivyProvider>        email + passkey login, gasless embedded wallet, default chain Mantle
+//   <PrivyProvider>        email + passkey login, gasless embedded wallet, default chain Base (Mantle supported)
 //     <QueryClientProvider> react-query cache (shared by wagmi + app hooks)
 //       <WagmiProvider>    chain context + read transports (see lib/wagmi.ts)
 //         {children}
@@ -14,7 +14,8 @@ import { PrivyProvider } from "@privy-io/react-auth";
 import { WagmiProvider } from "wagmi";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
-import { mantle, wagmiConfig } from "@/lib/wagmi";
+import { wagmiConfig } from "@/lib/wagmi";
+import { BASE, MANTLE } from "@/lib/chains";
 import { ServiceWorkerRegistrar } from "@/components/pwa/ServiceWorkerRegistrar";
 
 const PRIVY_APP_ID = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
@@ -46,8 +47,8 @@ export function Providers({ children }: { children: ReactNode }) {
         // Email, Google, X (Twitter) — or bring your own EOA wallet.
         // (Passkey is omitted: it's currently disabled in the Privy dashboard. Re-add "passkey" once enabled there.)
         loginMethods: ["email", "google", "twitter", "wallet"],
-        defaultChain: mantle,
-        supportedChains: [mantle],
+        defaultChain: BASE.chain,
+        supportedChains: [BASE.chain, MANTLE.chain],
         // Social/email users get a no-seed-phrase embedded wallet; users who connect
         // their own wallet keep using that EOA (it owns their gasless smart account).
         embeddedWallets: {
@@ -62,7 +63,7 @@ export function Providers({ children }: { children: ReactNode }) {
           showWalletLoginFirst: false, // email + social first (beginner-friendly)
           landingHeader: "Welcome to Stax",
           loginMessage: "Invest in real companies, in plain words.",
-          walletChainType: "ethereum-only", // Mantle is EVM; hide Solana wallets
+          walletChainType: "ethereum-only", // Base + Mantle are EVM; hide Solana wallets
           walletList: ["detected_wallets", "metamask", "coinbase_wallet", "wallet_connect", "rainbow"],
         },
       }}

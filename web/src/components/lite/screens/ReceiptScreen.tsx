@@ -5,6 +5,7 @@
 // for Vera's sample recorded recommendations we show the illustrative reference.
 import { Icon, Seal } from "@/components/design";
 import { usd, txUrl } from "@/lib/format";
+import { useChain } from "@/lib/chains/active";
 import { iconBtn } from "./primitives";
 
 export function ReceiptScreen({
@@ -23,7 +24,8 @@ export function ReceiptScreen({
   date?: string;
 }) {
   // Live receipts have a real tx; sample records only have an illustrative ref.
-  const explorerHref = txHash ? txUrl(txHash) : undefined;
+  const chain = useChain();
+  const explorerHref = txHash ? txUrl(txHash, chain) : undefined;
   const showAmount = amount !== undefined;
 
   return (

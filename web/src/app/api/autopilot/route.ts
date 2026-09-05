@@ -3,9 +3,12 @@
 //   POST   → create/update (also resets the schedule)
 //   DELETE → turn it off
 // Authed (Privy session). The actual autonomous execution lives in the cron route.
+// The config carries the chain it runs on: `chain` in the body wins, else the
+// request's x-stax-chain header / ?chain= (Base default).
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { isAddress } from "viem";
+import { chainKeyFromRequest } from "@/lib/server/chain";
 import { verifyRequest } from "@/lib/server/privyAuth";
 import { rateLimit } from "@/lib/server/rateLimit";
 import { unauthorized, badRequest, tooManyRequests, serverError } from "@/lib/server/respond";
@@ -19,6 +22,7 @@ const ConfigInput = z.object({
   walletId: z.string().min(1), // Privy embedded-wallet id (server signs for this)
   owner: addr, // embedded EOA (smart-account owner)
   smartAccount: addr, // the AA address that holds funds + executes
+  chain: z.enum(["base", "mantle"]).optional(), // ChainKey; defaults to the request chain
   goal: z.string().min(1).max(600),
   amountUsd: z.number().positive().max(100_000),
   cadence: z.enum(["daily", "weekly", "biweekly", "monthly"]),
@@ -55,6 +59,7 @@ export async function POST(req: NextRequest) {
       walletId: body.walletId,
       owner: body.owner as `0x${string}`,
       smartAccount: body.smartAccount as `0x${string}`,
+      chain: body.chain ?? chainKeyFromRequest(req),
       goal: body.goal,
       amountUsd: body.amountUsd,
       cadence: body.cadence,

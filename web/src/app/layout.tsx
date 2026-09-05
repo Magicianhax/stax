@@ -51,6 +51,8 @@ export const metadata: Metadata = {
     "invest with AI",
     "AI investing assistant",
     "buy stocks crypto",
+    "Base",
+    "Coinbase tokenized stocks",
     "Mantle",
     "no seed phrase wallet",
     "gasless investing",

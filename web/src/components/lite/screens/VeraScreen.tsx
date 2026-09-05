@@ -10,12 +10,14 @@ import { useVeraRecord } from "@/hooks/useVeraRecord";
 import { VERA } from "@/lib/veraData";
 import { Icon, VeraOrb, SectionTitle, Seal, type IconName } from "@/components/design";
 import { addressUrl, shortAddress, usd, riskLabel } from "@/lib/format";
+import { useChain } from "@/lib/chains/active";
 
 export function VeraScreen({
   go,
 }: {
   go: (target: string | number, params?: Record<string, unknown>) => void;
 }) {
+  const chain = useChain();
   const { data: identity } = useAgentIdentity();
   const { data: record, isLoading: recordLoading } = useVeraRecord();
 
@@ -54,7 +56,7 @@ export function VeraScreen({
           </div>
           {identity && (
             <a
-              href={addressUrl(identity.registry)}
+              href={addressUrl(identity.registry, chain)}
               target="_blank"
               rel="noopener noreferrer"
               className="tap"

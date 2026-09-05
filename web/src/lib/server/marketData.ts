@@ -1,15 +1,15 @@
 // Server-only market history for Stax assets — real charts + real daily moves.
 //
-//   - Stocks/ETFs (AAPL … SPY, QQQ): Yahoo Finance chart API. Our xStocks track
-//     real equities and our tickers ARE the real tickers, so the underlying
-//     market's history is the honest series to draw. The price you trade at is
-//     still the on-chain pool spot (/api/prices) — the two track closely.
-//   - sUSDe / mETH / FBTC / USDY: CoinGecko market charts (the underlying token).
-//   - USDC / mUSD: flat $1 series, synthesized (they are dollar pegs).
+//   - Stocks/ETFs (AAPL … SPY, QQQ): Yahoo Finance chart API. Tokenized stocks
+//     track real equities and our tickers ARE the real tickers (on every chain),
+//     so the underlying market's history is the honest series to draw. The price
+//     you trade at is still the on-chain pool spot (/api/prices) — they track closely.
+//   - Crypto / yield tokens (BTC, ETH, sUSDe, mETH, FBTC, USDY): CoinGecko charts.
+//   - USDC / aUSDC / mUSD: flat $1 series, synthesized (they are dollar pegs).
 //
 // Everything is cached in-memory per instance (promise-deduped) so a screenful
 // of clients costs at most one upstream call per symbol per TTL window.
-import { STOCKS, ALL_ASSETS } from "@/lib/mantle";
+import type { StaxChain } from "@/lib/chains/types";
 
 export type MarketRange = "1D" | "1W" | "1M" | "1Y" | "All";
 export const MARKET_RANGES: MarketRange[] = ["1D", "1W", "1M", "1Y", "All"];
@@ -41,11 +41,16 @@ function ttlCache<T>(key: string, ttlMs: number, load: () => Promise<T>): Promis
 }
 
 // ── source mapping ────────────────────────────────────────────────────────────
-const STOCK_SYMBOLS = new Set(STOCKS.map((s) => s.symbol));
+function isStock(chain: StaxChain, symbol: string): boolean {
+  return chain.assets.stocks.some((s) => s.symbol === symbol);
+}
 
-// CoinGecko ids for the non-equity assets. FBTC maps to bitcoin itself (it IS
-// BTC exposure and CG's data for it is far denser than the wrapper's listing).
+// CoinGecko ids for the non-equity assets (shared across chains — the symbol is
+// the same exposure everywhere). FBTC / BTC map to bitcoin itself: it IS BTC
+// exposure and CG's data for it is far denser than any wrapper's listing.
 const COINGECKO_IDS: Record<string, string> = {
+  BTC: "bitcoin",
+  ETH: "ethereum",
   sUSDe: "ethena-staked-usde",
   mETH: "mantle-staked-ether",
   FBTC: "bitcoin",
@@ -53,7 +58,7 @@ const COINGECKO_IDS: Record<string, string> = {
 };
 
 // Flat dollar pegs — a real fetch would just draw the same line.
-const FLAT_DOLLAR = new Set(["USDC", "mUSD"]);
+const FLAT_DOLLAR = new Set(["USDC", "aUSDC", "mUSD"]);
 
 // ── Yahoo Finance (equities) ──────────────────────────────────────────────────
 const YAHOO_RANGES: Record<MarketRange, { range: string; interval: string }> = {
@@ -144,11 +149,14 @@ const HISTORY_TTL: Record<MarketRange, number> = {
   All: 6 * 60 * 60_000,
 };
 
-/** Real price history for one asset, or null when no source exists / upstream fails. */
-export function getHistory(symbol: string, range: MarketRange): Promise<MarketHistory | null> {
+/** Real price history for one asset on `chain`, or null when no source exists / upstream fails. */
+export function getHistory(chain: StaxChain, symbol: string, range: MarketRange): Promise<MarketHistory | null> {
+  // Stock history is chain-independent (same real ticker), so it's cached without
+  // the chain key; token/peg lookups are symbol-keyed too. The chain only decides
+  // which source applies.
   return ttlCache(`history:${symbol}:${range}`, HISTORY_TTL[range], async () => {
     if (FLAT_DOLLAR.has(symbol)) return { series: Array(20).fill(1), changePct: 0 };
-    if (STOCK_SYMBOLS.has(symbol)) return yahooHistory(symbol, range);
+    if (isStock(chain, symbol)) return yahooHistory(symbol, range);
     const cgId = COINGECKO_IDS[symbol];
     if (cgId) return coingeckoHistory(cgId, range);
     return null;
@@ -156,15 +164,15 @@ export function getHistory(symbol: string, range: MarketRange): Promise<MarketHi
 }
 
 /**
- * 1D change + row sparkline for every asset that has a live source. Powers the
- * portfolio rows and the market list. One cached object for all clients.
+ * 1D change + row sparkline for every asset on `chain` that has a live source.
+ * Powers the portfolio rows and the market list. One cached object per chain.
  */
-export function getDaySummary(): Promise<Record<string, DaySummaryEntry>> {
-  return ttlCache("day-summary", 5 * 60_000, async () => {
+export function getDaySummary(chain: StaxChain): Promise<Record<string, DaySummaryEntry>> {
+  return ttlCache(`day-summary:${chain.key}`, 5 * 60_000, async () => {
     const entries = await Promise.all(
-      ALL_ASSETS.map(async (asset) => {
+      chain.assets.all.map(async (asset) => {
         try {
-          const h = await getHistory(asset.symbol, "1D");
+          const h = await getHistory(chain, asset.symbol, "1D");
           if (!h) return null;
           return [
             asset.symbol,

@@ -14,6 +14,7 @@ import { displayFor } from "@/lib/displayAssets";
 import { authHeader } from "@/lib/authedFetch";
 import { CADENCE_LABEL, type Cadence, type AutopilotConfig } from "@/lib/autopilot";
 import { usd, txUrl } from "@/lib/format";
+import { useChain } from "@/lib/chains/active";
 import { STAX_FEE_LABEL } from "@/lib/fees";
 import { haptic } from "@/lib/haptics";
 import { iconBtn, Spinner } from "./primitives";
@@ -54,6 +55,7 @@ export function AutopilotScreen({
 }) {
   const { user } = usePrivy();
   const { address: smartAccount } = useSmartAccount();
+  const chain = useChain();
   const { data: bal } = useUsdcBalance(smartAccount ?? undefined);
   const cash = bal?.value ?? 0;
   const { addSessionSigners, removeSessionSigners } = useSessionSigners();
@@ -547,7 +549,7 @@ export function AutopilotScreen({
                 )}
 
                 {ok && r.txHash && (
-                  <a href={txUrl(r.txHash)} target="_blank" rel="noopener noreferrer" className="btn btn-glass btn-block tap" style={{ height: 46, marginTop: 18, fontSize: 14.5, textDecoration: "none" }}>
+                  <a href={txUrl(r.txHash, chain)} target="_blank" rel="noopener noreferrer" className="btn btn-glass btn-block tap" style={{ height: 46, marginTop: 18, fontSize: 14.5, textDecoration: "none" }}>
                     View on Mantlescan <Icon name="arrowUR" size={16} />
                   </a>
                 )}

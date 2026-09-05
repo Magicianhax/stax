@@ -7,7 +7,8 @@
 // screen (useQuote + useSwap, gasless). Tiers the executor can't route yet are
 // flagged "Coming soon".
 import { useState } from "react";
-import { ALL_ASSETS, type Asset } from "@/lib/mantle";
+import type { Asset } from "@/lib/chains";
+import { useChain } from "@/lib/chains/active";
 import { usePortfolio } from "@/hooks/useBalances";
 import { usePrice } from "@/hooks/usePrices";
 import { useMarketHistory, type MarketRange } from "@/hooks/useMarket";
@@ -26,7 +27,8 @@ export function AssetDetailScreen({
   go: (target: string | number, params?: Record<string, unknown>) => void;
   symbol: string;
 }) {
-  const asset: Asset = ALL_ASSETS.find((a) => a.symbol === symbol) ?? ALL_ASSETS[0];
+  const chain = useChain();
+  const asset: Asset = chain.assets.all.find((a) => a.symbol === symbol) ?? chain.assets.all[0];
   const d = displayFor(asset.symbol, asset.name);
   const { address } = useSmartAccount();
   const { data: port } = usePortfolio(address ?? undefined);
@@ -71,7 +73,7 @@ export function AssetDetailScreen({
     { k: "Category", v: d.cat },
     ...(d.apy ? [{ k: "Yield", v: `${d.apy} a year` }] : []),
     { k: "Held as", v: heldAs },
-    { k: "Network", v: "Mantle" },
+    { k: "Network", v: chain.name },
   ];
 
   return (

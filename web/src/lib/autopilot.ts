@@ -8,6 +8,7 @@
 // This module is the dependency-free core: the config shape, cadence math, and
 // the bounds checks that gate every autonomous run. The signing/execution engine
 // (server) and the grant/configure UI (client) build on top of this.
+import type { ChainKey } from "./chains/types";
 
 export type Cadence = "daily" | "weekly" | "biweekly" | "monthly";
 
@@ -35,6 +36,8 @@ export interface AutopilotConfig {
   owner: `0x${string}`;
   /** The smart-account address that holds funds and executes. */
   smartAccount: `0x${string}`;
+  /** Chain this autopilot runs on (Base default; Mantle legacy). */
+  chain: ChainKey;
   /** Plain-language goal Vera re-allocates against each run. */
   goal: string;
   /** Contribution per run, USD. */

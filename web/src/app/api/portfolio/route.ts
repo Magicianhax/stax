@@ -1,45 +1,35 @@
-// GET /api/portfolio?address=0x… — the user's holdings, fully valued on the
-// server. ONE multicall reads USDC + every asset balance, prices come from the
-// same DEX-pool spot source as /api/prices (cached 15s across all users), and
-// each holding is decorated with its real 1D market move for the row UI.
+// GET /api/portfolio?address=0x… — the user's holdings on the request chain,
+// fully valued on the server. ONE multicall reads USDC + every asset balance,
+// prices come from the same DEX-pool spot source as /api/prices (cached 15s per
+// chain across all users), and each holding is decorated with its real 1D
+// market move for the row UI.
 //
 // The client renders this verbatim — no balance fan-out, no qty×price math, no
-// price stitching on the frontend.
+// price stitching on the frontend. Token decimals come from the registry (B20
+// stocks are 8 dec, aUSDC 6, WETH 18) — never assumed.
 import type { NextRequest } from "next/server";
-import { createPublicClient, http, isAddress } from "viem";
-import { MANTLE_CHAIN, MULTICALL3, USDC, ALL_ASSETS } from "@/lib/mantle";
+import { isAddress } from "viem";
 import { ERC20_ABI } from "@/lib/abis";
+import type { ChainKey, StaxChain } from "@/lib/chains/types";
 import { priceAll } from "@/lib/prices";
 import { fromUnits } from "@/lib/format";
+import { chainFromRequest, serverClient } from "@/lib/server/chain";
 import { getDaySummary } from "@/lib/server/marketData";
 import { rateLimit, clientIp } from "@/lib/server/rateLimit";
 import { badRequest, tooManyRequests, serverError } from "@/lib/server/respond";
 
 export const dynamic = "force-dynamic";
 
-const RPC_URL = process.env.NEXT_PUBLIC_MANTLE_RPC_URL || "https://rpc.mantle.xyz";
-
-const publicClient = createPublicClient({
-  chain: {
-    id: MANTLE_CHAIN.id,
-    name: MANTLE_CHAIN.name,
-    nativeCurrency: MANTLE_CHAIN.nativeCurrency,
-    rpcUrls: MANTLE_CHAIN.rpcUrls,
-    contracts: { multicall3: { address: MULTICALL3 } },
-  },
-  batch: { multicall: { wait: 16 } },
-  transport: http(RPC_URL),
-});
-
-// Prices move slowly relative to page views — share one read across all users.
-let pricesCache: { at: number; value: ReturnType<typeof priceAll> } | null = null;
-function cachedPrices() {
-  if (pricesCache && Date.now() - pricesCache.at < 15_000) return pricesCache.value;
-  const value = priceAll(publicClient).catch((err) => {
-    pricesCache = null;
+// Prices move slowly relative to page views — share one read per chain across all users.
+const pricesCache = new Map<ChainKey, { at: number; value: ReturnType<typeof priceAll> }>();
+function cachedPrices(chain: StaxChain) {
+  const hit = pricesCache.get(chain.key);
+  if (hit && Date.now() - hit.at < 15_000) return hit.value;
+  const value = priceAll(chain, serverClient(chain)).catch((err) => {
+    pricesCache.delete(chain.key);
     throw err;
   });
-  pricesCache = { at: Date.now(), value };
+  pricesCache.set(chain.key, { at: Date.now(), value });
   return value;
 }
 
@@ -52,6 +42,8 @@ interface PortfolioHolding {
   valueUsd: number | null;
   dayChangePct: number | null;
   spark: number[] | null;
+  /** Supply APY (percent) for yield assets like aUSDC, when known. */
+  apy: number | null;
 }
 
 export async function GET(req: NextRequest) {
@@ -61,13 +53,16 @@ export async function GET(req: NextRequest) {
   const address = req.nextUrl.searchParams.get("address");
   if (!address || !isAddress(address)) return badRequest("Valid ?address required.");
 
+  const chain = chainFromRequest(req);
+  const client = serverClient(chain);
+
   try {
-    const assets = ALL_ASSETS.filter((a) => a.address && a.decimals);
+    const assets = chain.assets.all.filter((a) => a.address && a.decimals);
     const [results, prices, day] = await Promise.all([
       // USDC first, then the asset universe — one multicall, one RPC request.
-      publicClient.multicall({
+      client.multicall({
         contracts: [
-          { address: USDC.address as `0x${string}`, abi: ERC20_ABI, functionName: "balanceOf" as const, args: [address as `0x${string}`] },
+          { address: chain.usdc.address, abi: ERC20_ABI, functionName: "balanceOf" as const, args: [address as `0x${string}`] },
           ...assets.map((asset) => ({
             address: asset.address!,
             abi: ERC20_ABI,
@@ -76,13 +71,13 @@ export async function GET(req: NextRequest) {
           })),
         ],
       }),
-      cachedPrices(),
-      getDaySummary().catch(() => ({}) as Awaited<ReturnType<typeof getDaySummary>>),
+      cachedPrices(chain),
+      getDaySummary(chain).catch(() => ({}) as Awaited<ReturnType<typeof getDaySummary>>),
     ]);
 
     const usdcRead = results[0];
     const cashUsd =
-      usdcRead.status === "success" ? fromUnits(usdcRead.result as bigint, USDC.decimals) : 0;
+      usdcRead.status === "success" ? fromUnits(usdcRead.result as bigint, chain.usdc.decimals) : 0;
 
     const holdings: PortfolioHolding[] = [];
     for (let i = 0; i < assets.length; i++) {
@@ -91,8 +86,9 @@ export async function GET(req: NextRequest) {
       const raw = r.result as bigint;
       if (raw === BigInt(0)) continue;
       const asset = assets[i];
-      const qty = fromUnits(raw, asset.decimals!);
-      const priceUsd = prices[asset.symbol]?.priceUsd ?? null;
+      const qty = fromUnits(raw, asset.decimals!); // registry decimals (8 for B20 stocks)
+      const p = prices[asset.symbol];
+      const priceUsd = p?.priceUsd ?? null;
       holdings.push({
         symbol: asset.symbol,
         raw: raw.toString(),
@@ -101,6 +97,7 @@ export async function GET(req: NextRequest) {
         valueUsd: priceUsd !== null ? qty * priceUsd : null,
         dayChangePct: day[asset.symbol]?.dayChangePct ?? null,
         spark: day[asset.symbol]?.spark ?? null,
+        apy: p?.apy ?? null,
       });
     }
 
@@ -110,6 +107,7 @@ export async function GET(req: NextRequest) {
 
     return Response.json(
       {
+        chain: chain.key,
         cashUsd,
         investedUsd,
         totalUsd: cashUsd + investedUsd,

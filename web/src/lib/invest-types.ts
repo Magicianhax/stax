@@ -1,11 +1,14 @@
 // Shared client-side types for the allocate -> plan -> send flow.
 // These mirror the JSON the API routes return (all bigints serialized as strings).
 import type { Allocation } from "./allocation-schema";
+import type { ChainKey } from "./chains/types";
 
 /** POST /api/allocate response. */
 export interface AllocateResult extends Allocation {
   amountUsd: number;
   model: string;
+  /** Chain the allocation was built for (its investable universe). */
+  chain: ChainKey;
 }
 
 /** A swap leg as returned by /api/invest-plan (bigints serialized). */
@@ -39,7 +42,12 @@ export interface InvestPlanResult {
   inference: SerializedInference;
   legs: SerializedLeg[];
   usdcTotal: string;
+  /** Chain the plan was signed for — the client must send the UserOp on this chain. */
+  chain: ChainKey;
+  /** StaxExecutor on `chain` (approve target + investWithAI callee). */
   executor: `0x${string}`;
+  /** Explorer base URL for `chain` (e.g. https://basescan.org) so the client never guesses. */
+  explorer: string;
   notes: string[];
 }
 
