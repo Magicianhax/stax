@@ -1,61 +1,41 @@
-// Mantle mainnet (chainId 5000) wiring for wagmi + viem.
-// One source of truth for the chain object, the wagmi config, and a shared
-// read-only viem public client. Imported by providers.tsx, aa.ts, and any
-// component/hook that needs on-chain reads.
+// Multi-chain wagmi + viem wiring. Base (8453) is default; Mantle (5000) is the legacy mode.
+// Privy owns the embedded wallet + signing; wagmi here is read-only chain context.
+// For chain-aware reads use `getPublicClient(chain)`.
 import { createConfig, http } from "wagmi";
-import { createPublicClient, defineChain } from "viem";
+import { createPublicClient, type PublicClient } from "viem";
+import { BASE, MANTLE, CHAINS, type ChainKey, type StaxChain } from "./chains";
 
-const RPC_URL = process.env.NEXT_PUBLIC_MANTLE_RPC_URL || "https://rpc.mantle.xyz";
+export const base = BASE.chain;
+export const mantle = MANTLE.chain;
 
-/**
- * Mantle as a proper viem `Chain`. Built with `defineChain` so it carries the
- * full type surface viem/wagmi/permissionless expect (formatters, fees, etc.).
- * Mirrors the lighter `MANTLE_CHAIN` constant in mantle.ts.
- */
-export const mantle = defineChain({
-  id: 5000,
-  name: "Mantle",
-  nativeCurrency: { name: "Mantle", symbol: "MNT", decimals: 18 },
-  rpcUrls: {
-    default: { http: [RPC_URL] },
-  },
-  blockExplorers: {
-    default: { name: "Mantlescan", url: "https://mantlescan.xyz" },
-  },
-  contracts: {
-    multicall3: {
-      address: "0xcA11bde05977b3631167028862bE2a173976CA11",
-    },
-  },
-});
-
-/**
- * wagmi config. The embedded wallet + signing is owned by Privy (via its
- * `getEthereumProvider()` EIP-1193 surface, consumed in lib/aa.ts), so wagmi
- * here is configured purely for chain context + HTTP transports used by hooks
- * that read on-chain state. No connector is registered: account abstraction
- * sends transactions through the Pimlico smart-account client, not wagmi.
- */
 export const wagmiConfig = createConfig({
-  chains: [mantle],
+  chains: [base, mantle],
   transports: {
-    [mantle.id]: http(RPC_URL),
+    [base.id]: http(BASE.rpcUrl),
+    [mantle.id]: http(MANTLE.rpcUrl),
   },
   ssr: true,
 });
 
+const clients = new Map<ChainKey, PublicClient>();
+
 /**
- * Shared read-only client for balances, allowances, pool quotes, receipts.
- * `batch.multicall` aggregates every readContract issued in the same tick into
- * ONE Multicall3 eth_call — a portfolio refresh (15 balanceOf) or a quote burst
- * becomes a single RPC request instead of 15-20, which is what the public
- * rpc.mantle.xyz rate limiter demands (unbatched bursts get some calls dropped,
- * making holdings flicker in and out).
+ * Shared read-only client per chain. `batch.multicall` aggregates every readContract
+ * issued in the same tick into ONE Multicall3 eth_call — a portfolio refresh or a quote
+ * burst becomes a single RPC request (public RPC rate limiters demand this).
  */
-export const publicClient = createPublicClient({
-  chain: mantle,
-  batch: { multicall: { wait: 16 } },
-  transport: http(RPC_URL),
-});
+export function getPublicClient(chain: StaxChain | ChainKey): PublicClient {
+  const c = typeof chain === "string" ? CHAINS[chain] : chain;
+  let client = clients.get(c.key);
+  if (!client) {
+    client = createPublicClient({
+      chain: c.chain,
+      batch: { multicall: { wait: 16 } },
+      transport: http(c.rpcUrl),
+    }) as PublicClient;
+    clients.set(c.key, client);
+  }
+  return client;
+}
 
 export type WagmiConfig = typeof wagmiConfig;
