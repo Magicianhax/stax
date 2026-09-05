@@ -205,6 +205,14 @@ export function SiteLanding() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [filmOpen, setFilmOpen] = useState(false);
 
+  // Shared basket links may land on the root (`/?basket=…`): forward them to the
+  // app, which decodes and opens the basket. Plain navigation, no router needed.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const basket = url.searchParams.get("basket");
+    if (basket) window.location.replace(`/app?basket=${encodeURIComponent(basket)}`);
+  }, []);
+
   useEffect(() => {
     const saved = localStorage.getItem("stax-landing-mode");
     if (saved === "dark" || saved === "light") setMode(saved);

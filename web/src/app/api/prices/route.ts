@@ -2,7 +2,9 @@
 // from DEX pools. Cached briefly (the underlying pools move slowly relative to a
 // page view) so a burst of clients doesn't hammer the RPC. Stocks price off their
 // USDC pool, routed assets off their route, aUSDC at $1 (+ Aave APY); assets with
-// a Chainlink feed also carry `marketPrice`. No live source → priceUsd: null.
+// a Chainlink feed also carry `marketPrice` + `marketPriceAt` (feed updatedAt, unix
+// s), and Coinbase B20 stocks carry `sharesPerToken` (multiplier / 1e18). All of
+// it is one multicall per request burst. No live source → priceUsd: null.
 import type { NextRequest } from "next/server";
 import { priceAll } from "@/lib/prices";
 import { chainFromRequest, serverClient } from "@/lib/server/chain";

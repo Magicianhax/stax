@@ -51,6 +51,15 @@ export function tokenQty(raw: bigint, decimals: number): string {
   return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 }
 
+/** "just now" / "4m ago" / "2h ago" / "3d ago" — age of a unix-seconds timestamp. */
+export function timeAgo(unixSec: number, nowMs: number = Date.now()): string {
+  const diff = Math.max(0, Math.floor(nowMs / 1000) - unixSec);
+  if (diff < 60) return "just now";
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86_400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86_400)}d ago`;
+}
+
 /** 0xabc…1234 — shortened address for trust signals. */
 export function shortAddress(addr?: string): string {
   if (!addr || addr.length < 10) return addr ?? "";

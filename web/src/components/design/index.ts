@@ -64,6 +64,9 @@ export { TabBar, type TabBarProps, type TabId } from "./TabBar";
 // Network (Base · Mantle)
 export { ChainMark, NetworkChip, NetworkSwitch, ChainLaunching, ChainLaunchingLine } from "./Network";
 
+// US stock-market hours (open/closed pill + explainer)
+export { MarketStatus, useMarketStatus, type MarketStatusProps } from "./MarketStatus";
+
 // Toast
 export {
   Toast,

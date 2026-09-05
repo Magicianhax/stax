@@ -77,3 +77,15 @@ Stax runs on Base (default) and Mantle (earlier investments). The chain is a pro
 - **Chip:** `NetworkChip` (mark + name, `.chip` at 44px) sits in the Home top bar beside the icon buttons and opens Settings. It is the only place the chain shows on Home.
 - **Undeployed chain:** when `chain.contracts.deployed` is false, `ChainLaunching` (card: mark, "Stax on Base is being switched on", "You can still browse prices. Investing opens shortly.", optional next-step button) replaces the Invest CTA, Autopilot setup and Vera's record; `ChainLaunchingLine` is the one-line form for pinned bars. Manual Pro buy/sell stays enabled (it doesn't need the executor). `useChainReady()` in `components/lite` treats the demo as ready so landing phones never show the state.
 - **Copy:** chain names and explorers always come from the registry (`chain.name`, `chain.explorer.name`, `chain.issuer`, `explorerTx/explorerAddress`); never hardcode "Mantle" or "Mantlescan". "Coming soon" tags use `--surface-2` + `--ink-2` (AA), never the terracotta accent, which stays reserved for trust signals.
+
+## Market hours & reference price
+
+Stocks trade on-chain 24/7 but their reference price (Chainlink) only moves while the NYSE is open (`lib/marketHours.ts`, pure, DST-safe via `Intl` in `America/New_York`). The signal is `MarketStatus` in `components/design/MarketStatus.tsx`: a quiet `.chip` pill (7px dot + 12.5px/600 `--ink-2` text) inside a 44px hit area. Dot is `--pos` with a soft halo when open, `--ink-3` when closed; no animation, no red.
+- **Market header:** `Open · closes 4:00pm ET` / `Closed · opens Mon 9:30am ET` beside the title; the issuer drops to a subline.
+- **Asset detail (under the price) and Trade (by the quote), stocks only:** `detail` variant. Closed → `Market closed · trades still go through, prices can drift until Mon 9:30am ET` (wraps); open → `Market open · closes 4:00pm ET`.
+- **Tap → "Market hours" sheet** (BottomSheet): status line on `--surface-2`, then three plain sentences (pools never close; reference price updates only in market hours; you may pay a little more or less). Voice stays "a smart friend", never a disclaimer.
+- Asset facts add `Reference price · $x · updated 2h ago` (feed `updatedAt`), `Shares per token` only when ≠ 1, and for Coinbase stocks a full-width `Dividends` row ("Reinvested automatically — your token grows instead of paying cash").
+
+## Add money (Coinbase Onramp)
+
+Wallet's one obvious action is a solid primary `Add money` (52px, plus icon) under the balance, with `Cash out` as a `.btn-ghost` beside it only when the offramp is available. Send / Receive / Invest stay as the recessed card row below. The sheet: one sentence, four 44px amount chips (`$25 $50 $100 Custom`, `.chip.is-dark` selected), a `.field` for custom, then `Add $50 with Coinbase ↗` (opens a new tab). A quiet text link falls through to Receive. Gating lives in `lib/onramp.ts`: no project id → the button *is* Receive; on Mantle the sheet says Add money is on Base and offers "Show my address". Never a disabled primary.

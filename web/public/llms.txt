@@ -13,6 +13,7 @@ Stax is built for people who are new to investing and to crypto. There is no see
 - Real shares: issued one-to-one by Coinbase on Base and by Backed on Mantle, held in self-custody, recorded on-chain.
 - Available to eligible people outside the United States.
 - Autopilot: optional automated, recurring investing (dollar-cost averaging).
+- Baskets: ready-made mixes (for example Big Tech, AI & Chips, Safe Growth) you can invest in with one tap, save from a Vera plan, or share as a link; Vera still signs the risk before each invest.
 - Built on Base, Coinbase's Ethereum network; Mantle is kept as a second network for earlier investments. You can start from as little as $1.
 
 ## Pages

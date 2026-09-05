@@ -25,6 +25,8 @@ import { toTile, catFor } from "@/lib/displayAssets";
 import { usd, tokenQty } from "@/lib/format";
 import { iconBtn } from "./primitives";
 import { useChainReady } from "../useChainReady";
+import { useBaskets } from "@/hooks/useBaskets";
+import { BasketRailTile } from "./basketPrimitives";
 
 const DOTS = "••••••";
 
@@ -40,6 +42,9 @@ export function HomeScreen({
   const { data: port, isLoading: portLoading } = usePortfolio(address ?? undefined);
   const { data: activity } = useActivity(address ?? undefined);
   const [hideBalance, setHideBalance] = useState(false);
+  // Baskets rail: yours first, then Stax's — four tiles, the rest behind "See all".
+  const { all: baskets } = useBaskets();
+  const rail = baskets.slice(0, 4);
 
   const balance = port?.cashUsd ?? 0;
   const holdings: Holding[] = port?.holdings ?? [];
@@ -230,6 +235,54 @@ export function HomeScreen({
           <Icon name="arrowUR" size={22} stroke={2.2} style={{ position: "relative" }} />
         </button>
       </div>
+
+      {/* baskets rail — one-tap mixes, under the Vera card */}
+      {rail.length > 0 && (
+        <div style={{ padding: "22px 0 0" }}>
+          <div style={{ padding: "0 22px" }}>
+            <SectionTitle action="See all" onAction={() => go("baskets")}>
+              Baskets
+            </SectionTitle>
+          </div>
+          <div
+            className="stagger-in"
+            style={{
+              display: "flex",
+              gap: 10,
+              padding: "2px 22px 6px",
+              overflowX: "auto",
+              scrollSnapType: "x proximity",
+              scrollPaddingLeft: 22,
+              // let the card shadows breathe past the scroll edge
+              margin: "-2px 0 -6px",
+            }}
+          >
+            {rail.map((b) => (
+              <BasketRailTile key={b.id} basket={b} onClick={() => go("basket", { id: b.id })} />
+            ))}
+            <button
+              className="tap"
+              onClick={() => go("baskets")}
+              aria-label="See all baskets"
+              style={{
+                flex: "none",
+                width: 96,
+                borderRadius: "var(--rr-lg)",
+                background: "var(--surface-2)",
+                color: "var(--primary)",
+                fontSize: 13.5,
+                fontWeight: 600,
+                display: "grid",
+                placeItems: "center",
+                scrollSnapAlign: "start",
+              }}
+            >
+              See all
+            </button>
+            <span aria-hidden style={{ flex: "none", width: 12 }} />
+          </div>
+        </div>
+      )}
 
       {/* holdings */}
       <div style={{ padding: "20px 22px 0" }}>

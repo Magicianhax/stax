@@ -14,7 +14,7 @@ import { useChain } from "@/lib/chains/active";
 import { displayFor, type AssetDisplay } from "@/lib/displayAssets";
 import { usePrices } from "@/hooks/usePrices";
 import { useMarketSummary } from "@/hooks/useMarket";
-import { Icon, AssetTile, Sparkline, SectionTitle } from "@/components/design";
+import { Icon, AssetTile, Sparkline, SectionTitle, MarketStatus } from "@/components/design";
 import { usd } from "@/lib/format";
 
 const CATS = ["All", "Big tech", "Funds", "Safer", "Crypto", "More"] as const;
@@ -159,10 +159,25 @@ export function MarketScreen({
 
   return (
     <div className="screen screen-pad-top" style={{ paddingBottom: 110 }}>
-      <div style={{ padding: "12px 22px 0", display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
+      {/* title + the stock-market clock. Stocks are the headline here, so the
+          open/closed pill sits beside the title; the issuer moves to a subline. */}
+      <div style={{ padding: "12px 22px 0", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         <h1 className="serif" style={{ margin: 0, fontSize: 32, letterSpacing: "-.015em" }}>Market</h1>
-        <span style={{ fontSize: 13, color: "var(--ink-2)", fontWeight: 500 }}>{chain.issuer}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <MarketStatus />
+          {/* Baskets entry: ready-made mixes live one tap from the asset list. */}
+          <button
+            type="button"
+            className="tap"
+            onClick={() => go("baskets")}
+            aria-label="Baskets"
+            style={{ minHeight: 44, minWidth: 44, padding: "0 2px", background: "none", border: 0, display: "grid", placeItems: "center", cursor: "pointer" }}
+          >
+            <span className="chip" style={{ fontWeight: 600, fontSize: 12.5 }}>Baskets</span>
+          </button>
+        </div>
       </div>
+      <div style={{ padding: "2px 22px 0", fontSize: 13, color: "var(--ink-2)", fontWeight: 500 }}>{chain.issuer}</div>
 
       {/* search */}
       <div style={{ padding: "14px 22px 0" }}>

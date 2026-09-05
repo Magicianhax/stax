@@ -10,10 +10,12 @@
 // reference or a dash), never fake.
 import { useQuery } from "@tanstack/react-query";
 import type { AssetPrice } from "@/lib/prices";
+import type { ChainKey } from "@/lib/chains";
 import { useChain } from "@/lib/chains/active";
 import { authedFetch } from "@/lib/authedFetch";
 
 export interface PricesResponse {
+  chain: ChainKey;
   prices: Record<string, AssetPrice>;
   asOf: string;
 }
@@ -44,4 +46,11 @@ export function usePrice(symbol: string | undefined): { priceUsd?: number; isLoa
   const { data, isLoading } = usePrices();
   if (!symbol) return { priceUsd: undefined, isLoading };
   return { priceUsd: data?.prices[symbol]?.priceUsd, isLoading };
+}
+
+/** The full price record for one symbol (venue spot, reference price + age, APY, shares per token). */
+export function useAssetPrice(symbol: string | undefined): { price?: AssetPrice; isLoading: boolean } {
+  const { data, isLoading } = usePrices();
+  if (!symbol) return { price: undefined, isLoading };
+  return { price: data?.prices[symbol], isLoading };
 }

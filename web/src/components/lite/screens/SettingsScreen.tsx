@@ -245,7 +245,7 @@ export function SettingsScreen({
           <Row
             icon="wallet"
             title="Wallet"
-            sub="Cash, holdings, send & receive"
+            sub="Cash, holdings, add money & send"
             onClick={() => go("wallet")}
             right={<Icon name="chevR" size={18} style={{ color: "var(--ink-3)" }} />}
           />

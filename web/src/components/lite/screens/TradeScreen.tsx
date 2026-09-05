@@ -17,7 +17,7 @@ import { usePrice } from "@/hooks/usePrices";
 import { useMarketHistory } from "@/hooks/useMarket";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { displayFor } from "@/lib/displayAssets";
-import { Icon, AssetTile, Crossfade, PriceChart } from "@/components/design";
+import { Icon, AssetTile, Crossfade, PriceChart, MarketStatus } from "@/components/design";
 import { usd, tokenQty, fromUnits } from "@/lib/format";
 import { STAX_FEE_LABEL } from "@/lib/fees";
 import { iconBtn, Spinner } from "./primitives";
@@ -149,6 +149,13 @@ export function TradeScreen({
           {(up ? "+" : "") + day.toFixed(2)}% today
         </span>
       </div>
+      {/* stock-market clock beside the quote — a closed market means the
+          reference price is stale and the pool price can drift from it */}
+      {asset.tier === "stock" && (
+        <div style={{ padding: "10px 22px 0" }}>
+          <MarketStatus detail />
+        </div>
+      )}
       <div style={{ padding: "10px 22px 2px" }}>
         <PriceChart
           data={spark}

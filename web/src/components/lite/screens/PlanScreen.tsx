@@ -11,7 +11,12 @@
 //   - Nudge chips   -> re-run allocate() with an adjusted goal/riskTolerance and
 //                      visibly rebuild the plan (the "rethinking" state)
 //   - big button    -> onInvest() (useInvest.invest → /api/invest-plan + send)
-import { Icon, VeraOrb, AssetTile, RiskMeter, VerifiedBadge, Crossfade, ChainLaunchingLine } from "@/components/design";
+import { useState } from "react";
+import { Icon, VeraOrb, AssetTile, RiskMeter, VerifiedBadge, Crossfade, ChainLaunchingLine, BottomSheet, useToast } from "@/components/design";
+import { useBaskets } from "@/hooks/useBaskets";
+import { allocationToBasket, shortName, BASKET_NAME_MAX, type Basket } from "@/lib/baskets";
+import { haptic } from "@/lib/haptics";
+import { shareBasket, WeightBar } from "./basketPrimitives";
 import { toTile, catFor } from "@/lib/displayAssets";
 import { usd } from "@/lib/format";
 import { STAX_FEE_LABEL, feeUsd } from "@/lib/fees";
@@ -29,7 +34,7 @@ const NUDGES: { id: Tone; label: string }[] = [
 ];
 
 // Map a 0..10000 bps risk score to the 1..5 meter + a friendly label.
-function riskMeta(bps: number): { level: number; label: string } {
+export function riskMeta(bps: number): { level: number; label: string } {
   const v = Math.max(0, Math.min(100, bps / 100));
   if (v < 20) return { level: 1, label: "Very steady" };
   if (v < 40) return { level: 2, label: "Cautious" };
@@ -47,6 +52,8 @@ export function PlanScreen({
   busy,
   onNudge,
   onInvest,
+  basket,
+  goal,
 }: {
   go: (screen: string, params?: Record<string, unknown>) => void;
   allocation: AllocateResult;
@@ -56,9 +63,34 @@ export function PlanScreen({
   busy: boolean;
   onNudge: (tone: Tone) => void;
   onInvest: () => void;
+  /** Set when this plan came from a basket: fixed weights, so no nudge chips. */
+  basket?: Basket;
+  /** The goal that produced this plan (kept on a saved basket as its origin). */
+  goal?: string;
 }) {
   const risk = riskMeta(allocation.riskScore);
   const { chain, ready } = useChainReady();
+  const { save } = useBaskets();
+  const { notify } = useToast();
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [name, setName] = useState(shortName(allocation.summary));
+  // Curated baskets are already listed and personal ones already saved, so only a
+  // fresh Vera plan (or a shared basket) has something worth saving.
+  const canSave = !basket || basket.author === "shared";
+
+  const asBasket = () => basket ?? allocationToBasket(chain, allocation, name, goal, { author: "vera" });
+  const onSave = () => {
+    save({ ...asBasket(), name: name.trim() || shortName(allocation.summary), author: "you" });
+    setSaveOpen(false);
+    haptic.light();
+    notify("Saved to your baskets", "check");
+  };
+  const onShare = async () => {
+    haptic.light();
+    const r = await shareBasket(asBasket());
+    if (r === "copied") notify("Link copied", "link");
+    else if (r === "failed") notify("Couldn't copy the link. Try again.", "info");
+  };
 
   // While Vera recomposes (a nudge), blur + soften the basket so it reads as one
   // morphing object — transform/filter only, interruptible, GPU-friendly.
@@ -133,7 +165,8 @@ export function PlanScreen({
         </div>
       </div>
 
-      {/* nudge chips — talk back to Vera */}
+      {/* nudge chips — talk back to Vera (a basket's weights are fixed, so none) */}
+      {!basket && (
       <div style={{ display: "flex", gap: 8, padding: "14px 22px 0", overflowX: "auto", flexShrink: 0 }}>
         {NUDGES.map((n) => (
           <button
@@ -147,24 +180,14 @@ export function PlanScreen({
           </button>
         ))}
       </div>
+      )}
 
       {/* allocation bar — blurs softly while Vera recomposes (one morph, not a grey-out) */}
       <div
         className="anim-rise"
         style={{ ...recompose, animationDelay: ".04s", padding: "16px 22px 0" }}
       >
-        <div style={{ display: "flex", height: 14, borderRadius: 99, overflow: "hidden", gap: 2 }}>
-          {allocation.allocations.map((a) => {
-            const tile = toTile(a.symbol);
-            return (
-              <div
-                key={a.symbol}
-                style={{ width: `${a.weightPct}%`, background: tile.color, transition: "width .45s var(--ease-out)" }}
-                title={tile.name}
-              />
-            );
-          })}
-        </div>
+        <WeightBar items={allocation.allocations} height={14} animate />
       </div>
 
       {/* holdings */}
@@ -233,6 +256,48 @@ export function PlanScreen({
       <div style={{ padding: "14px 22px 0", display: "flex", justifyContent: "center" }}>
         <VerifiedBadge label="Vera will sign & record this plan" onClick={() => go("vera")} />
       </div>
+
+      {/* quiet text actions — keep this mix, or hand it to a friend */}
+      <div style={{ ...recompose, padding: "10px 22px 0", display: "flex", justifyContent: "center", gap: 4 }}>
+        {canSave && (
+          <button
+            className="tap"
+            disabled={rethinking}
+            onClick={() => setSaveOpen(true)}
+            style={{ minHeight: 44, padding: "0 12px", fontSize: 13.5, fontWeight: 600, color: "var(--primary)", display: "inline-flex", alignItems: "center", gap: 6 }}
+          >
+            <Icon name="plus" size={15} /> Save as basket
+          </button>
+        )}
+        <button
+          className="tap"
+          disabled={rethinking}
+          onClick={onShare}
+          style={{ minHeight: 44, padding: "0 12px", fontSize: 13.5, fontWeight: 600, color: "var(--primary)", display: "inline-flex", alignItems: "center", gap: 6 }}
+        >
+          <Icon name="link" size={15} /> Share this plan
+        </button>
+      </div>
+
+      <BottomSheet open={saveOpen} onClose={() => setSaveOpen(false)} title="Name this basket">
+        <div className="field" style={{ padding: "13px 16px" }}>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value.slice(0, BASKET_NAME_MAX))}
+            maxLength={BASKET_NAME_MAX}
+            aria-label="Basket name"
+            placeholder="e.g. My steady mix"
+            autoFocus
+            style={{ width: "100%", fontSize: 17, fontWeight: 600 }}
+          />
+        </div>
+        <p style={{ fontSize: 13, color: "var(--ink-2)", margin: "10px 0 0", lineHeight: 1.5 }}>
+          Saved baskets keep these exact weights. Invest in them again anytime from Baskets.
+        </p>
+        <button className="btn btn-primary btn-block btn-lg tap" style={{ marginTop: 14 }} onClick={onSave}>
+          Save basket
+        </button>
+      </BottomSheet>
 
       {/* Pinned invest bar — sticky (NOT absolute, which scrolls inside an
           overflow container). margin-top:auto holds it at the bottom on short

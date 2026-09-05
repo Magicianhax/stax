@@ -1,11 +1,17 @@
 "use client";
 
-// Wallet — the account's money in one place: total balance, quick Send / Receive
+// Wallet — the account's money in one place: total balance, Add money (Coinbase
+// Onramp, card/bank → USDC on Base) with Cash out beside it, quick Send / Receive
 // / Buy, spendable cash (USDC), holdings (live price · qty · value), and the full
 // incoming/outgoing transaction history. Receive is an in-place sheet (QR +
 // address); each transaction opens a detail sheet with an explorer link.
+//
+// Add money is env-gated (NEXT_PUBLIC_CDP_PROJECT_ID): unset → the button opens
+// the Receive sheet, so the screen never shows a dead primary. On a chain Coinbase
+// can't deliver to (Mantle) the sheet says so and points at Receive.
 import { useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
+import { usePrivy } from "@privy-io/react-auth";
 import { useUsdcBalance, usePortfolio, type Holding } from "@/hooks/useBalances";
 import { useTransactions } from "@/hooks/useTransactions";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
@@ -15,6 +21,7 @@ import { toTile, catFor } from "@/lib/displayAssets";
 import { usd, tokenQty, shortAddress, txUrl } from "@/lib/format";
 import { useChain } from "@/lib/chains/active";
 import { haptic } from "@/lib/haptics";
+import { ONRAMP_PRESETS, offrampUrl, onrampEnabled, onrampSupported, onrampUrl } from "@/lib/onramp";
 import type { WalletTx } from "@/lib/walletTx";
 import { iconBtn, Spinner, Pager } from "./primitives";
 
@@ -56,14 +63,49 @@ export function WalletScreen({
 }) {
   const { address, loading: addrLoading } = useSmartAccount();
   const chain = useChain();
+  const { user } = usePrivy();
   const { data: bal, isLoading: balLoading } = useUsdcBalance(address ?? undefined);
   const { data: port, isLoading: portLoading } = usePortfolio(address ?? undefined);
   const { data: txs, isLoading: txLoading } = useTransactions(address ?? undefined);
   const { notify } = useToast();
   const [hide, setHide] = useState(false);
   const [receiveOpen, setReceiveOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [addAmt, setAddAmt] = useState<number | "custom">(50);
+  const [customAmt, setCustomAmt] = useState("");
   const [tx, setTx] = useState<WalletTx | null>(null);
   const [txPage, setTxPage] = useState(0);
+
+  // Add money: Coinbase Onramp when configured and the chain is supported;
+  // otherwise the button is the Receive flow (never a dead primary).
+  const rampOn = onrampEnabled();
+  const rampHere = rampOn && onrampSupported(chain);
+  const addAmount = addAmt === "custom" ? Math.floor(parseFloat(customAmt) || 0) : addAmt;
+  const rampParams = address
+    ? { chain, address, amountUsd: addAmount, partnerUserRef: user?.id }
+    : undefined;
+  const buyUrl = rampHere && rampParams ? onrampUrl(rampParams) : undefined;
+  const sellUrl = rampHere && rampParams ? offrampUrl({ ...rampParams, amountUsd: undefined }) : undefined;
+
+  const openAddMoney = () => {
+    haptic.light();
+    if (!rampOn) {
+      setReceiveOpen(true);
+      return;
+    }
+    setAddOpen(true);
+  };
+  const continueToCoinbase = () => {
+    if (!buyUrl) return;
+    haptic.light();
+    window.open(buyUrl, "_blank", "noopener");
+    setAddOpen(false);
+  };
+  const cashOut = () => {
+    if (!sellUrl) return;
+    haptic.light();
+    window.open(sellUrl, "_blank", "noopener");
+  };
 
   const cash = bal?.value ?? 0;
   const holdings: Holding[] = port?.holdings ?? [];
@@ -137,11 +179,36 @@ export function WalletScreen({
         </div>
       </div>
 
+      {/* the one obvious action: put money in. Cash out sits beside it as the
+          quiet reverse, only when Coinbase can actually do it on this chain. */}
+      <div style={{ display: "flex", gap: 10, padding: "14px 22px 0" }}>
+        <button
+          type="button"
+          className="btn btn-primary tap"
+          onClick={openAddMoney}
+          style={{ flex: 1, height: 52, fontSize: 16 }}
+        >
+          <Icon name="plus" size={19} stroke={2.4} />
+          Add money
+        </button>
+        {sellUrl && (
+          <button
+            type="button"
+            className="btn btn-ghost tap"
+            onClick={cashOut}
+            aria-label="Cash out with Coinbase (opens in a new tab)"
+            style={{ flex: "none", height: 52, padding: "0 18px", fontSize: 15 }}
+          >
+            Cash out
+          </button>
+        )}
+      </div>
+
       {/* quick actions */}
-      <div style={{ display: "flex", gap: 10, padding: "16px 22px 0" }}>
+      <div style={{ display: "flex", gap: 10, padding: "12px 22px 0" }}>
         <Action icon="arrowUR" label="Send" onClick={() => go("send")} />
         <Action icon="arrowDR" label="Receive" onClick={() => { haptic.light(); setReceiveOpen(true); }} />
-        <Action icon="plus" label="Buy" onClick={() => go("market")} />
+        <Action icon="trend" label="Invest" onClick={() => go("market")} />
       </div>
 
       {/* cash */}
@@ -255,6 +322,91 @@ export function WalletScreen({
         )}
         {txList.length > 10 && <Pager page={txSafePage} pageCount={txPageCount} onPage={setTxPage} />}
       </div>
+
+      {/* add money sheet — presets, then off to Coinbase in a new tab */}
+      <BottomSheet open={addOpen} onClose={() => setAddOpen(false)} title="Add money">
+        {rampHere ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: "2px 2px 8px" }}>
+            <p style={{ margin: 0, fontSize: 14, color: "var(--ink-2)", lineHeight: 1.5 }}>
+              Pay with a card or bank through Coinbase. It lands in your account as US dollars on {chain.name},
+              usually within a few minutes.
+            </p>
+            <div role="radiogroup" aria-label="Amount" style={{ display: "flex", gap: 8 }}>
+              {ONRAMP_PRESETS.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  role="radio"
+                  aria-checked={addAmt === p}
+                  onClick={() => { haptic.select(); setAddAmt(p); }}
+                  className={`chip tap ${addAmt === p ? "is-dark" : ""}`}
+                  style={{ flex: 1, justifyContent: "center", height: 44, fontSize: 15, fontWeight: 600 }}
+                >
+                  ${p}
+                </button>
+              ))}
+              <button
+                type="button"
+                role="radio"
+                aria-checked={addAmt === "custom"}
+                onClick={() => { haptic.select(); setAddAmt("custom"); }}
+                className={`chip tap ${addAmt === "custom" ? "is-dark" : ""}`}
+                style={{ flex: 1, justifyContent: "center", height: 44, fontSize: 15, fontWeight: 600 }}
+              >
+                Custom
+              </button>
+            </div>
+            {addAmt === "custom" && (
+              <div className="field" style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 16px", height: 52 }}>
+                <span className="tnum" style={{ fontSize: 18, fontWeight: 700, color: customAmt ? "var(--ink)" : "var(--ink-3)" }}>$</span>
+                <input
+                  inputMode="numeric"
+                  autoFocus
+                  placeholder="0"
+                  value={customAmt}
+                  onChange={(e) => setCustomAmt(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
+                  aria-label="Amount to add in dollars"
+                  className="tnum"
+                  style={{ flex: 1, fontSize: 18, fontWeight: 700, background: "transparent", border: "none", outline: "none", padding: 0 }}
+                />
+              </div>
+            )}
+            <button
+              type="button"
+              className="btn btn-primary btn-block tap"
+              disabled={!buyUrl || addAmount <= 0}
+              onClick={continueToCoinbase}
+              style={{ height: 52 }}
+            >
+              {addAmount > 0 ? `Add ${usd(addAmount).replace(/\.00$/, "")} with Coinbase` : "Enter an amount"}
+              <Icon name="arrowUR" size={16} />
+            </button>
+            <button
+              type="button"
+              className="tap"
+              onClick={() => { setAddOpen(false); setReceiveOpen(true); }}
+              style={{ minHeight: 44, fontSize: 14, fontWeight: 600, color: "var(--ink-2)", background: "none" }}
+            >
+              Or send US dollars from another account
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: "2px 2px 8px" }}>
+            <p style={{ margin: 0, fontSize: 14.5, color: "var(--ink-2)", lineHeight: 1.55 }}>
+              Add money with a card or bank is available on Base. On {chain.name}, send USDC to your address
+              instead. It arrives in under a minute.
+            </p>
+            <button
+              type="button"
+              className="btn btn-primary btn-block tap"
+              onClick={() => { setAddOpen(false); setReceiveOpen(true); }}
+              style={{ height: 52 }}
+            >
+              Show my address
+            </button>
+          </div>
+        )}
+      </BottomSheet>
 
       {/* receive sheet */}
       <BottomSheet open={receiveOpen} onClose={() => setReceiveOpen(false)} title="Receive">

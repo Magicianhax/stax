@@ -41,9 +41,15 @@ import { HelpScreen } from "./screens/HelpScreen";
 import { WalletScreen } from "./screens/WalletScreen";
 import { SendScreen } from "./screens/SendScreen";
 import { AutopilotScreen } from "./screens/AutopilotScreen";
+import { BasketsScreen } from "./screens/BasketsScreen";
+import { BasketDetailScreen } from "./screens/BasketDetailScreen";
+import { decodeBasketLink, type Basket } from "@/lib/baskets";
+import type { AllocateResult } from "@/lib/invest-types";
 
 type Screen =
   | "home"
+  | "baskets"
+  | "basket"
   | "wallet"
   | "send"
   | "autopilot"
@@ -105,6 +111,10 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
   const [amount, setAmount] = useState(0);
   const [tone, setTone] = useState<Tone>("balanced");
   const [rethinking, setRethinking] = useState(false);
+  // A basket's fixed-weight plan, reviewed on the same PlanScreen as Vera's own
+  // plans and placed through the same invest() call. Cleared whenever home resets.
+  const [basketPlan, setBasketPlan] = useState<{ allocation: AllocateResult; basket: Basket } | null>(null);
+  const activeAllocation = basketPlan?.allocation ?? invest.allocation;
 
   // Navigation direction drives the screen transition (push / pop / fade).
   const [dir, setDir] = useState<"push" | "pop" | "fade">("fade");
@@ -147,11 +157,25 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
         return;
       }
 
+      // Basket → plan: review a fixed-weight basket on the real PlanScreen.
+      if (next === "plan" && p.allocation && p.basket) {
+        setDir("push");
+        setBasketPlan({ allocation: p.allocation as AllocateResult, basket: p.basket as Basket });
+        setAmount(Number(p.amt ?? 0));
+        setGoal("");
+        setTone("balanced");
+        setStack((s) => [...s, { screen: "plan", params: {} }]);
+        return;
+      }
+
       // Tab roots / home reset the stack to a single route.
       const ROOTS: Screen[] = ["home", "portfolio", "market", "vera"];
       if (ROOTS.includes(next)) {
         setDir("fade");
-        if (next === "home") invest.reset();
+        if (next === "home") {
+          invest.reset();
+          setBasketPlan(null);
+        }
         setStack([{ screen: next, params: p }]);
         return;
       }
@@ -179,15 +203,43 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
 
   // Place the investment (server-signed plan + batched sponsored UserOp).
   const onInvest = useCallback(() => {
-    if (!invest.allocation || !address) {
+    if (!activeAllocation || !address) {
       notify("Loading your account, try again in a moment", "info");
       return;
     }
     haptic.medium();
     setDir("push");
     setStack((s) => [...s, { screen: "placing", params: {} }]);
-    void invest.invest(invest.allocation, amount, address);
-  }, [invest, address, amount, notify]);
+    void invest.invest(activeAllocation, amount, address);
+  }, [invest, activeAllocation, address, amount, notify]);
+
+  // Shared basket links: `/app?basket=<param>` (and `/demo?basket=`) open the
+  // decoded basket on load. The link is never trusted — decodeBasketLink validates
+  // symbols, renormalizes weights and recomputes risk — and a bad one just toasts.
+  // The param is then stripped so a refresh doesn't re-open it.
+  useEffect(() => {
+    if (demoPlay) return; // the landing's auto-playing phones ignore the page URL
+    if (!new URL(window.location.href).searchParams.has("basket")) return;
+    // Deferred a tick so the route push happens after first paint (and never
+    // synchronously inside the effect).
+    const t = setTimeout(() => {
+      const url = new URL(window.location.href);
+      const param = url.searchParams.get("basket");
+      if (!param) return;
+      url.searchParams.delete("basket");
+      window.history.replaceState(window.history.state, "", url.toString());
+      const res = decodeBasketLink(param);
+      if (res.ok) {
+        setDir("push");
+        setStack((s) => [...s, { screen: "basket", params: { basket: res.basket } }]);
+      } else {
+        notify(res.reason, "info");
+      }
+    }, 0);
+    return () => clearTimeout(t);
+    // Run once on mount only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Latest handlers for the demo autoplay driver (avoids stale closures).
   const goRef = useRef(go);
@@ -269,6 +321,8 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
     if (demo) return;
     const NAMES: Record<Screen, string> = {
       home: "Your money",
+      baskets: "Baskets",
+      basket: "Basket",
       wallet: "Wallet",
       send: "Send",
       autopilot: "Autopilot",
@@ -355,17 +409,31 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
     case "thinking":
       view = <ThinkingScreen />;
       break;
+    case "baskets":
+      view = <BasketsScreen go={go} />;
+      break;
+    case "basket":
+      view = (
+        <BasketDetailScreen
+          go={go}
+          id={params.id as string | undefined}
+          shared={params.basket as Basket | undefined}
+        />
+      );
+      break;
     case "plan":
-      view = invest.allocation ? (
+      view = activeAllocation ? (
         <PlanScreen
           go={go}
-          allocation={invest.allocation}
+          allocation={activeAllocation}
           amount={amount}
           tone={tone}
           rethinking={rethinking}
           busy={invest.busy}
           onNudge={onNudge}
           onInvest={onInvest}
+          basket={basketPlan?.basket}
+          goal={goal || undefined}
         />
       ) : (
         <GoalScreen go={go} />

@@ -11,6 +11,8 @@ import type { Holding } from "@/hooks/useBalances";
 import type { ActivityRow, VeraRecord } from "@/lib/onchainHistory";
 import type { AllocateResult, InvestSuccess } from "@/lib/invest-types";
 import type { Allocation } from "@/lib/allocation-schema";
+import type { Basket } from "@/lib/baskets";
+import type { MarketHistoryResponse, MarketRange } from "@/hooks/useMarket";
 
 const DEMO_CHAIN = getChain("base");
 
@@ -118,4 +120,51 @@ export function demoSuccess(alloc: Allocation, amountUsd: number): InvestSuccess
       amountUsd: (amountUsd * a.weightPct) / 100,
     })),
   };
+}
+
+// ── Baskets (demo) ────────────────────────────────────────────────────────────
+// One personal basket so the "Yours" section has something to show, plus a
+// deterministic history series per symbol (scaled from the display spark) so the
+// performance chips + sparklines work offline. Demo numbers, demo screens only.
+
+export function demoSeedBaskets(chain: "base" | "mantle"): Basket[] {
+  if (chain !== "base") return [];
+  const items = [
+    { symbol: "NVDA", weightPct: 30, reason: "Leads the AI boom." },
+    { symbol: "AAPL", weightPct: 25, reason: "A steady, profitable giant." },
+    { symbol: "GOOGL", weightPct: 25, reason: "Search, YouTube, and cloud in one name." },
+    { symbol: "aUSDC", weightPct: 20, reason: "A calm dollar cushion that still earns." },
+  ];
+  return [
+    {
+      id: "p_demo_first",
+      chain: "base",
+      name: "My first Stax",
+      tagline: "A balanced mix that grows over time and keeps some safe.",
+      emoji: "🧺",
+      color: "#57a07e",
+      items,
+      riskScore: 5000, // rehydrated on read by useBaskets
+      author: "you",
+      createdAt: Math.floor(Date.now() / 1000) - 12 * 86_400,
+      source: { goal: "Grow $300, mostly big names, keep some safe" },
+    },
+  ];
+}
+
+const DEMO_RANGE_SCALE: Record<MarketRange, number> = { "1D": 1, "1W": 2.4, "1M": 4.1, "1Y": 13, All: 22 };
+
+/** Demo price history for one symbol + range, shaped from its display sparkline. */
+export function demoHistory(symbol: string, range: MarketRange): MarketHistoryResponse {
+  const d = displayFor(symbol);
+  const changePct = Number((d.day * DEMO_RANGE_SCALE[range]).toFixed(2));
+  const base = d.price ?? 1;
+  const first = d.spark[0] || 1;
+  const last = d.spark[d.spark.length - 1] || 1;
+  // Rescale the spark so start→end equals changePct around the reference price.
+  const series = d.spark.map((v) => {
+    const t = (v - first) / (last - first || 1);
+    return Number((base * (1 + (changePct / 100) * t)).toFixed(4));
+  });
+  return { series, changePct, asOf: new Date(0).toISOString() };
 }

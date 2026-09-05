@@ -7,7 +7,12 @@
 //   - Aave v3 aToken (Base aUSDC): priced 1:1 with USDC; `apy` from the Pool's
 //     currentLiquidityRate (ray).
 //   - Assets with a Chainlink feed (`priceFeed`) ALSO report `marketPrice` — the
-//     reference market price (8 dec) — alongside the pool price a buy actually pays.
+//     reference market price (8 dec) — alongside the pool price a buy actually pays,
+//     plus `marketPriceAt` (the feed's `updatedAt`, unix seconds) so the UI can say
+//     how stale the reference is (feeds only move while the stock market is open).
+//   - Coinbase B20 stocks (Base) also report `sharesPerToken` = multiplier()/1e18:
+//     dividends are reinvested by growing the multiplier, so one token can be worth
+//     more than one share over time (1.0 today).
 //   - Anything without a pool/route: no live price (undefined), surfaced honestly.
 //
 // All math is integer (bigint) on raw units; we only convert to a JS number at the
@@ -15,7 +20,7 @@
 // the price you trade at. Reads are issued in parallel — the server client's
 // multicall batching folds them into one eth_call.
 import type { PublicClient } from "viem";
-import { AAVE_POOL_ABI, AGGREGATOR_V3_ABI, V3_POOL_ABI } from "./abis";
+import { AAVE_POOL_ABI, AGGREGATOR_V3_ABI, B20_ABI, V3_POOL_ABI } from "./abis";
 import type { Asset, RouteHop, StaxChain } from "./chains/types";
 
 const Q192 = (BigInt(2) ** BigInt(96)) ** BigInt(2);
@@ -31,6 +36,10 @@ export interface AssetPrice {
   priceUsd?: number;
   /** Reference market price from the asset's Chainlink feed (8 dec), when one exists. */
   marketPrice?: number;
+  /** When the feed last updated (unix seconds) — stale outside US market hours. */
+  marketPriceAt?: number;
+  /** Coinbase B20 stocks: shares one token represents (multiplier / 1e18; 1 today). */
+  sharesPerToken?: number;
   /** Supply APY in percent for yield assets (Aave v3), when applicable. */
   apy?: number;
   /** Where the price came from (for honesty in the UI / debugging). */
@@ -114,19 +123,39 @@ async function priceFromRoute(client: PublicClient, hops: RouteHop[]): Promise<n
   }
 }
 
-/** Chainlink AggregatorV3 reference price (8 dec) → USD number, or undefined. */
+/** Chainlink AggregatorV3 reference price (8 dec) → USD number + updatedAt, or undefined. */
 async function marketPriceFromFeed(
   client: PublicClient,
   feed: `0x${string}`,
-): Promise<number | undefined> {
+): Promise<{ price: number; at: number } | undefined> {
   try {
     const round = await client.readContract({ address: feed, abi: AGGREGATOR_V3_ABI, functionName: "latestRoundData" });
-    const answer = (round as readonly bigint[])[1];
+    const [, answer, , updatedAt] = round as readonly bigint[];
     if (answer <= ZERO) return undefined;
-    return Number(answer) / 1e8;
+    return { price: Number(answer) / 1e8, at: Number(updatedAt) };
   } catch {
     return undefined;
   }
+}
+
+/** Coinbase B20 `multiplier()` (WAD) → shares per token, or undefined if the call fails. */
+async function b20SharesPerToken(
+  client: PublicClient,
+  token: `0x${string}`,
+): Promise<number | undefined> {
+  try {
+    const wad = await client.readContract({ address: token, abi: B20_ABI, functionName: "multiplier" });
+    if ((wad as bigint) <= ZERO) return undefined;
+    // 6 dp is plenty for display ("1 token = 1.02 shares") and avoids float noise.
+    return Number((wad as bigint) / BigInt(1e12)) / 1e6;
+  } catch {
+    return undefined;
+  }
+}
+
+/** True for Coinbase-issued B20 stock tokens (Base stock tier with an address). */
+function isB20Stock(chain: StaxChain, asset: Asset): asset is Asset & { address: `0x${string}` } {
+  return chain.key === "base" && asset.tier === "stock" && Boolean(asset.address);
 }
 
 /** Aave v3 supply APY (percent) for USDC on this chain, from currentLiquidityRate (ray). */
@@ -155,7 +184,9 @@ export async function priceAsset(
   client: PublicClient,
   asset: Asset,
 ): Promise<AssetPrice> {
+  // Kicked off first so the multicall batcher folds them in with the pool reads.
   const marketPromise = asset.priceFeed ? marketPriceFromFeed(client, asset.priceFeed) : Promise.resolve(undefined);
+  const sharesPromise = isB20Stock(chain, asset) ? b20SharesPerToken(client, asset.address) : Promise.resolve(undefined);
 
   let priceUsd: number | undefined;
   let source: PriceSource = "none";
@@ -174,9 +205,13 @@ export async function priceAsset(
     if (priceUsd !== undefined) source = "agni_route";
   }
 
-  const marketPrice = await marketPromise;
+  const [market, sharesPerToken] = await Promise.all([marketPromise, sharesPromise]);
   const out: AssetPrice = { symbol: asset.symbol, priceUsd, source };
-  if (marketPrice !== undefined) out.marketPrice = marketPrice;
+  if (market !== undefined) {
+    out.marketPrice = market.price;
+    out.marketPriceAt = market.at;
+  }
+  if (sharesPerToken !== undefined) out.sharesPerToken = sharesPerToken;
   if (apy !== undefined) out.apy = apy;
   return out;
 }

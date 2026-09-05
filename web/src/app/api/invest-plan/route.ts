@@ -2,6 +2,8 @@ import type { NextRequest } from "next/server";
 import { isAddress } from "viem";
 import { z } from "zod";
 import { AllocationSchema } from "@/lib/allocation-schema";
+import { isRoutable } from "@/lib/chains";
+import { riskScoreFor } from "@/lib/baskets";
 import { buildLegs } from "@/lib/legBuilder";
 import { buildPlanId, recHash, signRiskInference } from "@/lib/eip712";
 import { netOf } from "@/lib/fees";
@@ -54,6 +56,15 @@ export async function POST(req: NextRequest) {
   try {
     const { allocation, amountUsd } = body;
 
+    // Baskets / shared links: every holding must be buyable on this chain. Name the
+    // offenders (they're our own tickers, not user input echoed back).
+    const notRoutable = allocation.allocations
+      .map((a) => a.symbol)
+      .filter((s) => !isRoutable(chain, s));
+    if (notRoutable.length > 0) {
+      return badRequest(`Not buyable on ${chain.name} yet: ${[...new Set(notRoutable)].join(", ")}.`);
+    }
+
     // USDC is 6dp. Round to whole micro-USDC. The platform fee is skimmed by the
     // client (a batched USDC transfer to the treasury), so we deploy the NET into
     // assets — build the legs against the net so they sum correctly.
@@ -80,7 +91,15 @@ export async function POST(req: NextRequest) {
     }
 
     const planId = buildPlanId(allocation, nowSeconds);
-    const assessedRisk = Math.max(0, Math.min(RISK_CEILING_BPS, Math.round(allocation.riskScore)));
+    // The signed risk is never lower than what the weights imply by tier, so a
+    // hand-edited link (or a generous model) can't understate it.
+    const assessedRisk = Math.max(
+      0,
+      Math.min(
+        RISK_CEILING_BPS,
+        Math.max(Math.round(allocation.riskScore), riskScoreFor(chain, allocation.allocations)),
+      ),
+    );
     const maxRisk = Math.min(RISK_CEILING_BPS, assessedRisk + RISK_HEADROOM_BPS);
     const expiry = BigInt(nowSeconds + EXPIRY_SECONDS);
 

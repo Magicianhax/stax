@@ -12,23 +12,22 @@ import { useState } from "react";
 import type { Asset } from "@/lib/chains";
 import { useChain } from "@/lib/chains/active";
 import { usePortfolio } from "@/hooks/useBalances";
-import { usePrices } from "@/hooks/usePrices";
+import { useAssetPrice } from "@/hooks/usePrices";
 import { useMarketHistory, type MarketRange } from "@/hooks/useMarket";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { displayFor } from "@/lib/displayAssets";
-import { Icon, AssetTile, PriceChart, SectionTitle, Stat } from "@/components/design";
-import { usd, tokenQty } from "@/lib/format";
+import { Icon, AssetTile, PriceChart, SectionTitle, Stat, MarketStatus } from "@/components/design";
+import { usd, tokenQty, timeAgo } from "@/lib/format";
 import { iconBtn } from "./primitives";
 import { ComingTag, yieldLine } from "./MarketScreen";
 
 const RANGES = ["1D", "1W", "1M", "1Y", "All"];
 
-// Live venue price + supply rate for one symbol (the rate only exists for the
-// safe tier, e.g. Aave on Base).
-function usePriceWithApy(symbol: string): { priceUsd?: number; apy?: number } {
-  const { data } = usePrices();
-  const p = data?.prices[symbol];
-  return { priceUsd: p?.priceUsd, apy: p?.apy };
+/** One key-fact row; `wide` stacks label over value for sentence-length facts. */
+interface Fact {
+  k: string;
+  v: string;
+  wide?: boolean;
 }
 
 export function AssetDetailScreen({
@@ -44,9 +43,14 @@ export function AssetDetailScreen({
   const { address } = useSmartAccount();
   const { data: port } = usePortfolio(address ?? undefined);
   const holding = port?.holdings.find((h) => h.asset.symbol === asset.symbol);
-  const { priceUsd: livePrice, apy: liveApy } = usePriceWithApy(asset.symbol);
+  const { price: live } = useAssetPrice(asset.symbol);
+  const livePrice = live?.priceUsd;
+  const liveApy = live?.apy;
   const shownPrice = livePrice ?? d.price;
   const safe = asset.tier === "safe";
+  const stock = asset.tier === "stock";
+  // Coinbase B20 stocks (Base): dividends grow the token instead of paying cash.
+  const coinbaseStock = stock && chain.key === "base";
   const yieldText = safe ? yieldLine(liveApy, d.apy) : undefined;
   const coming = Boolean(asset.coming || d.coming);
   const [r, setR] = useState(2);
@@ -81,7 +85,7 @@ export function AssetDetailScreen({
   };
   const heldAs =
     d.kind === "crypto" ? "Tokenized coin" : d.kind === "safe" ? "Yield account" : "Real shares";
-  const facts: { k: string; v: string }[] = [
+  const facts: Fact[] = [
     { k: "Type", v: TYPE_LABEL[d.kind ?? "stock"] ?? "Stock" },
     { k: "Category", v: d.cat },
     ...(yieldText
@@ -89,8 +93,24 @@ export function AssetDetailScreen({
       : d.apy
         ? [{ k: "Rate", v: `about ${d.apy.replace("~", "")} a year, can change` }]
         : []),
+    // Reference price = the last official stock-market price (Chainlink), with
+    // its age — it only moves while the market is open, so "2h ago" is honest.
+    ...(live?.marketPrice !== undefined
+      ? [
+          {
+            k: "Reference price",
+            v: `${usd(live.marketPrice)}${live.marketPriceAt ? ` · updated ${timeAgo(live.marketPriceAt)}` : ""}`,
+          },
+        ]
+      : []),
     { k: "Held as", v: heldAs },
-    ...(asset.tier === "stock" ? [{ k: "Issued by", v: chain.issuer.replace(" tokenized stocks", "") }] : []),
+    ...(live?.sharesPerToken !== undefined && live.sharesPerToken !== 1
+      ? [{ k: "Shares per token", v: `1 token = ${live.sharesPerToken.toFixed(2)} shares` }]
+      : []),
+    ...(coinbaseStock
+      ? [{ k: "Dividends", v: "Reinvested automatically — your token grows instead of paying cash", wide: true }]
+      : []),
+    ...(stock ? [{ k: "Issued by", v: chain.issuer.replace(" tokenized stocks", "") }] : []),
     { k: "Network", v: chain.name },
   ];
   const reason = coming
@@ -135,6 +155,12 @@ export function AssetDetailScreen({
           >
             {(winUp ? "+" : "") + rangeChange.toFixed(2)}%{" "}
             <span style={{ color: "var(--ink-3)", fontWeight: 600 }}>· {RANGES[r]}</span>
+          </div>
+        )}
+        {/* stock-market clock — only stocks have a market that closes */}
+        {stock && (
+          <div style={{ marginTop: 14 }}>
+            <MarketStatus detail />
           </div>
         )}
       </div>
@@ -206,16 +232,19 @@ export function AssetDetailScreen({
               key={f.k}
               style={{
                 display: "flex",
+                flexDirection: f.wide ? "column" : "row",
                 justifyContent: "space-between",
-                alignItems: "center",
-                gap: 16,
+                alignItems: f.wide ? "stretch" : "center",
+                gap: f.wide ? 3 : 16,
                 padding: "12px 0",
                 borderTop: i ? "1px solid var(--line-2)" : "none",
                 fontSize: 14.5,
               }}
             >
-              <span style={{ color: "var(--ink-2)" }}>{f.k}</span>
-              <span style={{ fontWeight: 600, color: "var(--ink)", textAlign: "right" }}>{f.v}</span>
+              <span style={{ color: "var(--ink-2)", flex: "none" }}>{f.k}</span>
+              <span style={{ fontWeight: 600, color: "var(--ink)", textAlign: f.wide ? "left" : "right", lineHeight: 1.4 }}>
+                {f.v}
+              </span>
             </div>
           ))}
         </div>
