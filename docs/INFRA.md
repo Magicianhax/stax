@@ -74,6 +74,19 @@ Indexes: `autopilots (active, next_run_at)`, `executor_events (chain, user)`, `e
   logs from the Mantle-era Supabase imported with `npm run db:import -- scripts/supabase-dump.json`
   (ids preserved, `chain = 'mantle'`, checksums matched the source).
 
+## Private beta
+
+Waitlist + gate + admin console per `docs/BETA.md`; tables `waitlist` and `waitlist_events` (migration
+`0002_harsh_christian_walker`). Flag `NEXT_PUBLIC_PRIVATE_BETA=true` (server reads the same var via
+`lib/beta.ts:isBetaOn()`); `ADMIN_USER_IDS` / `ADMIN_EMAILS` (server-only comma lists) name the admins;
+`NEXT_PUBLIC_SITE_URL` prefixes referral links (default `https://www.stax.best`). Store:
+`lib/server/waitlist.ts`; guards: `lib/server/admin.ts` (`requireApproved` on the five money routes,
+`requireAdmin` on `/api/admin/beta`). Position is never stored — it is computed per query over waiting
+rows as `rank() over (order by referrals desc, created_at asc)`, with referrals = rows whose
+`referred_by` is this row's `ref_code` and status ≠ blocked. Admin listing is keyset-paginated on
+`(sort_key, -referrals, created_at, id)`. Emails come from Privy linked accounts (cached in
+`users.email`). `npm run db:smoke` covers a two-user join with a referral, positions, approve, access.
+
 ## Verification
 
 `npm run db:migrate` against Neon succeeds; a smoke script inserts + claims an autopilot, upserts

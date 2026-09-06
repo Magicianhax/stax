@@ -9,6 +9,7 @@ import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { isAddress } from "viem";
 import { chainKeyFromRequest } from "@/lib/server/chain";
+import { requireApproved } from "@/lib/server/admin";
 import { verifyRequest } from "@/lib/server/privyAuth";
 import { rateLimit } from "@/lib/server/rateLimit";
 import { unauthorized, badRequest, tooManyRequests, serverError } from "@/lib/server/respond";
@@ -40,6 +41,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const user = await verifyRequest(req);
   if (!user) return unauthorized();
+  // Private beta: only approved users may spend (no-op while NEXT_PUBLIC_PRIVATE_BETA is off).
+  const gate = await requireApproved(user);
+  if (gate) return gate;
   const limit = rateLimit(`autopilot:${user.userId}`, 20, 60_000);
   if (!limit.ok) return tooManyRequests(limit.retryAfter);
 

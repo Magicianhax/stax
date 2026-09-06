@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { AllocateRequestSchema } from "@/lib/allocation-schema";
 import { buildAllocation, ALLOCATE_MODEL } from "@/lib/server/allocate";
 import { chainFromRequest } from "@/lib/server/chain";
+import { requireApproved } from "@/lib/server/admin";
 import { verifyRequest } from "@/lib/server/privyAuth";
 import { rateLimit } from "@/lib/server/rateLimit";
 import { unauthorized, badRequest, tooManyRequests, serverError } from "@/lib/server/respond";
@@ -19,6 +20,9 @@ export async function POST(req: NextRequest) {
   // C-2: only a signed-in user can spend Anthropic tokens.
   const user = await verifyRequest(req);
   if (!user) return unauthorized();
+  // Private beta: only approved users may spend (no-op while NEXT_PUBLIC_PRIVATE_BETA is off).
+  const gate = await requireApproved(user);
+  if (gate) return gate;
 
   // M-5: cap AI calls per user (cost-amplification guard).
   const limit = rateLimit(`allocate:${user.userId}`, 12, 60_000);

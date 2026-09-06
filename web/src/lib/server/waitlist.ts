@@ -1,0 +1,584 @@
+import "server-only";
+
+// Private-beta waitlist store (Postgres). Contract: docs/BETA.md.
+//   joinWaitlist()     idempotent join for a signed-in user (links an admin-added row by
+//                      address/email, honours a referral code once, logs `joined`).
+//   getAccess()        the caller's Access — position + referrals computed in SQL.
+//   getStats()         public counts.
+//   listAdmin()        search + status filter + keyset pagination, sorted by position.
+//   approve/block/unblock/approveTop/addEntries/setNote — admin actions, each audited.
+//
+// Position is never stored. Over waiting rows only:
+//   rank() over (order by referrals desc, created_at asc)
+// where referrals = count of rows whose referred_by = this row's ref_code and status != 'blocked'.
+import { randomBytes } from "node:crypto";
+import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
+import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
+import { isAddress } from "viem";
+import type { Access, AdminRow, AdminStats, BetaStats, WaitlistStatus } from "@/lib/beta";
+import { isBetaOn } from "@/lib/beta";
+import { db, users, waitlist, waitlistEvents, type WaitlistRow } from "@/lib/db";
+import { fetchPrivyEmail } from "@/lib/server/privyAuth";
+import { touchUser } from "@/lib/server/users";
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+type Executor = typeof db | Tx;
+
+// ---------- ids + codes ----------
+
+const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+/** Lowercase + digits with the look-alikes (0/o, 1/l/i) removed — safe to read aloud or retype. */
+const REF_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
+export const REF_CODE_LENGTH = 8;
+const REF_CODE_RE = /^[a-z0-9]{6,12}$/;
+
+function randomFrom(alphabet: string, length: number): string {
+  // Rejection sampling keeps the distribution uniform (256 % alphabet.length != 0).
+  const max = 256 - (256 % alphabet.length);
+  let out = "";
+  while (out.length < length) {
+    for (const b of randomBytes(length * 2)) {
+      if (b < max) {
+        out += alphabet[b % alphabet.length];
+        if (out.length === length) break;
+      }
+    }
+  }
+  return out;
+}
+
+const newId = () => randomFrom(BASE62, 12);
+const newRefCode = () => randomFrom(REF_ALPHABET, REF_CODE_LENGTH);
+
+/** Normalise a user-supplied referral code; null when it can't be a code at all. */
+export function normalizeRefCode(ref: string | null | undefined): string | null {
+  const v = ref?.trim().toLowerCase() ?? "";
+  return REF_CODE_RE.test(v) ? v : null;
+}
+
+/** Normalise an address; null when it isn't one. */
+export function normalizeAddress(address: string | null | undefined): string | null {
+  const v = address?.trim() ?? "";
+  return v && isAddress(v) ? v.toLowerCase() : null;
+}
+
+export function normalizeEmail(email: string | null | undefined): string | null {
+  const v = email?.trim().toLowerCase() ?? "";
+  return v.length >= 3 && v.length <= 254 && v.includes("@") ? v : null;
+}
+
+/** Postgres unique_violation. */
+function isUniqueViolation(e: unknown, constraint?: string): boolean {
+  const err = e as { code?: string; constraint?: string } | null;
+  if (err?.code !== "23505") return false;
+  return constraint ? err.constraint === constraint : true;
+}
+
+// ---------- email ----------
+
+/**
+ * The user's email: the cached `users.email` when known, else Privy's linked accounts
+ * (cached back into `users.email`). Null when neither knows one.
+ */
+export async function resolveUserEmail(userId: string): Promise<string | null> {
+  const [u] = await db.select({ email: users.email }).from(users).where(eq(users.id, userId)).limit(1);
+  if (u?.email) return u.email.toLowerCase();
+  const email = await fetchPrivyEmail(userId);
+  if (email) await touchUser(userId, email);
+  return email;
+}
+
+// ---------- position SQL ----------
+
+/**
+ * Every waitlist row with its referral count and (for waiting rows) its position.
+ * Usage: `with ${RANKED_CTE} select ... from ranked`.
+ */
+const RANKED_CTE = sql`
+  counts as (
+    select referred_by as ref_code, count(*)::int as referrals
+    from waitlist
+    where referred_by is not null and status <> 'blocked'
+    group by referred_by
+  ),
+  ranked as (
+    select
+      w.*,
+      coalesce(c.referrals, 0)::int as referrals,
+      case when w.status = 'waiting' then
+        rank() over (partition by w.status order by coalesce(c.referrals, 0) desc, w.created_at asc)::int
+      end as position,
+      case w.status when 'waiting' then 0 when 'approved' then 1 else 2 end as sort_key,
+      to_char(w.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as created_iso,
+      to_char(w.approved_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as approved_iso
+    from waitlist w
+    left join counts c on c.ref_code = w.ref_code
+  )`;
+
+type RankedRow = {
+  id: string;
+  user_id: string | null;
+  address: string | null;
+  email: string | null;
+  status: WaitlistStatus;
+  ref_code: string;
+  referred_by: string | null;
+  source: string | null;
+  note: string | null;
+  referrals: number;
+  position: number | null;
+  sort_key: number;
+  /** Microsecond-exact ISO strings (raw `db.execute` rows don't get drizzle's Date mapping). */
+  created_iso: string;
+  approved_iso: string | null;
+};
+
+const seconds = (iso: string | null) => (iso ? Math.floor(Date.parse(iso) / 1000) : null);
+
+function siteUrl(): string {
+  return (process.env.NEXT_PUBLIC_SITE_URL || "https://www.stax.best").replace(/\/+$/, "");
+}
+
+export function referralUrlFor(refCode: string): string {
+  return `${siteUrl()}/beta?ref=${refCode}`;
+}
+
+async function countWaiting(ex: Executor): Promise<number> {
+  const [row] = await ex
+    .select({ n: sql<number>`count(*)::int` })
+    .from(waitlist)
+    .where(eq(waitlist.status, "waiting"));
+  return row?.n ?? 0;
+}
+
+function accessNone(waiting: number): Access {
+  return {
+    beta: isBetaOn(),
+    status: "none",
+    position: null,
+    waiting,
+    refCode: null,
+    referrals: 0,
+    referralUrl: null,
+    joinedAt: null,
+  };
+}
+
+/** The signed-in user's Access (status 'none' when not on the list). */
+export async function getAccess(userId: string): Promise<Access> {
+  const res = await db.execute<RankedRow>(sql`with ${RANKED_CTE} select * from ranked where user_id = ${userId} limit 1`);
+  const row = res.rows[0];
+  const waiting = await countWaiting(db);
+  if (!row) return accessNone(waiting);
+  return {
+    beta: isBetaOn(),
+    status: row.status,
+    position: row.status === "waiting" ? row.position : null,
+    waiting,
+    refCode: row.ref_code,
+    referrals: row.referrals,
+    referralUrl: referralUrlFor(row.ref_code),
+    joinedAt: seconds(row.created_iso),
+  };
+}
+
+/** Status only — the cheap read the money-route guard uses. */
+export async function getStatus(userId: string): Promise<WaitlistStatus | "none"> {
+  const [row] = await db
+    .select({ status: waitlist.status })
+    .from(waitlist)
+    .where(eq(waitlist.userId, userId))
+    .limit(1);
+  return (row?.status as WaitlistStatus | undefined) ?? "none";
+}
+
+// ---------- join ----------
+
+async function logEvent(
+  ex: Executor,
+  waitlistId: string,
+  actor: string,
+  action: "joined" | "approved" | "blocked" | "unblocked" | "note" | "imported",
+  meta?: Record<string, unknown>,
+): Promise<void> {
+  await ex.insert(waitlistEvents).values({ waitlistId, actor, action, meta: meta ?? null });
+}
+
+/** Id of the row that already holds `address` (unique), if any. */
+async function addressOwner(ex: Executor, address: string): Promise<string | null> {
+  const [row] = await ex.select({ id: waitlist.id }).from(waitlist).where(eq(waitlist.address, address)).limit(1);
+  return row?.id ?? null;
+}
+
+export interface JoinInput {
+  userId: string;
+  /** Already validated by the route; lowercased here. */
+  address?: string | null;
+  ref?: string | null;
+  /** Pass to skip the Privy lookup (tests); undefined → resolveUserEmail(). */
+  email?: string | null;
+}
+
+/**
+ * Join (or re-read) the list for a signed-in user. Idempotent: a second call returns the
+ * same row. Order of resolution: the user's own row → an admin-added row matching the
+ * address or email (linked to the user) → a new row. `ref` is honoured only for a new
+ * row and only when it names an existing, non-blocked row.
+ */
+export async function joinWaitlist(input: JoinInput): Promise<Access> {
+  const address = normalizeAddress(input.address);
+  const ref = normalizeRefCode(input.ref);
+  const email = input.email === undefined ? await resolveUserEmail(input.userId) : normalizeEmail(input.email);
+  await touchUser(input.userId, email);
+
+  await db.transaction(async (tx) => {
+    // 1. Already on the list?
+    const [own] = await tx.select().from(waitlist).where(eq(waitlist.userId, input.userId)).limit(1);
+    if (own) {
+      await fillIn(tx, own, address, email);
+      return;
+    }
+
+    // 2. An admin-added row for this address / email → link it.
+    const matches: SQL[] = [];
+    if (address) matches.push(eq(waitlist.address, address));
+    if (email) matches.push(sql`lower(${waitlist.email}) = ${email}`);
+    if (matches.length) {
+      const [orphan] = await tx
+        .select()
+        .from(waitlist)
+        .where(and(sql`${waitlist.userId} is null`, sql.join(matches, sql` or `)))
+        .orderBy(waitlist.createdAt)
+        .limit(1);
+      if (orphan) {
+        await tx.update(waitlist).set({ userId: input.userId }).where(eq(waitlist.id, orphan.id));
+        await fillIn(tx, { ...orphan, userId: input.userId }, address, email);
+        await logEvent(tx, orphan.id, "system", "joined", { linked: true, address, email });
+        return;
+      }
+    }
+
+    // 3. New row. The referrer must exist and not be blocked; "not self" is implied
+    //    (the caller has no row yet) — but never let a code point at the address we're inserting.
+    let referredBy: string | null = null;
+    if (ref) {
+      const [referrer] = await tx
+        .select({ refCode: waitlist.refCode, address: waitlist.address })
+        .from(waitlist)
+        .where(and(eq(waitlist.refCode, ref), sql`${waitlist.status} <> 'blocked'`))
+        .limit(1);
+      if (referrer && !(address && referrer.address === address)) referredBy = referrer.refCode;
+    }
+    // An address already on someone else's row is not ours to claim.
+    const freeAddress = address && !(await addressOwner(tx, address)) ? address : null;
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const id = newId();
+      const refCode = newRefCode();
+      try {
+        await tx.insert(waitlist).values({
+          id,
+          userId: input.userId,
+          address: freeAddress,
+          email,
+          status: "waiting",
+          refCode,
+          referredBy,
+          source: "beta-page",
+        });
+        await logEvent(tx, id, "system", "joined", { address: freeAddress, email, ref: referredBy });
+        return;
+      } catch (e) {
+        // Collision on our own random id / code: draw again. Anything else propagates.
+        if (isUniqueViolation(e, "waitlist_ref_code_key") || isUniqueViolation(e, "waitlist_pkey")) continue;
+        throw e;
+      }
+    }
+    throw new Error("waitlist: could not allocate a unique ref code");
+  });
+
+  return getAccess(input.userId);
+}
+
+/** Backfill address / email on an existing row when we now know them and they're free. */
+async function fillIn(tx: Tx, row: WaitlistRow, address: string | null, email: string | null): Promise<void> {
+  const set: PgUpdateSetSource<typeof waitlist> = {};
+  if (address && !row.address && !(await addressOwner(tx, address))) set.address = address;
+  if (email && !row.email) set.email = email;
+  if (Object.keys(set).length) await tx.update(waitlist).set(set).where(eq(waitlist.id, row.id));
+}
+
+// ---------- stats ----------
+
+export async function getStats(): Promise<BetaStats> {
+  const [row] = await db
+    .select({
+      waiting: sql<number>`count(*) filter (where ${waitlist.status} = 'waiting')::int`,
+      approved: sql<number>`count(*) filter (where ${waitlist.status} = 'approved')::int`,
+      total: sql<number>`count(*)::int`,
+    })
+    .from(waitlist);
+  return { waiting: row?.waiting ?? 0, approved: row?.approved ?? 0, total: row?.total ?? 0 };
+}
+
+export async function getAdminStats(): Promise<AdminStats> {
+  const [row] = await db
+    .select({
+      waiting: sql<number>`count(*) filter (where ${waitlist.status} = 'waiting')::int`,
+      approved: sql<number>`count(*) filter (where ${waitlist.status} = 'approved')::int`,
+      blocked: sql<number>`count(*) filter (where ${waitlist.status} = 'blocked')::int`,
+      total: sql<number>`count(*)::int`,
+      referrals: sql<number>`count(*) filter (where ${waitlist.referredBy} is not null and ${waitlist.status} <> 'blocked')::int`,
+    })
+    .from(waitlist);
+  return {
+    waiting: row?.waiting ?? 0,
+    approved: row?.approved ?? 0,
+    blocked: row?.blocked ?? 0,
+    total: row?.total ?? 0,
+    referrals: row?.referrals ?? 0,
+  };
+}
+
+// ---------- admin list ----------
+
+export interface ListInput {
+  status?: WaitlistStatus | null;
+  q?: string | null;
+  cursor?: string | null;
+  limit?: number;
+}
+
+/** Keyset cursor = the sort tuple of the last row on the page. */
+interface Cursor {
+  s: number; // sort_key
+  r: number; // referrals
+  c: string; // created_at as a microsecond-exact ISO string (created_iso)
+  i: string; // id
+}
+
+function encodeCursor(c: Cursor): string {
+  return Buffer.from(JSON.stringify(c), "utf8").toString("base64url");
+}
+
+function decodeCursor(raw: string | null | undefined): Cursor | null {
+  if (!raw) return null;
+  try {
+    const c = JSON.parse(Buffer.from(raw, "base64url").toString("utf8")) as Partial<Cursor>;
+    if (
+      typeof c.s === "number" &&
+      typeof c.r === "number" &&
+      typeof c.c === "string" &&
+      !Number.isNaN(Date.parse(c.c)) &&
+      typeof c.i === "string"
+    ) {
+      return { s: c.s, r: c.r, c: c.c, i: c.i };
+    }
+  } catch {
+    /* malformed → first page */
+  }
+  return null;
+}
+
+const escapeLike = (s: string) => s.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+
+function toAdminRow(r: RankedRow): AdminRow {
+  return {
+    id: r.id,
+    userId: r.user_id,
+    address: r.address,
+    email: r.email,
+    status: r.status,
+    refCode: r.ref_code,
+    referredBy: r.referred_by,
+    referrals: r.referrals,
+    position: r.status === "waiting" ? r.position : null,
+    source: r.source,
+    note: r.note,
+    createdAt: seconds(r.created_iso) ?? 0,
+    approvedAt: seconds(r.approved_iso),
+  };
+}
+
+export const ADMIN_LIST_MAX = 200;
+
+/**
+ * Rows sorted by position (waiting first by rank, then approved, then blocked; ties by
+ * created_at, id), filtered by status and a free-text `q` over email / address / refCode /
+ * userId / id. Keyset paginated: pass back `next` as `cursor`.
+ */
+export async function listAdmin(input: ListInput): Promise<{ rows: AdminRow[]; next: string | null }> {
+  const limit = Math.min(Math.max(1, input.limit ?? 50), ADMIN_LIST_MAX);
+  const where: SQL[] = [];
+  if (input.status) where.push(sql`status = ${input.status}`);
+  const q = input.q?.trim().toLowerCase();
+  if (q) {
+    const like = `%${escapeLike(q)}%`;
+    where.push(
+      sql`(lower(email) like ${like} or address like ${like} or ref_code like ${like} or lower(user_id) like ${like} or lower(id) like ${like})`,
+    );
+  }
+  const cursor = decodeCursor(input.cursor);
+  if (cursor) {
+    // Row-value comparison walks the exact ORDER BY below (referrals negated so every key ascends).
+    where.push(
+      sql`(sort_key, -referrals, created_at, id) > (${cursor.s}, ${-cursor.r}, ${cursor.c}::timestamptz, ${cursor.i})`,
+    );
+  }
+  const whereSql = where.length ? sql`where ${sql.join(where, sql` and `)}` : sql``;
+  const res = await db.execute<RankedRow>(sql`
+    with ${RANKED_CTE}
+    select * from ranked
+    ${whereSql}
+    order by sort_key asc, referrals desc, created_at asc, id asc
+    limit ${limit + 1}`);
+  const page = res.rows.slice(0, limit);
+  const last = page[page.length - 1];
+  const next =
+    res.rows.length > limit && last
+      ? encodeCursor({ s: last.sort_key, r: last.referrals, c: last.created_iso, i: last.id })
+      : null;
+  return { rows: page.map(toAdminRow), next };
+}
+
+// ---------- admin actions ----------
+
+const adminActor = (adminUserId: string) => `admin:${adminUserId}`;
+
+async function transition(
+  ids: string[],
+  to: WaitlistStatus,
+  action: "approved" | "blocked" | "unblocked",
+  adminUserId: string,
+): Promise<number> {
+  if (!ids.length) return 0;
+  return db.transaction(async (tx) => {
+    const set: PgUpdateSetSource<typeof waitlist> = { status: to };
+    if (to === "approved") set.approvedAt = sql`now()`;
+    if (to === "blocked") set.blockedAt = sql`now()`;
+    if (action === "unblocked") set.blockedAt = null;
+    const guard = action === "unblocked" ? eq(waitlist.status, "blocked") : sql`${waitlist.status} <> ${to}`;
+    const changed = await tx
+      .update(waitlist)
+      .set(set)
+      .where(and(inArray(waitlist.id, ids), guard))
+      .returning({ id: waitlist.id });
+    if (changed.length) {
+      await tx
+        .insert(waitlistEvents)
+        .values(changed.map((r) => ({ waitlistId: r.id, actor: adminActor(adminUserId), action, meta: null })));
+    }
+    return changed.length;
+  });
+}
+
+export const approve = (ids: string[], adminUserId: string) => transition(ids, "approved", "approved", adminUserId);
+export const block = (ids: string[], adminUserId: string) => transition(ids, "blocked", "blocked", adminUserId);
+/** Blocked → waiting (the row keeps its created_at, so its old position is restored). */
+export const unblock = (ids: string[], adminUserId: string) => transition(ids, "waiting", "unblocked", adminUserId);
+
+/** Approve the top `n` waiting rows by position. */
+export async function approveTop(n: number, adminUserId: string): Promise<number> {
+  const take = Math.min(Math.max(0, Math.floor(n)), 1000);
+  if (!take) return 0;
+  const res = await db.execute<{ id: string }>(sql`
+    with ${RANKED_CTE}
+    select id from ranked where status = 'waiting'
+    order by position asc, created_at asc, id asc
+    limit ${take}`);
+  return approve(
+    res.rows.map((r) => r.id),
+    adminUserId,
+  );
+}
+
+export interface AddEntry {
+  address?: string | null;
+  email?: string | null;
+  note?: string | null;
+}
+
+/**
+ * Admin "add": each entry becomes an approved row (`source: 'admin'`), or approves the row
+ * that already holds that address / email. Entries with neither a valid address nor an
+ * email are skipped. Returns how many rows were created or newly approved.
+ */
+export async function addEntries(entries: AddEntry[], adminUserId: string): Promise<number> {
+  const actor = adminActor(adminUserId);
+  let changed = 0;
+  await db.transaction(async (tx) => {
+    for (const entry of entries) {
+      const address = normalizeAddress(entry.address);
+      const email = normalizeEmail(entry.email);
+      const note = entry.note?.trim().slice(0, 500) || null;
+      if (!address && !email) continue;
+
+      const matches: SQL[] = [];
+      if (address) matches.push(eq(waitlist.address, address));
+      if (email) matches.push(sql`lower(${waitlist.email}) = ${email}`);
+      const [existing] = await tx
+        .select()
+        .from(waitlist)
+        .where(sql.join(matches, sql` or `))
+        .orderBy(waitlist.createdAt)
+        .limit(1);
+
+      if (existing) {
+        const set: PgUpdateSetSource<typeof waitlist> = {};
+        if (existing.status !== "approved") {
+          set.status = "approved";
+          set.approvedAt = sql`now()`;
+          set.blockedAt = null;
+        }
+        if (address && !existing.address && !(await addressOwner(tx, address))) set.address = address;
+        if (email && !existing.email) set.email = email;
+        if (note) set.note = note;
+        if (Object.keys(set).length) await tx.update(waitlist).set(set).where(eq(waitlist.id, existing.id));
+        if (set.status) {
+          await logEvent(tx, existing.id, actor, "approved", { via: "add" });
+          changed++;
+        } else if (note) {
+          await logEvent(tx, existing.id, actor, "note", { note });
+        }
+        continue;
+      }
+
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const id = newId();
+        try {
+          await tx.insert(waitlist).values({
+            id,
+            address,
+            email,
+            status: "approved",
+            refCode: newRefCode(),
+            source: "admin",
+            note,
+            approvedAt: sql`now()`,
+          });
+          await logEvent(tx, id, actor, "imported", { source: "admin", address, email });
+          await logEvent(tx, id, actor, "approved", { via: "add" });
+          changed++;
+          break;
+        } catch (e) {
+          if (isUniqueViolation(e, "waitlist_ref_code_key") || isUniqueViolation(e, "waitlist_pkey")) continue;
+          throw e;
+        }
+      }
+    }
+  });
+  return changed;
+}
+
+export async function setNote(id: string, note: string, adminUserId: string): Promise<number> {
+  const clean = note.trim().slice(0, 500);
+  return db.transaction(async (tx) => {
+    const changed = await tx
+      .update(waitlist)
+      .set({ note: clean || null })
+      .where(eq(waitlist.id, id))
+      .returning({ id: waitlist.id });
+    if (changed.length) await logEvent(tx, id, adminActor(adminUserId), "note", { note: clean || null });
+    return changed.length;
+  });
+}

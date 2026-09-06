@@ -124,6 +124,7 @@
 .subRow {
   display: flex;
   align-items: center;
+  gap: 22px;
   margin-top: 12px;
 }
 
@@ -182,7 +183,7 @@
   .subRow {
     justify-content: center;
   }
-  .film {
+  .film:only-child {
     margin-inline: auto;
   }
   .event {

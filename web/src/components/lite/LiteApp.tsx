@@ -23,6 +23,9 @@ import { haptic } from "@/lib/haptics";
 import { TabBar, type TabId, useToast } from "@/components/design";
 import { InstallPrompt } from "@/components/app/InstallPrompt";
 import { useDemo } from "@/components/demo/DemoProvider";
+import { useBetaAccess, isBetaOn } from "@/hooks/useBetaAccess";
+import { LoadingScreen } from "@/components/shared/AppShell";
+import { BetaGateScreen } from "./screens/BetaGateScreen";
 import { HomeScreen } from "./screens/HomeScreen";
 import { GoalScreen } from "./screens/GoalScreen";
 import { ThinkingScreen } from "./screens/ThinkingScreen";
@@ -103,6 +106,11 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
   const { address } = useSmartAccount();
   const { notify } = useToast();
   const demo = useDemo();
+  // Private beta (docs/BETA.md): real mode only, never the demo. Resolved
+  // after Privy auth; the splash holds until we know, then the gate replaces
+  // the whole app unless the person is approved. Rendered below, after hooks.
+  const beta = useBetaAccess();
+  const gated = isBetaOn() && !demo;
 
   const [stack, setStack] = useState<Route[]>([{ screen: "home", params: {} }]);
   const current = stack[stack.length - 1];
@@ -401,6 +409,13 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
       setDragX(0); // snap back
     }
   };
+
+  if (gated) {
+    if (beta.loading && !beta.error) return <LoadingScreen />;
+    if (beta.error || !beta.access || (beta.access.beta && beta.access.status !== "approved")) {
+      return <BetaGateScreen access={beta.access} error={beta.error} onRetry={beta.refresh} />;
+    }
+  }
 
   // Tabs visible only on the root browse screens.
   const showTabs =

@@ -7,7 +7,9 @@
 // divider. Under 720px the links live behind a 44px menu button that opens a
 // full-width glass sheet (Escape closes, focus stays inside, aria-expanded).
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isBetaOn } from "@/lib/beta";
 import { ArrowRight, Menu, X } from "lucide-react";
 import { ShineButton } from "@/components/site/ui/ShineButton";
 import L from "./layout.module.css";
@@ -59,6 +61,9 @@ function useActiveSection(): string | null {
 export function Nav() {
   const scrolled = useScrolled();
   const active = useActiveSection();
+  // Off the landing (e.g. /beta) the section links point back home.
+  const home = usePathname() === "/" ? "" : "/";
+  const beta = isBetaOn();
   const [open, setOpen] = useState(false);
   const sheetRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLButtonElement>(null);
@@ -101,7 +106,7 @@ export function Nav() {
     <nav className={s.nav} data-scrolled={scrolled || undefined} data-open={open || undefined} aria-label="Site">
       <div className={L.wrap}>
         <div className={s.bar}>
-          <a className={s.brand} href="#top" aria-label="Stax, back to top">
+          <a className={s.brand} href={`${home}#top`} aria-label="Stax, back to top">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/brand/stax-light.png" alt="" width={28} height={28} className={s.mark} />
             <span className={s.wordmark}>Stax</span>
@@ -109,10 +114,15 @@ export function Nav() {
 
           <div className={s.links}>
             {LINKS.map((l) => (
-              <a key={l.id} href={`#${l.id}`} className={s.link} data-active={active === l.id || undefined} aria-current={active === l.id ? "location" : undefined}>
+              <a key={l.id} href={`${home}#${l.id}`} className={s.link} data-active={active === l.id || undefined} aria-current={active === l.id ? "location" : undefined}>
                 {l.label}
               </a>
             ))}
+            {beta && (
+              <Link href="/beta" className={s.link}>
+                Beta
+              </Link>
+            )}
           </div>
 
           <div className={s.right}>
@@ -144,7 +154,7 @@ export function Nav() {
             <ul className={s.sheetList}>
               {LINKS.map((l) => (
                 <li key={l.id}>
-                  <a href={`#${l.id}`} className={s.sheetLink} data-active={active === l.id || undefined} onClick={close}>
+                  <a href={`${home}#${l.id}`} className={s.sheetLink} data-active={active === l.id || undefined} onClick={close}>
                     {l.label}
                   </a>
                 </li>

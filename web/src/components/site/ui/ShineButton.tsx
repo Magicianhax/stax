@@ -1,9 +1,10 @@
 "use client";
 
-// Pill button (link) with a soft shine that sweeps once per hover. Primary is
-// the solid sage gradient; glass is the translucent secondary. Scale 1.02 on
+// Pill button with a soft shine that sweeps once per hover. Primary is the
+// solid sage gradient; glass is the translucent secondary. Scale 1.02 on
 // hover (CSS); the sweep is a GSAP tween created in a context-safe handler,
-// hover devices only.
+// hover devices only. Renders a Link when given `href`, otherwise a <button>
+// (same look, for actions like opening the login modal).
 import Link from "next/link";
 import { useRef, type ReactNode } from "react";
 import { gsap, useGSAP, HOVER_OK } from "./gsap";
@@ -11,16 +12,20 @@ import s from "./ShineButton.module.css";
 
 export function ShineButton({
   href,
+  onClick,
+  disabled,
   children,
   variant = "primary",
   className,
 }: {
-  href: string;
+  href?: string;
+  onClick?: () => void;
+  disabled?: boolean;
   children: ReactNode;
   variant?: "primary" | "glass";
   className?: string;
 }) {
-  const ref = useRef<HTMLAnchorElement>(null);
+  const ref = useRef<HTMLAnchorElement & HTMLButtonElement>(null);
 
   useGSAP(
     (_, contextSafe) => {
@@ -40,10 +45,22 @@ export function ShineButton({
   );
 
   const cls = [s.btn, variant === "glass" ? s.glass : s.primary, className].filter(Boolean).join(" ");
-  return (
-    <Link ref={ref} href={href} className={cls}>
+  const inner = (
+    <>
       <span className={s.shine} data-shine aria-hidden="true" />
       <span className={s.label}>{children}</span>
-    </Link>
+    </>
+  );
+  if (href) {
+    return (
+      <Link ref={ref} href={href} className={cls}>
+        {inner}
+      </Link>
+    );
+  }
+  return (
+    <button ref={ref} type="button" className={cls} onClick={onClick} disabled={disabled}>
+      {inner}
+    </button>
   );
 }

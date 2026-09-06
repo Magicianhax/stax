@@ -73,3 +73,16 @@
     transition: none;
   }
 }
+
+/* Button form (no href): reset the UA styling so both forms match. */
+button.btn {
+  border: 0;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+button.btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+  transform: none;
+}

@@ -71,3 +71,24 @@ export async function verifyRequest(req: Request): Promise<AuthedUser | null> {
     return null;
   }
 }
+
+/**
+ * The email Privy knows for a user (email login, or the address an OAuth
+ * provider reported), lowercased. Null when there is none or the lookup fails —
+ * callers treat email as best-effort. Used by the waitlist + admin allowlist.
+ */
+export async function fetchPrivyEmail(userId: string): Promise<string | null> {
+  try {
+    const user = await privy().users()._get(userId);
+    for (const acct of user.linked_accounts) {
+      if (acct.type === "email" && acct.address) return acct.address.trim().toLowerCase();
+    }
+    for (const acct of user.linked_accounts) {
+      if ("email" in acct && typeof acct.email === "string" && acct.email) return acct.email.trim().toLowerCase();
+    }
+    return null;
+  } catch (e) {
+    console.warn("[auth] fetchPrivyEmail failed:", e instanceof Error ? e.message : e);
+    return null;
+  }
+}

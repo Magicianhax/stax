@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { requireApproved } from "@/lib/server/admin";
 import { verifyRequest } from "@/lib/server/privyAuth";
 import { rateLimit } from "@/lib/server/rateLimit";
 import { getAutopilot } from "@/lib/server/autopilotStore";
@@ -13,6 +14,9 @@ export const maxDuration = 120;
 export async function POST(req: NextRequest) {
   const user = await verifyRequest(req);
   if (!user) return unauthorized();
+  // Private beta: only approved users may spend (no-op while NEXT_PUBLIC_PRIVATE_BETA is off).
+  const gate = await requireApproved(user);
+  if (gate) return gate;
 
   // Tight cap — each call signs and submits an on-chain UserOp.
   const limit = rateLimit(`autopilot-run:${user.userId}`, 6, 60_000);

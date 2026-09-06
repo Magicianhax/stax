@@ -20,6 +20,7 @@ import { z } from "zod";
 import { assetBySymbol, isRoutable } from "@/lib/chains";
 import { chainFromRequest } from "@/lib/server/chain";
 import { KyberError, KyberNoRoute, kyberBuild, kyberRoute } from "@/lib/server/kyber";
+import { requireApproved } from "@/lib/server/admin";
 import { verifyRequest } from "@/lib/server/privyAuth";
 import { rateLimit } from "@/lib/server/rateLimit";
 import { getSmartAccount } from "@/lib/server/users";
@@ -63,6 +64,9 @@ export interface SwapQuoteResponse {
 export async function POST(req: NextRequest) {
   const user = await verifyRequest(req);
   if (!user) return unauthorized();
+  // Private beta: only approved users may spend (no-op while NEXT_PUBLIC_PRIVATE_BETA is off).
+  const gate = await requireApproved(user);
+  if (gate) return gate;
 
   // Quotes refetch on every keystroke burst + a 15s interval; 120/min is ample.
   const limit = rateLimit(`swap-quote:${user.userId}`, 120, 60_000);

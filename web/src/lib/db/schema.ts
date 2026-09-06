@@ -196,6 +196,69 @@ export const baskets = pgTable(
   (t) => [index("baskets_owner_user_id_idx").on(t.ownerUserId), chainCheck("baskets_chain_check", t.chain)],
 );
 
+/**
+ * Private-beta waitlist — one row per person (docs/BETA.md). `user_id` is the Privy user
+ * once they sign in; admin-added rows (address/email only) get linked on first join.
+ * Position is never stored: it is `rank() over (order by referrals desc, created_at asc)`
+ * across waiting rows, where referrals = rows whose `referred_by` = this row's `ref_code`
+ * and status != 'blocked' (see lib/server/waitlist.ts).
+ */
+export const waitlist = pgTable(
+  "waitlist",
+  {
+    /** 12-char base62. */
+    id: text("id").primaryKey(),
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    /** Primary wallet the person connected, lowercased. */
+    address: text("address"),
+    /** From Privy linked accounts when available, lowercased. */
+    email: text("email"),
+    status: text("status").notNull().default("waiting"),
+    /** 8-char, lowercase + digits, no 0/o/1/l/i ambiguity. */
+    refCode: text("ref_code").notNull(),
+    /** Another row's `ref_code`, set once at join, never changed. */
+    referredBy: text("referred_by"),
+    /** 'beta-page' | 'admin' | 'import' */
+    source: text("source"),
+    note: text("note"),
+    createdAt: createdAt(),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    blockedAt: timestamp("blocked_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("waitlist_user_id_key").on(t.userId),
+    uniqueIndex("waitlist_address_key").on(t.address),
+    uniqueIndex("waitlist_ref_code_key").on(t.refCode),
+    index("waitlist_status_created_at_idx").on(t.status, t.createdAt),
+    index("waitlist_referred_by_idx").on(t.referredBy),
+    index("waitlist_email_lower_idx").on(sql`lower(${t.email})`),
+    check("waitlist_status_check", sql`${t.status} in ('waiting', 'approved', 'blocked')`),
+  ],
+);
+
+/** Append-only audit log of everything that happens to a waitlist row. */
+export const waitlistEvents = pgTable(
+  "waitlist_events",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    waitlistId: text("waitlist_id")
+      .notNull()
+      .references(() => waitlist.id, { onDelete: "cascade" }),
+    /** 'system' | 'admin:<userId>' */
+    actor: text("actor").notNull(),
+    action: text("action").notNull(),
+    meta: jsonb("meta"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("waitlist_events_waitlist_id_idx").on(t.waitlistId),
+    check(
+      "waitlist_events_action_check",
+      sql`${t.action} in ('joined', 'approved', 'blocked', 'unblocked', 'note', 'imported')`,
+    ),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type SmartAccount = typeof smartAccounts.$inferSelect;
@@ -212,3 +275,7 @@ export type PriceSnapshot = typeof priceSnapshots.$inferSelect;
 export type NewPriceSnapshot = typeof priceSnapshots.$inferInsert;
 export type Basket = typeof baskets.$inferSelect;
 export type NewBasket = typeof baskets.$inferInsert;
+export type WaitlistRow = typeof waitlist.$inferSelect;
+export type NewWaitlistRow = typeof waitlist.$inferInsert;
+export type WaitlistEvent = typeof waitlistEvents.$inferSelect;
+export type NewWaitlistEvent = typeof waitlistEvents.$inferInsert;

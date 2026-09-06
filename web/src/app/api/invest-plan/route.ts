@@ -8,6 +8,7 @@ import { buildLegs } from "@/lib/legBuilder";
 import { buildPlanId, recHash, signRiskInference } from "@/lib/eip712";
 import { netOf } from "@/lib/fees";
 import { chainFromRequest, serverClient } from "@/lib/server/chain";
+import { requireApproved } from "@/lib/server/admin";
 import { verifyRequest } from "@/lib/server/privyAuth";
 import { rateLimit } from "@/lib/server/rateLimit";
 import { unauthorized, badRequest, tooManyRequests, serverError, jsonError } from "@/lib/server/respond";
@@ -34,6 +35,9 @@ export async function POST(req: NextRequest) {
   // C-2: only a signed-in user can have the agent sign a plan.
   const user = await verifyRequest(req);
   if (!user) return unauthorized();
+  // Private beta: only approved users may spend (no-op while NEXT_PUBLIC_PRIVATE_BETA is off).
+  const gate = await requireApproved(user);
+  if (gate) return gate;
 
   // M-5: cap signing requests per user.
   const limit = rateLimit(`invest-plan:${user.userId}`, 20, 60_000);

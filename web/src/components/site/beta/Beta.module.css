@@ -1,0 +1,395 @@
+/* /beta — one centred column on the layout-law grid: copy on columns 3–10,
+   the card on 4–9. The hero fills the first viewport like the landing's. */
+
+.hero {
+  display: flex;
+  align-items: center;
+  min-height: calc(100svh - 72px);
+  padding-block: 72px 96px;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(46% 44% at 12% 10%, color-mix(in srgb, var(--s-primary) 16%, transparent) 0%, transparent 62%),
+    radial-gradient(40% 42% at 90% 80%, color-mix(in srgb, var(--s-accent) 14%, transparent) 0%, transparent 60%);
+}
+
+.hero > .grid {
+  width: 100%;
+  position: relative;
+  row-gap: 40px;
+}
+
+.intro {
+  grid-column: 3 / span 8;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.h1 {
+  margin: 0;
+  font-family: var(--s-display);
+  font-optical-sizing: auto;
+  font-weight: 500;
+  font-size: clamp(44px, 6.4vw, 84px);
+  line-height: 1;
+  letter-spacing: -0.035em;
+  color: var(--s-ink);
+  text-wrap: balance;
+}
+
+.sub {
+  margin: 22px 0 0;
+  max-width: 60ch;
+  font-size: 19px;
+  line-height: 1.5;
+  color: var(--s-ink-2);
+  text-wrap: pretty;
+}
+
+/* "340 waiting · 12 in" — tabular, quiet. */
+.live {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin: 18px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--s-ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.live b {
+  font-weight: 700;
+  color: var(--s-ink);
+}
+
+.liveSep {
+  color: var(--s-ink-3);
+}
+
+.action {
+  margin-top: 34px;
+  min-height: 52px;
+}
+
+.action > * {
+  max-width: 100%;
+}
+
+/* ── The card ─────────────────────────────────────────────────────────── */
+.cardCol {
+  grid-column: 4 / span 6;
+  min-width: 0;
+}
+
+.card {
+  position: relative;
+  padding: 28px;
+  border-radius: var(--s-r-lg);
+  background: var(--s-glass);
+  backdrop-filter: var(--s-glass-blur);
+  border: 1px solid var(--s-glass-line);
+  box-shadow: var(--s-glass-hi), var(--s-shadow);
+  color: var(--s-ink);
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.position {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+.rank {
+  font-family: var(--s-display);
+  font-optical-sizing: auto;
+  font-weight: 500;
+  font-size: clamp(56px, 8vw, 88px);
+  line-height: 0.95;
+  letter-spacing: -0.04em;
+  color: var(--s-ink);
+}
+
+.of {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--s-ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.title {
+  margin: 0;
+  font-family: var(--s-display);
+  font-optical-sizing: auto;
+  font-weight: 500;
+  font-size: clamp(34px, 4vw, 48px);
+  line-height: 1;
+  letter-spacing: -0.035em;
+  color: var(--s-ink);
+}
+
+.calm {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.5;
+  color: var(--s-ink-2);
+}
+
+/* Referral link: mono field + copy button, one row. */
+.linkRow {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+}
+
+.field {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  height: 48px;
+  padding: 0 14px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--s-paper) 70%, transparent);
+  border: 1px solid var(--s-line);
+  font-family: var(--s-mono);
+  font-size: 13.5px;
+  color: var(--s-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+
+.field > span {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.copyBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 48px;
+  min-width: 48px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--s-ink);
+  color: var(--s-paper);
+  font: inherit;
+  font-size: 14.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 160ms var(--s-ease-soft), background 160ms var(--s-ease);
+}
+
+.copyBtn[data-done] {
+  background: var(--s-primary-d);
+  color: #fff;
+}
+
+.copyBtn:active {
+  transform: scale(0.97);
+}
+
+/* Share row: four equal pills, icon + label; labels drop on narrow phones. */
+.share {
+  display: flex;
+  gap: 8px;
+}
+
+.share > * {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.shareBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 46px;
+  padding: 0 10px;
+  border-radius: 14px;
+  border: 1px solid var(--s-glass-line);
+  background: var(--s-glass-strong);
+  box-shadow: var(--s-glass-hi);
+  color: var(--s-ink);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 160ms var(--s-ease-soft), box-shadow 160ms var(--s-ease), color 160ms var(--s-ease);
+}
+
+.shareBtn svg {
+  flex: none;
+}
+
+.shareBtn:active {
+  transform: scale(0.97);
+}
+
+@media (hover: hover) {
+  .shareBtn:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--s-glass-hi), var(--s-shadow);
+  }
+  .copyBtn:hover {
+    background: color-mix(in srgb, var(--s-ink) 88%, var(--s-primary));
+  }
+}
+
+.note {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--s-ink-2);
+  text-wrap: pretty;
+}
+
+.friends {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--s-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Loading / error inside the card. */
+.pending {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--s-ink-2);
+}
+
+.spin {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2.4px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.retry {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 99px;
+  border: 1px solid var(--s-line);
+  background: var(--s-glass-strong);
+  color: var(--s-ink);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ctaRow {
+  display: flex;
+}
+
+/* ── Breakpoints ──────────────────────────────────────────────────────── */
+@media (max-width: 1023px) {
+  .intro {
+    grid-column: 2 / span 10;
+  }
+  .cardCol {
+    grid-column: 3 / span 8;
+  }
+}
+
+@media (max-width: 767px) {
+  .hero {
+    min-height: calc(100svh - 64px);
+    padding-block: 44px 64px;
+  }
+  .hero > .grid {
+    row-gap: 32px;
+  }
+  .intro,
+  .cardCol {
+    grid-column: 1 / -1;
+  }
+  .sub {
+    margin-top: 18px;
+    font-size: 17px;
+  }
+  .action {
+    margin-top: 28px;
+    width: 100%;
+  }
+  .action > * {
+    width: 100%;
+  }
+  .card {
+    padding: 22px 20px;
+    gap: 20px;
+  }
+  .share {
+    flex-wrap: wrap;
+  }
+  .share > * {
+    flex-basis: calc(50% - 4px);
+  }
+}
+
+@media (max-width: 479px) {
+  .action > * {
+    height: auto;
+    min-height: 52px;
+    padding: 12px 20px;
+    white-space: normal;
+    text-align: center;
+    line-height: 1.25;
+  }
+  .ctaRow > * {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .copyBtn,
+  .shareBtn,
+  .spin {
+    transition: none;
+    animation: none;
+  }
+  .spin {
+    border-top-color: color-mix(in srgb, currentColor 30%, transparent);
+  }
+}

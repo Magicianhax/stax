@@ -2,8 +2,8 @@
 //   npm run db:smoke      (= tsx --conditions=react-server --env-file=.env.local scripts/db-smoke.ts)
 // `--conditions=react-server` makes the `server-only` guard a no-op so the app's own
 // store module can run outside Next. Everything it creates is deleted at the end.
-import { eq } from "drizzle-orm";
-import { autopilotRuns, autopilots, db, pool, users } from "../src/lib/db";
+import { eq, inArray } from "drizzle-orm";
+import { autopilotRuns, autopilots, db, pool, users, waitlist } from "../src/lib/db";
 import {
   claimDueAutopilots,
   deleteAutopilot,
@@ -15,8 +15,13 @@ import {
   upsertAutopilot,
 } from "../src/lib/server/autopilotStore";
 import { getSmartAccount, touchUser, upsertSmartAccount } from "../src/lib/server/users";
+import { approve, getAccess, getStats, joinWaitlist, listAdmin } from "../src/lib/server/waitlist";
 
 const USER = "smoke-user";
+const USER_B = "smoke-user-b";
+const ADMIN = "smoke-admin";
+const ADDR_A = "0x000000000000000000000000000000000000A11A" as const;
+const ADDR_B = "0x000000000000000000000000000000000000B22B" as const;
 const OWNER = "0x000000000000000000000000000000000000dEaD" as const;
 const ACCOUNT = "0x000000000000000000000000000000000000bEEF" as const;
 
@@ -28,6 +33,49 @@ async function cleanup() {
   await db.delete(autopilotRuns).where(eq(autopilotRuns.userId, USER));
   await deleteAutopilot(USER);
   await db.delete(users).where(eq(users.id, USER));
+  await db.delete(waitlist).where(inArray(waitlist.userId, [USER, USER_B]));
+  await db.delete(waitlist).where(inArray(waitlist.address, [ADDR_A.toLowerCase(), ADDR_B.toLowerCase()]));
+  await db.delete(users).where(inArray(users.id, [USER_B, ADMIN]));
+}
+
+/** Waitlist: two joins with a referral, positions, approve, access. */
+async function waitlistRoundTrip() {
+  // A joins (email passed explicitly: no Privy lookup for a fake user id).
+  const a = await joinWaitlist({ userId: USER, address: ADDR_A, email: "smoke@example.com" });
+  expect(a.status === "waiting" && a.refCode && a.referralUrl?.endsWith(`/beta?ref=${a.refCode}`), "A joined");
+  // Idempotent: a second join keeps the same row / code.
+  const aAgain = await joinWaitlist({ userId: USER, address: ADDR_A, email: "smoke@example.com" });
+  expect(aAgain.refCode === a.refCode, "join is idempotent");
+  // B joins through A's link (uppercase to prove normalisation).
+  const b = await joinWaitlist({ userId: USER_B, address: ADDR_B, ref: a.refCode!.toUpperCase(), email: null });
+  expect(b.status === "waiting" && b.referrals === 0, "B joined");
+  const [bRow] = await db.select().from(waitlist).where(eq(waitlist.userId, USER_B));
+  expect(bRow.referredBy === a.refCode && bRow.address === ADDR_B.toLowerCase(), "B referred by A, address lowercased");
+  // A now has one referral and outranks B.
+  const a2 = await getAccess(USER);
+  const b2 = await getAccess(USER_B);
+  expect(a2.referrals === 1, `A referrals = ${a2.referrals}, expected 1`);
+  expect(a2.position !== null && b2.position !== null && a2.position < b2.position, "A ranks above B");
+  expect(a2.waiting >= 2 && a2.waiting === b2.waiting, "waiting count consistent");
+  // Admin list contains both, sorted by position, with a search hit on the ref code.
+  const page = await listAdmin({ q: a.refCode, limit: 5 });
+  expect(page.rows.length === 1 && page.rows[0].userId === USER && page.rows[0].referrals === 1, "admin search by refCode");
+  const all = await listAdmin({ status: "waiting", limit: 200 });
+  const ia = all.rows.findIndex((r) => r.userId === USER);
+  const ib = all.rows.findIndex((r) => r.userId === USER_B);
+  expect(ia >= 0 && ib >= 0 && ia < ib, "admin list ordered by position");
+  // Approve A: approved rows have no position; B moves up; stats reflect it.
+  const before = await getStats();
+  expect((await approve([page.rows[0].id], ADMIN)) === 1, "approve changed 1");
+  expect((await approve([page.rows[0].id], ADMIN)) === 0, "approve is idempotent");
+  const a3 = await getAccess(USER);
+  const b3 = await getAccess(USER_B);
+  expect(a3.status === "approved" && a3.position === null, "A approved, no position");
+  expect(b3.status === "waiting" && b3.position !== null && b3.position < b2.position!, "B moved up");
+  const after = await getStats();
+  expect(after.waiting === before.waiting - 1 && after.approved === before.approved + 1, "stats moved");
+  const none = await getAccess("smoke-nobody");
+  expect(none.status === "none" && none.position === null && none.refCode === null, "unknown user → none");
 }
 
 async function main() {
@@ -91,9 +139,12 @@ async function main() {
   const [released] = await db.select().from(autopilots).where(eq(autopilots.id, cfg.id));
   expect(released.claimedAt === null, "claim released");
 
+  await waitlistRoundTrip();
+
   await cleanup();
   expect((await getAutopilot(USER)) === null, "cleanup");
   expect((await getSmartAccount(USER, "base")) === null, "cleanup cascaded to smart_accounts");
+  expect((await getAccess(USER)).status === "none", "cleanup removed waitlist rows");
   console.log("OK");
 }
 

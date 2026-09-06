@@ -9,7 +9,9 @@
 // stack drops in on its own and then only floats.
 import { useState } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { ArrowRight, Play } from "lucide-react";
+import { isBetaOn } from "@/lib/beta";
 import { SealSilhouette } from "@/components/site/three/SealSilhouette";
 import { FilmLightbox } from "@/components/site/FilmLightbox";
 import { DotField } from "@/components/site/ui/DotField";
@@ -27,6 +29,9 @@ const HeroSeal = dynamic(() => import("@/components/site/three/HeroSeal"), {
 
 export function Hero() {
   const [filmOpen, setFilmOpen] = useState(false);
+  // Private beta: the one action becomes joining the list; "Open Stax" steps
+  // back to the glass slot and the demo becomes a text link beside the film.
+  const beta = isBetaOn();
 
   return (
     <section className={`${L.sec} ${s.hero}`} id="top" aria-labelledby="hero-title">
@@ -58,13 +63,27 @@ export function Hero() {
           </p>
 
           <div className={s.ctas}>
-            <ShineButton href="/app">
-              Open Stax
-              <ArrowRight size={18} strokeWidth={2.2} aria-hidden="true" />
-            </ShineButton>
-            <ShineButton href="/demo" variant="glass">
-              Try the demo
-            </ShineButton>
+            {beta ? (
+              <>
+                <ShineButton href="/beta">
+                  Join the private beta
+                  <ArrowRight size={18} strokeWidth={2.2} aria-hidden="true" />
+                </ShineButton>
+                <ShineButton href="/app" variant="glass">
+                  Open Stax
+                </ShineButton>
+              </>
+            ) : (
+              <>
+                <ShineButton href="/app">
+                  Open Stax
+                  <ArrowRight size={18} strokeWidth={2.2} aria-hidden="true" />
+                </ShineButton>
+                <ShineButton href="/demo" variant="glass">
+                  Try the demo
+                </ShineButton>
+              </>
+            )}
           </div>
 
           <div className={s.subRow}>
@@ -72,6 +91,11 @@ export function Hero() {
               <Play size={14} strokeWidth={2.4} aria-hidden="true" />
               Watch the film
             </button>
+            {beta && (
+              <Link href="/demo" className={s.film}>
+                Try the demo
+              </Link>
+            )}
           </div>
 
           <div className={s.proof}>

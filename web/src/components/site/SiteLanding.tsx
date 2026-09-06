@@ -32,6 +32,7 @@ import { Baskets } from "@/components/site/sections/Baskets";
 import { Assets } from "@/components/site/sections/Assets";
 import { Faq } from "@/components/site/sections/Faq";
 import { Closing } from "@/components/site/sections/Closing";
+import { captureRef } from "@/lib/referral";
 
 // Runs before hydration so a dark-system visitor never sees a light flash.
 // Mirrors the matchMedia read in useMediaQuery below.
@@ -45,7 +46,9 @@ export function SiteLanding() {
 
   // Shared basket links may land on the root (`/?basket=…`): forward them to the
   // app, which decodes and opens the basket. Plain navigation, no router needed.
+  // A `?ref=CODE` (beta referral) is kept for the join and stripped from the URL.
   useEffect(() => {
+    captureRef();
     const url = new URL(window.location.href);
     const basket = url.searchParams.get("basket");
     if (basket) window.location.replace(`/app?basket=${encodeURIComponent(basket)}`);

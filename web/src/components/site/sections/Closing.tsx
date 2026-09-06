@@ -10,6 +10,7 @@ import { ArrowUpRight } from "lucide-react";
 import { Reveal } from "../ui/Reveal";
 import { ShineButton } from "../ui/ShineButton";
 import { BuiltOn } from "./BuiltOn";
+import { isBetaOn } from "@/lib/beta";
 import l from "../layout.module.css";
 import s from "./Closing.module.css";
 
@@ -18,6 +19,7 @@ const LINKS: { label: string; href: string; external?: boolean }[] = [
   { label: "Baskets", href: "#baskets" },
   { label: "FAQ", href: "#faq" },
   { label: "Demo", href: "/demo" },
+  ...(isBetaOn() ? [{ label: "Beta", href: "/beta" }] : []),
   { label: "@stax_market", href: "https://x.com/stax_market", external: true },
   { label: "GitHub", href: "https://github.com/Magicianhax/stax", external: true },
 ];

@@ -11,7 +11,8 @@ import { LandingScreen } from "@/components/lite/screens/LandingScreen";
 import { LiteApp } from "@/components/lite/LiteApp";
 import { MobileFrame } from "./MobileFrame";
 
-function LoadingScreen() {
+/** The splash shown while auth (and, behind the beta gate, access) resolves. */
+export function LoadingScreen() {
   return (
     <div className="screen" style={{ alignItems: "center", justifyContent: "center" }}>
       <span
