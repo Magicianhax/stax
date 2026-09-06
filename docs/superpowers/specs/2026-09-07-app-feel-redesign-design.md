@@ -87,6 +87,32 @@ configured), cash row, deposits (Relay history when any), transactions with date
 max labels at the extremes; range change morphs the path (GSAP `attr` tween on `d`, 0.5 s); the line
 colour follows the range's change (pos/neg). Used on Asset detail and Basket detail.
 
+## 3b. Charts (added 2026-09-07 after approval: "work on charts as well, add a few and make existing better")
+
+Kit additions in `components/design/Charts.tsx` (owned by `feel-kit`):
+- `PriceChart` gains `area` (gradient fill under the line, line colour at 22% → 0), `range` chips
+  rendered by a new `RangeChips` component (`values`, `value`, `onChange`, pill segment with a sliding
+  highlight) so every chart uses the same chips, and the scrub + morph from §3.
+- `Bars` — small bar chart (`data: { label; value; tone? }[]`, `height`, `showValues`), bars grow from
+  the baseline on mount (stagger 30 ms), positive/negative tones, tap a bar to read its value.
+- `ProjectionChart` — two stacked series (contributed vs projected value) over N months as an area
+  chart with a dashed contributions line; morphs when inputs change.
+- `Sparkline` keeps its API, gains `fill` (soft area) and draws on mount.
+
+Where they go:
+- **Owned**: the hero becomes a portfolio-value `PriceChart area` with `RangeChips` (1D 1W 1M 1Y All);
+  the readout shows value + date; P&L for the range under it; donut moves below the holdings.
+- **Home**: 60 px `Sparkline fill` under the balance (today), tap → Owned.
+- **Vera**: a "track record" `PriceChart area` (value of $100 following every recorded plan) above the
+  recorded plans; each plan row carries a 60 px `Sparkline` since placed.
+- **Wallet**: `Bars` of cash in/out by week (last 8 weeks) above the transactions list.
+- **Autopilot**: `ProjectionChart` that updates live as amount, cadence and risk change, with a
+  one-line reading ("≈ $1,340 in 12 months at $25/week").
+- **Basket detail**: chart gets `RangeChips` (1W 1M 1Y) + scrub instead of three static return chips;
+  the return chips become the readout.
+- **Asset detail**: scrub, min/max, morph on range change (already in §3).
+- Demo data: deterministic series generated from a seed per symbol so screenshots are stable.
+
 ## 4. Brand everywhere
 
 - One `HoldingRow` anatomy: `AssetTile 44`, name, sub-label (qty · symbol), right column value +
