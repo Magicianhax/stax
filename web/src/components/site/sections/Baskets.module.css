@@ -71,9 +71,9 @@
     gap: 14px;
     overflow-x: auto;
     scroll-snap-type: x mandatory;
-    scroll-padding: 0 24px;
     margin: 0 -24px;
-    padding: 4px 24px 14px;
+    padding: 4px calc(50vw - min(40vw, 170px)) 14px;
+    scroll-padding: 0 calc(50vw - min(40vw, 170px));
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
   }
@@ -82,13 +82,11 @@
   }
   .cell {
     flex: 0 0 min(80vw, 340px);
-    scroll-snap-align: start;
+    scroll-snap-align: center;
   }
 }
 @media (max-width: 479px) {
   ul.grid {
-    scroll-padding: 0 16px;
     margin: 0 -16px;
-    padding: 4px 16px 14px;
   }
 }

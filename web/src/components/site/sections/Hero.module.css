@@ -170,9 +170,20 @@
   .hero {
     padding-top: 40px;
   }
+  .copy {
+    text-align: center;
+    align-items: center;
+  }
   .kicker {
     margin-bottom: 22px;
     font-size: 13px;
+    justify-content: center;
+  }
+  .subRow {
+    justify-content: center;
+  }
+  .film {
+    margin-inline: auto;
   }
   .event {
     flex-basis: 100%;
@@ -190,6 +201,8 @@
   }
   .proof {
     margin-top: 22px;
+    justify-content: center;
+    text-align: center;
   }
   .stage {
     margin-top: 8px;

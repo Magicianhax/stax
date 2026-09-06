@@ -183,8 +183,20 @@
   .footer {
     padding: 4px 0 32px;
   }
+  .footer .footGrid {
+    justify-items: center;
+    text-align: center;
+  }
+  .footer .brand {
+    justify-self: center;
+  }
+  .footer .links {
+    justify-content: center;
+  }
   .legal {
     padding-top: 0;
+    text-align: center;
+    align-items: center;
   }
 }
 

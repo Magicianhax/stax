@@ -41,10 +41,11 @@
     gap: 16px;
     overflow-x: auto;
     scroll-snap-type: x mandatory;
-    scroll-padding: 0 24px;
-    /* bleed to the viewport edges so the next frame peeks in */
+    /* bleed to the viewport edges; side padding lets every frame, first and
+       last included, snap to the exact centre of the screen */
     margin: 0 -24px;
-    padding: 4px 24px 12px;
+    padding: 4px calc(50vw - min(36vw, 150px)) 12px;
+    scroll-padding: 0 calc(50vw - min(36vw, 150px));
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
   }
@@ -62,8 +63,6 @@
 }
 @media (max-width: 479px) {
   ol.row {
-    scroll-padding: 0 16px;
     margin: 0 -16px;
-    padding: 4px 16px 12px;
   }
 }
