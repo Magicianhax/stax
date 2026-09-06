@@ -15,13 +15,20 @@ import { usePortfolio } from "@/hooks/useBalances";
 import { useAssetPrice } from "@/hooks/usePrices";
 import { useMarketHistory, type MarketRange } from "@/hooks/useMarket";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
+import { useBaskets } from "@/hooks/useBaskets";
+import { useDemo } from "@/components/demo/DemoProvider";
 import { displayFor } from "@/lib/displayAssets";
-import { Icon, AssetTile, PriceChart, SectionTitle, Stat, MarketStatus } from "@/components/design";
+import { Icon, AssetTile, PriceChart, SectionTitle, Stat, MarketStatus, type PricePoint } from "@/components/design";
+import { Money, Reveal, Tick, useFlashRow } from "@/components/motion";
 import { usd, tokenQty, timeAgo } from "@/lib/format";
+import { priceSeries } from "@/lib/demoSeries";
 import { iconBtn } from "./primitives";
 import { ComingTag, yieldLine } from "./MarketScreen";
+import { BasketRailTile } from "./basketPrimitives";
+import { readoutDate, timeSeries } from "./useRangeSeries";
+import type { LoopParams } from "../LiteApp";
 
-const RANGES = ["1D", "1W", "1M", "1Y", "All"];
+const RANGES = ["1D", "1W", "1M", "1Y", "All"] as const;
 
 /** One key-fact row; `wide` stacks label over value for sentence-length facts. */
 interface Fact {
@@ -33,11 +40,15 @@ interface Fact {
 export function AssetDetailScreen({
   go,
   symbol,
+  loop,
 }: {
   go: (target: string | number, params?: Record<string, unknown>) => void;
   symbol: string;
+  /** After a trade: the position card flashes once (LiteApp's closing-the-loop plumbing). */
+  loop?: LoopParams;
 }) {
   const chain = useChain();
+  const demo = useDemo();
   const asset: Asset = chain.assets.all.find((a) => a.symbol === symbol) ?? chain.assets.all[0];
   const d = displayFor(asset.symbol, asset.name);
   const { address } = useSmartAccount();
@@ -54,27 +65,50 @@ export function AssetDetailScreen({
   const yieldText = safe ? yieldLine(liveApy, d.apy) : undefined;
   const coming = Boolean(asset.coming || d.coming);
   const [r, setR] = useState(2);
+  const range = RANGES[r] as MarketRange;
+  const [hover, setHover] = useState<(PricePoint & { index: number }) | null>(null);
+  const [now] = useState(() => Date.now());
+  // Baskets this asset sits in — a row of rail tiles under the position.
+  const { all: baskets } = useBaskets();
+  const related = baskets.filter((b) => b.items.some((i) => i.symbol === asset.symbol));
+  // After a trade the position card washes once (keyed so it never replays).
+  const { ref: posRef, className: posFlash } = useFlashRow<HTMLDivElement>(
+    holding && loop?.flash.includes(asset.symbol) ? `${asset.symbol}:${loop.txHash}` : undefined,
+  );
 
   // REAL market history for the selected range (server-cached; keepPreviousData
   // makes range switches seamless). Assets with no live source (or an upstream
   // outage) fall back to the windowed reference series so the chart never blanks.
-  const { data: market } = useMarketHistory(asset.symbol, RANGES[r] as MarketRange);
-  const RANGE_FRAC = [0.18, 0.38, 0.6, 0.82, 1];
-  const fallbackSpark = (() => {
+  // Demo: the deterministic seeded series (stable screenshots, real dates).
+  const { data: market } = useMarketHistory(demo ? undefined : asset.symbol, range);
+  const points: PricePoint[] = (() => {
+    if (demo) {
+      // The seeded series ends at the reference price; rescale it onto the live
+      // price on screen so the chart, the headline and the position agree.
+      const base = priceSeries(asset.symbol, range);
+      const end = base[base.length - 1]?.v;
+      const k = shownPrice !== undefined && end ? shownPrice / end : 1;
+      return base.map((pt) => ({ t: pt.t, v: Number((pt.v * k).toFixed(4)) }));
+    }
+    if (market?.series && market.series.length > 1) {
+      return timeSeries(market.series, range, Date.parse(market.asOf) || now);
+    }
+    const RANGE_FRAC: Record<MarketRange, number> = { "1D": 0.18, "1W": 0.38, "1M": 0.6, "1Y": 0.82, All: 1 };
     const s = d.spark ?? [];
-    if (s.length < 2) return s;
-    const n = Math.max(2, Math.round(s.length * (RANGE_FRAC[r] ?? 1)));
-    return s.slice(s.length - n);
+    const n = Math.max(2, Math.round(s.length * RANGE_FRAC[range]));
+    return timeSeries(s.slice(s.length - n), range, now);
   })();
-  const sparkData = market?.series ?? fallbackSpark;
+  const first = points[0]?.v;
+  const last = points[points.length - 1]?.v;
   // Change across the selected range — real when we have market data (1D is vs
   // the previous session's close, like a broker shows it).
   const rangeChange =
-    market?.changePct ??
-    (sparkData.length > 1
-      ? ((sparkData[sparkData.length - 1] - sparkData[0]) / sparkData[0]) * 100
-      : d.day);
+    (demo ? undefined : market?.changePct) ??
+    (first !== undefined && last !== undefined && first > 0 ? ((last - first) / first) * 100 : d.day);
   const winUp = rangeChange >= 0;
+  // Scrub readout: price at the cursor and its move since the start of the range.
+  const scrubChange = hover && first !== undefined && first > 0 ? ((hover.v - first) / first) * 100 : undefined;
+  const readUp = (scrubChange ?? rangeChange) >= 0;
 
   // Key facts under About — a clean label/value list (not fat pill cards).
   const TYPE_LABEL: Record<string, string> = {
@@ -125,8 +159,8 @@ export function AssetDetailScreen({
         </button>
       </div>
 
+      <Reveal>
       <div
-        className="anim-rise"
         style={{ padding: "12px 22px 0", display: "flex", alignItems: "center", gap: 14 }}
       >
         <AssetTile asset={d} size={54} />
@@ -139,22 +173,31 @@ export function AssetDetailScreen({
         {coming && <ComingTag long />}
       </div>
 
-      {/* price */}
-      <div style={{ padding: "18px 22px 0" }}>
-        <div className="tnum" style={{ fontSize: 36, fontWeight: 700, letterSpacing: "-.03em" }}>
-          {shownPrice !== undefined ? usd(shownPrice) : "—"}
+      {/* price — live (Tick washes on change), or the scrubbed point while the
+          finger is on the chart */}
+      <div style={{ padding: "18px 22px 0" }} aria-live="polite">
+        <div className="tnum" style={{ fontSize: 36, fontWeight: 700, letterSpacing: "-.03em", minHeight: 43 }}>
+          {hover ? (
+            <span>{usd(hover.v)}</span>
+          ) : shownPrice !== undefined ? (
+            <Tick value={shownPrice} />
+          ) : (
+            "—"
+          )}
         </div>
-        {safe ? (
+        {safe && !hover ? (
           <div style={{ fontSize: 14.5, fontWeight: 600, color: "var(--ink-2)", marginTop: 2 }}>
             {yieldText ?? "a dollar that stays a dollar"}
           </div>
         ) : (
           <div
             className="tnum"
-            style={{ fontSize: 14.5, fontWeight: 700, color: winUp ? "var(--pos)" : "var(--neg)", marginTop: 2 }}
+            style={{ fontSize: 14.5, fontWeight: 700, color: readUp ? "var(--pos)" : "var(--neg)", marginTop: 2 }}
           >
-            {(winUp ? "+" : "") + rangeChange.toFixed(2)}%{" "}
-            <span style={{ color: "var(--ink-3)", fontWeight: 600 }}>· {RANGES[r]}</span>
+            {(readUp ? "+" : "") + (scrubChange ?? rangeChange).toFixed(2)}%{" "}
+            <span style={{ color: "var(--ink-3)", fontWeight: 600 }}>
+              · {hover ? readoutDate(hover.t, range) : RANGES[r]}
+            </span>
           </div>
         )}
         {/* stock-market clock — only stocks have a market that closes */}
@@ -165,29 +208,42 @@ export function AssetDetailScreen({
         )}
       </div>
 
-      {/* chart */}
-      <div className="anim-rise" style={{ animationDelay: ".05s", padding: "18px 22px 0" }}>
+      {/* chart — scrub for a price + date, min/max at the extremes, morphs on range change */}
+      <div style={{ padding: "18px 22px 0" }}>
         <div className="card" style={{ padding: "16px 14px 12px" }}>
           <PriceChart
-            data={sparkData}
+            points={points}
             up={winUp}
+            area
             height={216}
             ranges={RANGES}
             range={RANGES[r]}
-            onRange={(rr) => setR(RANGES.indexOf(rr))}
+            onRange={(rr) => {
+              setHover(null);
+              setR(RANGES.indexOf(rr as (typeof RANGES)[number]));
+            }}
+            onScrub={setHover}
             label={`${d.name} price chart, ${winUp ? "up" : "down"} ${Math.abs(rangeChange).toFixed(1)}% over ${RANGES[r]}`}
           />
         </div>
       </div>
 
-      {/* your position */}
+      {/* your position — value is shares × the price shown above, always */}
       {holding && (
         <div style={{ padding: "18px 22px 0" }}>
           <SectionTitle>Your position</SectionTitle>
-          <div className="card" style={{ padding: 18, display: "flex", gap: 16 }}>
+          <div ref={posRef} className={`card ${posFlash}`.trim()} style={{ padding: 18, display: "flex", gap: 16 }}>
             <Stat
               label="Value"
-              value={holding.valueUsd !== undefined ? usd(holding.valueUsd) : "—"}
+              value={
+                shownPrice !== undefined ? (
+                  <Money value={holding.qty * shownPrice} />
+                ) : holding.valueUsd !== undefined ? (
+                  usd(holding.valueUsd)
+                ) : (
+                  "—"
+                )
+              }
             />
             <Stat
               label={asset.tier === "stock" ? "Shares" : "Amount"}
@@ -196,6 +252,31 @@ export function AssetDetailScreen({
             {shownPrice !== undefined && (
               <Stat label="Price" value={usd(shownPrice)} />
             )}
+          </div>
+        </div>
+      )}
+
+      {/* in these baskets — ready-made mixes that hold this asset */}
+      {related.length > 0 && (
+        <div style={{ padding: "18px 0 0" }}>
+          <div style={{ padding: "0 22px" }}>
+            <SectionTitle action="All baskets" onAction={() => go("baskets")}>
+              In these baskets
+            </SectionTitle>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              padding: "2px 22px 6px",
+              overflowX: "auto",
+              margin: "-2px 0 -6px",
+            }}
+          >
+            {related.map((b) => (
+              <BasketRailTile key={b.id} basket={b} onClick={() => go("basket", { id: b.id })} />
+            ))}
+            <span aria-hidden style={{ flex: "none", width: 12 }} />
           </div>
         </div>
       )}
@@ -231,6 +312,8 @@ export function AssetDetailScreen({
           ))}
         </div>
       </div>
+
+      </Reveal>
 
       {/* CTA — manual buy/sell (no executor needed). Disabled with the reason
           when there's no liquid market yet. */}

@@ -651,8 +651,7 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
       view = <MarketScreen go={go} />;
       break;
     case "asset":
-      // feel-tabs: pass loop={params.loop as LoopParams | undefined} once AssetDetailScreen accepts it.
-      view = <AssetDetailScreen go={go} symbol={String(params.symbol ?? "")} />;
+      view = <AssetDetailScreen go={go} symbol={String(params.symbol ?? "")} loop={params.loop as LoopParams | undefined} />;
       break;
     case "trade":
       view = (
@@ -707,8 +706,7 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
       break;
     case "home":
     default:
-      // feel-tabs: pass loop={params.loop as LoopParams | undefined} once HomeScreen accepts it.
-      view = <HomeScreen go={go} />;
+      view = <HomeScreen go={go} loop={params.loop as LoopParams | undefined} />;
   }
 
   return (

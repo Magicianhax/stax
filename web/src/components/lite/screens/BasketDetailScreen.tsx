@@ -10,13 +10,16 @@ import { useMemo, useState } from "react";
 import {
   Icon,
   AssetTile,
+  LogoCluster,
   RiskMeter,
   PriceChart,
   VerifiedBadge,
   BottomSheet,
   ChainLaunching,
   useToast,
+  type PricePoint,
 } from "@/components/design";
+import { Reveal } from "@/components/motion";
 import { useBaskets } from "@/hooks/useBaskets";
 import { useBasketPerformance } from "@/hooks/useBasketPerformance";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
@@ -30,9 +33,13 @@ import { haptic } from "@/lib/haptics";
 import { iconBtn } from "./primitives";
 import { riskMeta } from "./PlanScreen";
 import { useChainReady } from "../useChainReady";
-import { BasketDisc, ReturnChip, WeightBar, fmtPct, shareBasket } from "./basketPrimitives";
+import { RampWeightBar, clusterOf, fmtPct, shareBasket } from "./basketPrimitives";
+import { useSymbolSeries, blendSeries, changeOf, readoutDate } from "./useRangeSeries";
 
 const QUICK_AMOUNTS = [50, 100, 300, 500];
+const RANGES = ["1W", "1M", "1Y"] as const;
+type Range = (typeof RANGES)[number];
+const RANGE_WORD: Record<Range, string> = { "1W": "past week", "1M": "past month", "1Y": "past year" };
 
 export function BasketDetailScreen({
   go,
@@ -53,10 +60,25 @@ export function BasketDetailScreen({
 
   // Once a shared basket is saved, the stored copy (author "you") takes over.
   const basket = byId(shared?.id) ?? shared ?? byId(id);
+  // Only "since you saved it" still comes from here; the chart blends its own series.
   const perf = useBasketPerformance(basket);
   const [sheet, setSheet] = useState(false);
   const [amt, setAmt] = useState("100");
   const amount = parseFloat(amt);
+
+  // Performance chart: what $100 in this mix would have done over the range,
+  // blended from each holding's series (demo: seeded; real: /api/market).
+  const [range, setRange] = useState<Range>("1M");
+  const [hover, setHover] = useState<(PricePoint & { index: number }) | null>(null);
+  const items = useMemo(() => basket?.items ?? [], [basket]);
+  const symbols = useMemo(() => items.map((i) => i.symbol), [items]);
+  const { series, loading: seriesLoading } = useSymbolSeries(symbols, range);
+  const points = useMemo(
+    () => blendSeries(items.map((i) => ({ points: series.get(i.symbol) ?? [], weight: i.weightPct })), { anchor: "start" }),
+    [items, series],
+  );
+  const change = changeOf(points);
+  const chartUp = change.pct >= 0;
 
   const isMine = Boolean(basket && mine.some((b) => b.id === basket.id));
   const onOtherChain = Boolean(basket && basket.chain !== chain.key);
@@ -70,7 +92,7 @@ export function BasketDetailScreen({
             <Icon name="back" size={20} />
           </button>
         </div>
-        <div className="card anim-rise" style={{ margin: "22px 22px 0", padding: "24px 18px", textAlign: "center" }}>
+        <Reveal className="card" style={{ margin: "22px 22px 0", padding: "24px 18px", textAlign: "center" }}>
           <div style={{ fontSize: 16, fontWeight: 700 }}>That basket isn&apos;t here</div>
           <p style={{ fontSize: 13.5, color: "var(--ink-2)", margin: "6px 0 0", lineHeight: 1.5 }}>
             It may have been removed, or it belongs to another network. Baskets are kept per network.
@@ -78,14 +100,14 @@ export function BasketDetailScreen({
           <button className="btn btn-ghost tap" style={{ marginTop: 14, minHeight: 44 }} onClick={() => go("baskets")}>
             See all baskets
           </button>
-        </div>
+        </Reveal>
       </div>
     );
   }
 
   const risk = riskMeta(basket.riskScore);
   const basketChain = getChain(basket.chain);
-  const trendUp = (perf.returns["1M"] ?? 0) >= 0;
+  const canSave = basket.author === "shared" && !isMine;
   const canReview = investable && ready && amount > 0;
 
   const onShare = async () => {
@@ -127,9 +149,9 @@ export function BasketDetailScreen({
       </div>
 
       {/* identity */}
-      <div className="anim-rise" style={{ padding: "14px 22px 0", display: "flex", gap: 14, alignItems: "center" }}>
-        <BasketDisc basket={basket} size={60} />
-        <div style={{ flex: 1, minWidth: 0 }}>
+      <Reveal style={{ padding: "14px 22px 0" }}>
+        <LogoCluster assets={clusterOf(basket)} size={34} />
+        <div style={{ marginTop: 10, minWidth: 0 }}>
           <h1 className="serif" style={{ margin: 0, fontSize: 27, letterSpacing: "-.015em", lineHeight: 1.1 }}>
             {basket.name}
           </h1>
@@ -143,7 +165,7 @@ export function BasketDetailScreen({
             {riskWord(basket.riskScore)}
           </div>
         </div>
-      </div>
+      </Reveal>
 
       {/* another network */}
       {onOtherChain && (
@@ -167,16 +189,35 @@ export function BasketDetailScreen({
         </div>
       )}
 
-      {/* performance — real numbers or honest words, never a filler figure */}
-      <div className="anim-rise" style={{ animationDelay: ".04s", padding: "18px 22px 0" }}>
+      {/* performance: $100 following this mix; scrub for a value + date */}
+      <Reveal delay={0.04} style={{ padding: "18px 22px 0" }}>
         <div className="card" style={{ padding: "14px 16px 12px" }}>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {(["1D", "1W", "1M"] as const).map((r) => (
-              <ReturnChip key={r} value={perf.returns[r]} loading={perf.loading} label={r} />
-            ))}
+          <div
+            aria-live="polite"
+            style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, minHeight: 44 }}
+          >
+            {hover ? (
+              <>
+                <span className="tnum" style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-.02em" }}>
+                  {usd(hover.v)}
+                </span>
+                <span className="tnum" style={{ fontSize: 13, fontWeight: 600, color: "var(--ink-2)" }}>
+                  {readoutDate(hover.t, range)}
+                </span>
+              </>
+            ) : points.length > 1 ? (
+              <>
+                <span className="tnum" style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-.02em", color: chartUp ? "var(--pos)" : "var(--neg)" }}>
+                  {fmtPct(change.pct)}
+                </span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink-2)" }}>{RANGE_WORD[range]}</span>
+              </>
+            ) : (
+              <span className="skeleton" style={{ width: 92, height: 22, borderRadius: 7, display: "inline-block" }} />
+            )}
           </div>
           {basket.author === "you" && (
-            <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 10, fontWeight: 600 }}>
+            <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 2, fontWeight: 600 }}>
               {perf.sinceSaved === null ? (
                 perf.loading ? "Working out your return since you saved it…" : "Since you saved it: not enough history yet."
               ) : (
@@ -189,32 +230,34 @@ export function BasketDetailScreen({
               )}
             </div>
           )}
-          <div style={{ marginTop: 12 }}>
-            {perf.spark ? (
+          <div style={{ marginTop: 10 }}>
+            {points.length > 1 ? (
               <PriceChart
-                data={perf.spark}
-                up={trendUp}
-                height={110}
-                label={
-                  perf.returns["1M"] == null
-                    ? `${basket.name} over the last month, return not available yet`
-                    : `${basket.name} over the last month, ${trendUp ? "up" : "down"} ${Math.abs(perf.returns["1M"]).toFixed(1)}%`
-                }
+                points={points}
+                up={chartUp}
+                area
+                height={150}
+                ranges={RANGES}
+                range={range}
+                onRange={(r) => setRange(r as Range)}
+                onScrub={setHover}
+                formatValue={(v) => usd(v)}
+                label={`$100 in ${basket.name}, ${chartUp ? "up" : "down"} ${Math.abs(change.pct).toFixed(1)}% over the ${RANGE_WORD[range]}`}
               />
             ) : (
               <div
-                className={perf.loading ? "skeleton" : undefined}
-                style={{ height: 110, borderRadius: 14, display: "grid", placeItems: "center", background: perf.loading ? undefined : "var(--surface-2)", color: "var(--ink-2)", fontSize: 13.5, fontWeight: 600 }}
+                className={seriesLoading ? "skeleton" : undefined}
+                style={{ height: 150, borderRadius: 14, display: "grid", placeItems: "center", background: seriesLoading ? undefined : "var(--surface-2)", color: "var(--ink-2)", fontSize: 13.5, fontWeight: 600 }}
               >
-                {!perf.loading && "Not enough history to draw yet"}
+                {!seriesLoading && "Not enough history to draw yet"}
               </div>
             )}
           </div>
           <p style={{ fontSize: 12.5, color: "var(--ink-2)", margin: "10px 0 0", lineHeight: 1.45 }}>
-            What this mix would have done, weighted the way it&apos;s built. Past returns don&apos;t promise future ones.
+            What $100 in this mix would have done, weighted the way it&apos;s built. Past returns don&apos;t promise future ones.
           </p>
         </div>
-      </div>
+      </Reveal>
 
       {/* risk */}
       <div style={{ padding: "12px 22px 0" }}>
@@ -239,9 +282,9 @@ export function BasketDetailScreen({
           </span>
         </div>
         <div style={{ marginBottom: 12 }}>
-          <WeightBar items={basket.items} height={12} />
+          <RampWeightBar items={basket.items} height={12} />
         </div>
-        <div className="card stagger" style={{ padding: "4px 16px" }}>
+        <Reveal className="card" style={{ padding: "4px 16px" }}>
           {basket.items.map((it, i) => {
             const tile = toTile(it.symbol);
             return (
@@ -268,25 +311,24 @@ export function BasketDetailScreen({
               </div>
             );
           })}
-        </div>
+        </Reveal>
       </div>
 
-      {/* secondary actions */}
-      <div style={{ padding: "14px 22px 0", display: "flex", gap: 10 }}>
-        <button className="btn btn-ghost tap" style={{ flex: 1, minHeight: 46 }} onClick={onShare}>
-          <Icon name="link" size={17} /> Share
-        </button>
-        {basket.author === "shared" && !isMine && (
-          <button className="btn btn-ghost tap" style={{ flex: 1, minHeight: 46 }} onClick={onSave}>
-            <Icon name="plus" size={17} /> Save
-          </button>
-        )}
-        {isMine && (
-          <button className="btn btn-ghost tap" style={{ flex: 1, minHeight: 46, color: "var(--neg)" }} onClick={onRemove}>
-            <Icon name="close" size={17} /> Remove
-          </button>
-        )}
-      </div>
+      {/* secondary actions: Share lives in the header; Save / Remove only when they apply */}
+      {(canSave || isMine) && (
+        <div style={{ padding: "14px 22px 0", display: "flex", gap: 10 }}>
+          {canSave && (
+            <button className="btn btn-ghost tap" style={{ flex: 1, minHeight: 46 }} onClick={onSave}>
+              <Icon name="plus" size={17} /> Save
+            </button>
+          )}
+          {isMine && (
+            <button className="btn btn-ghost tap" style={{ flex: 1, minHeight: 46, color: "var(--neg)" }} onClick={onRemove}>
+              <Icon name="close" size={17} /> Remove
+            </button>
+          )}
+        </div>
+      )}
 
       {/* how this is built */}
       <div style={{ padding: "18px 22px 0" }}>

@@ -13,8 +13,15 @@ import type { AllocateResult, InvestSuccess } from "@/lib/invest-types";
 import type { Allocation } from "@/lib/allocation-schema";
 import type { Basket } from "@/lib/baskets";
 import type { MarketHistoryResponse, MarketRange } from "@/hooks/useMarket";
+import type { WalletTx } from "@/lib/walletTx";
+import { DEMO_NOW } from "@/lib/demoSeries";
 
 const DEMO_CHAIN = getChain("base");
+const DAY = 86_400;
+/** Unix seconds, `days` before the fixed demo "now" (see demoSeries.DEMO_NOW), at `hour` UTC. */
+function ago(days: number, hour = 14, minute = 0): number {
+  return Math.floor(DEMO_NOW / 1000) - days * DAY + (hour - 14) * 3600 + minute * 60;
+}
 
 export const DEMO_ADDRESS = "0x5742a0d3b9c8417be5d8ae7c6cb0f2f3a1b2c3d4" as const;
 
@@ -55,10 +62,29 @@ export const DEMO_PORTFOLIO = {
 
 const hx = (tag: string): `0x${string}` => ("0x" + tag.repeat(32).slice(0, 64)) as `0x${string}`;
 
+// Three placed plans, newest first. Timestamps count back from the fixed demo
+// "now" (Mon 7 Sep 2026 14:00 UTC) so Activity groups and Wallet dates are stable.
+const PLAN_A = ["NVDA", "AAPL", "GOOGL", "aUSDC"];
+const PLAN_B = ["AAPL", "GOOGL", "aUSDC"];
 export const DEMO_ACTIVITY: ActivityRow[] = [
-  { kind: "invest", usdc: 300, legCount: 4, txHash: hx("7b41a9c0"), blockNumber: BigInt(0) },
-  { kind: "invest", usdc: 150, legCount: 3, txHash: hx("910e7f22"), blockNumber: BigInt(0) },
-  { kind: "invest", usdc: 500, legCount: 4, txHash: hx("a27c1043"), blockNumber: BigInt(0) },
+  { kind: "invest", usdc: 300, legCount: 4, txHash: hx("7b41a9c0"), blockNumber: BigInt(0), timestamp: ago(0, 9, 12), symbols: PLAN_A },
+  { kind: "invest", usdc: 150, legCount: 3, txHash: hx("910e7f22"), blockNumber: BigInt(0), timestamp: ago(24, 16, 40), symbols: PLAN_B },
+  { kind: "invest", usdc: 500, legCount: 4, txHash: hx("a27c1043"), blockNumber: BigInt(0), timestamp: ago(48, 11, 5), symbols: PLAN_A },
+];
+
+// Wallet transfers that mirror the activity above: every plan is USDC leaving
+// for the executor, and the deposits before it are what funded it. In − out
+// lands exactly on DEMO_USDC (240.55) so Wallet and Home agree.
+const EXECUTOR = DEMO_CHAIN.contracts.executor;
+const FUNDER = "0x2c8a7e13F4B15fDa2A6e0c9B7d51E4a30C6bD1e9";
+export const DEMO_TRANSACTIONS: WalletTx[] = [
+  { hash: hx("7b41a9c0"), direction: "out", symbol: "USDC", amount: 300, counterparty: EXECUTOR, tokenAddress: DEMO_CHAIN.usdc.address, blockNumber: 0, timestamp: ago(0, 9, 12) },
+  { hash: hx("c4d5e6f7"), direction: "in", symbol: "USDC", amount: 300, counterparty: FUNDER, tokenAddress: DEMO_CHAIN.usdc.address, blockNumber: 0, timestamp: ago(8, 18, 3) },
+  { hash: hx("910e7f22"), direction: "out", symbol: "USDC", amount: 150, counterparty: EXECUTOR, tokenAddress: DEMO_CHAIN.usdc.address, blockNumber: 0, timestamp: ago(24, 16, 40) },
+  { hash: hx("d5e6f7a8"), direction: "in", symbol: "USDC", amount: 350, counterparty: FUNDER, tokenAddress: DEMO_CHAIN.usdc.address, blockNumber: 0, timestamp: ago(28, 12, 30) },
+  { hash: hx("e6f7a8b9"), direction: "in", symbol: "USDC", amount: 40.55, counterparty: FUNDER, tokenAddress: DEMO_CHAIN.usdc.address, blockNumber: 0, timestamp: ago(41, 8, 15) },
+  { hash: hx("a27c1043"), direction: "out", symbol: "USDC", amount: 500, counterparty: EXECUTOR, tokenAddress: DEMO_CHAIN.usdc.address, blockNumber: 0, timestamp: ago(48, 11, 5) },
+  { hash: hx("f7a8b9c0"), direction: "in", symbol: "USDC", amount: 500, counterparty: FUNDER, tokenAddress: DEMO_CHAIN.usdc.address, blockNumber: 0, timestamp: ago(50, 19, 48) },
 ];
 
 // Vera's track record (the Vera screen's stat band + recorded recommendations).
@@ -67,9 +93,9 @@ export const DEMO_VERA_RECORD: VeraRecord = {
   totalExecutedUsd: 18450,
   executedCount: 19,
   recentRecommendations: [
-    { planId: hx("a1b2c3d4"), riskScore: 4200, usdcSpent: 300, txHash: hx("7b41a9c0"), blockNumber: BigInt(0) },
-    { planId: hx("b2c3d4e5"), riskScore: 6100, usdcSpent: 100, txHash: hx("910e7f22"), blockNumber: BigInt(0) },
-    { planId: hx("c3d4e5f6"), riskScore: 2600, usdcSpent: 500, txHash: hx("a27c1043"), blockNumber: BigInt(0) },
+    { planId: hx("a1b2c3d4"), riskScore: 4200, usdcSpent: 300, txHash: hx("7b41a9c0"), blockNumber: BigInt(0), timestamp: ago(0, 9, 12), symbols: PLAN_A },
+    { planId: hx("b2c3d4e5"), riskScore: 6100, usdcSpent: 150, txHash: hx("910e7f22"), blockNumber: BigInt(0), timestamp: ago(24, 16, 40), symbols: PLAN_B },
+    { planId: hx("c3d4e5f6"), riskScore: 2600, usdcSpent: 500, txHash: hx("a27c1043"), blockNumber: BigInt(0), timestamp: ago(48, 11, 5), symbols: PLAN_A },
   ],
 };
 

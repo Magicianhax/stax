@@ -1,42 +1,66 @@
 "use client";
 
-// Wallet — the account's money in one place: total balance, quick Receive /
-// Send / Invest (and Cash out when Coinbase Offramp is configured for this
-// chain), spendable cash (USDC), holdings (live price · qty · value), and the
-// full incoming/outgoing transaction history. Each transaction opens a detail
+// Wallet — money movement only: total balance, quick Receive / Send / Invest
+// (and Cash out when Coinbase Offramp is configured for this chain), spendable
+// cash (USDC), net cash flow by week, and the full incoming/outgoing transaction
+// history with dates. Holdings live on Owned. Each transaction opens a detail
 // sheet with an explorer link.
 //
 // Receive is the single way in. On Base it is the three-way chooser
 // (components/lite/receive, docs/RECEIVE.md): from another wallet, Add cash
 // (Coinbase Onramp sheet when NEXT_PUBLIC_CDP_PROJECT_ID is set, otherwise
 // "Coming soon"), or from any network. Mantle keeps the plain address + QR sheet.
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { usePrivy } from "@privy-io/react-auth";
-import { useUsdcBalance, usePortfolio, type Holding } from "@/hooks/useBalances";
+import { useUsdcBalance, usePortfolio } from "@/hooks/useBalances";
 import { useTransactions } from "@/hooks/useTransactions";
+import { useActivity } from "@/hooks/useActivity";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
-import { Icon, type IconName, HoldingRow, CountUp, SectionTitle, BottomSheet, useToast } from "@/components/design";
+import { Icon, type IconName, LogoCluster, Bars, SectionTitle, BottomSheet, useToast } from "@/components/design";
+import { Money, Reveal } from "@/components/motion";
 import { TokenLogo } from "@/components/lite/TokenLogo";
-import { toTile, catFor } from "@/lib/displayAssets";
-import { usd, tokenQty, shortAddress, txUrl } from "@/lib/format";
+import { usd, shortAddress, txUrl } from "@/lib/format";
 import { useChain } from "@/lib/chains/active";
 import { haptic } from "@/lib/haptics";
 import { ONRAMP_PRESETS, offrampUrl, onrampEnabled, onrampSupported, onrampUrl } from "@/lib/onramp";
 import type { WalletTx } from "@/lib/walletTx";
+import { useDemo } from "@/components/demo/DemoProvider";
+import { DEMO_TRANSACTIONS } from "@/lib/demo/demoData";
+import { DEMO_NOW } from "@/lib/demoSeries";
 import { iconBtn, Spinner, Pager } from "./primitives";
 import { ReceiveSheet } from "@/components/lite/receive";
 
 const DOTS = "••••••";
+const WEEK = 7 * 86_400e3;
 
-function relTime(sec?: number): string {
+/** "Sep 7 · 9:12 AM" — an absolute date, never a relative one. */
+function txDate(sec?: number): string {
   if (!sec) return "";
-  const diff = Math.floor(Date.now() / 1000) - sec;
-  if (diff < 60) return "just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86_400) return `${Math.floor(diff / 3600)}h ago`;
-  if (diff < 604_800) return `${Math.floor(diff / 86_400)}d ago`;
-  return new Date(sec * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const d = new Date(sec * 1000);
+  return `${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })} · ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
+}
+
+/** Net USDC per week (in +, out −) for the last `n` weeks ending at `nowMs`, oldest first. */
+function weeklyCashFlow(txs: WalletTx[], nowMs: number, n = 8): { label: string; value: number; in: number; out: number }[] {
+  const end = nowMs + 1; // inclusive of "now"
+  const start = end - n * WEEK;
+  const weeks = Array.from({ length: n }, (_, i) => ({
+    label: new Date(start + i * WEEK).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+    value: 0,
+    in: 0,
+    out: 0,
+  }));
+  for (const t of txs) {
+    if (t.symbol !== "USDC" || !t.timestamp) continue;
+    const ms = t.timestamp * 1000;
+    if (ms < start || ms >= end) continue;
+    const w = weeks[Math.min(n - 1, Math.floor((ms - start) / WEEK))];
+    if (t.direction === "in") w.in += t.amount;
+    else w.out += t.amount;
+    w.value = Number((w.in - w.out).toFixed(2));
+  }
+  return weeks;
 }
 
 function fmtAmt(n: number): string {
@@ -69,6 +93,8 @@ export function WalletScreen({
   const { data: bal, isLoading: balLoading } = useUsdcBalance(address ?? undefined);
   const { data: port, isLoading: portLoading } = usePortfolio(address ?? undefined);
   const { data: txs, isLoading: txLoading } = useTransactions(address ?? undefined);
+  const { data: activity } = useActivity(address ?? undefined);
+  const demo = useDemo();
   const { notify } = useToast();
   const [hide, setHide] = useState(false);
   const [receiveOpen, setReceiveOpen] = useState(false);
@@ -108,15 +134,28 @@ export function WalletScreen({
   };
 
   const cash = bal?.value ?? 0;
-  const holdings: Holding[] = port?.holdings ?? [];
   const invested = port?.investedUsd ?? 0;
   const total = cash + invested;
 
-  // Transactions, 10 per page.
-  const txList = txs ?? [];
+  // Transactions, 10 per page. The demo mirrors Home's activity (same plans,
+  // same hashes) so the two screens never contradict each other.
+  const txList = useMemo(() => (demo ? DEMO_TRANSACTIONS : (txs ?? [])), [demo, txs]);
   const txPageCount = Math.max(1, Math.ceil(txList.length / 10));
   const txSafePage = Math.min(txPage, txPageCount - 1);
   const txRows = txList.slice(txSafePage * 10, txSafePage * 10 + 10);
+
+  // Cash flow by week, straight from the transfer list (nothing invented).
+  // "Now" is fixed for the life of the screen; the demo anchors to DEMO_NOW.
+  const [nowMs] = useState(() => (demo ? DEMO_NOW : Date.now()));
+  const weeks = useMemo(() => weeklyCashFlow(txList, nowMs), [txList, nowMs]);
+  const flowIn = weeks.reduce((s, w) => s + w.in, 0);
+  const flowOut = weeks.reduce((s, w) => s + w.out, 0);
+
+  // A transfer to the executor is a plan being placed; its holdings come from
+  // the activity log (matched by tx hash) for the row's logo cluster.
+  const executor = chain.contracts.executor.toLowerCase();
+  const isInvest = (t: WalletTx) => t.direction === "out" && t.counterparty.toLowerCase() === executor;
+  const symbolsFor = (t: WalletTx) => activity?.find((a) => a.txHash.toLowerCase() === t.hash.toLowerCase())?.symbols;
 
   const loading = balLoading || portLoading;
   const balLen = usd(total).length;
@@ -164,7 +203,7 @@ export function WalletScreen({
               <div className="skeleton" style={{ width: 180, height: 44, borderRadius: 14, marginTop: 4 }} />
             ) : (
               <div className="tnum" style={{ fontSize: balSize, fontWeight: 700, letterSpacing: "-.045em", lineHeight: 0.96 }}>
-                {hide ? <span style={{ letterSpacing: ".06em" }}>{DOTS}</span> : <CountUp to={total} />}
+                {hide ? <span style={{ letterSpacing: ".06em" }}>{DOTS}</span> : <Money value={total} size={balSize} />}
               </div>
             )}
           </div>
@@ -204,45 +243,22 @@ export function WalletScreen({
         </button>
       </div>
 
-      {/* holdings */}
-      <div style={{ padding: "22px 22px 0" }}>
-        <SectionTitle>Holdings</SectionTitle>
-        {holdings.length === 0 ? (
-          <div className="card" style={{ padding: "26px 18px", textAlign: "center", color: "var(--ink-2)" }}>
-            <div style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)" }}>No holdings yet</div>
-            <div style={{ fontSize: 13.5, marginTop: 4 }}>Invest with Vera or buy an asset to fill your wallet.</div>
+      {/* cash flow — net in/out by week, from the same transfers listed below */}
+      {txList.length > 0 && (
+        <div style={{ padding: "22px 22px 0" }}>
+          <SectionTitle>Cash flow</SectionTitle>
+          <div className="card" style={{ padding: "14px 16px 12px" }}>
+            <Bars data={weeks.map((w) => ({ label: w.label, value: hide ? 0 : w.value }))} height={110} label="Net cash in and out by week, last 8 weeks" />
+            <div className="tnum" style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 10, fontWeight: 600 }}>
+              In <span style={{ color: "var(--pos)" }}>+{hide ? DOTS : usd(flowIn)}</span>
+              {" · "}
+              Out <span style={{ color: "var(--ink)" }}>−{hide ? DOTS : usd(flowOut)}</span>
+              {" · "}
+              <span style={{ fontWeight: 500 }}>last 8 weeks</span>
+            </div>
           </div>
-        ) : (
-          <div className="card stagger-in" style={{ padding: "4px 14px" }}>
-            {holdings.map((h, i) => {
-              const base = toTile(h.asset.symbol, h.asset.name);
-              // Real 1D market data replaces the presentational tint when available.
-              const tile = { ...base, day: h.dayChangePct ?? base.day, spark: h.spark ?? base.spark };
-              const dec = h.asset.decimals ?? 18;
-              return (
-                <div key={h.asset.symbol} style={{ borderBottom: i < holdings.length - 1 ? "1px solid var(--line-2)" : "none" }}>
-                  <HoldingRow
-                    asset={tile}
-                    sub={catFor(h.asset.symbol, h.asset.name)}
-                    showSpark
-                    onClick={() => go("asset", { symbol: h.asset.symbol })}
-                    right={
-                      <div style={{ textAlign: "right" }}>
-                        <div className="tnum" style={{ fontWeight: 600, fontSize: 16 }}>
-                          {hide ? DOTS : h.valueUsd !== undefined ? usd(h.valueUsd) : "—"}
-                        </div>
-                        <div className="tnum" style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 2 }}>
-                          {hide ? DOTS : `${tokenQty(h.raw, dec)} ${h.asset.symbol}`}
-                        </div>
-                      </div>
-                    }
-                  />
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* transactions */}
       <div style={{ padding: "22px 22px 0" }}>
@@ -260,43 +276,57 @@ export function WalletScreen({
               </div>
             ))}
           </div>
-        ) : !txs || txs.length === 0 ? (
+        ) : txList.length === 0 ? (
           <div className="card" style={{ padding: "26px 18px", textAlign: "center", color: "var(--ink-2)" }}>
             <div style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)" }}>No transactions yet</div>
             <div style={{ fontSize: 13.5, marginTop: 4, lineHeight: 1.5 }}>Money moving in and out on {chain.name} will show up here.</div>
           </div>
         ) : (
-          <div className="card" style={{ padding: "4px 14px" }}>
+          <Reveal key={txSafePage} className="card" style={{ padding: "4px 14px" }}>
             {txRows.map((t, i) => {
               const incoming = t.direction === "in";
+              const invest = isInvest(t);
+              const symbols = invest ? symbolsFor(t) : undefined;
               return (
                 <button
                   key={`${t.hash}-${t.direction}-${txSafePage}-${i}`}
                   className="row tap"
                   onClick={() => setTx(t)}
-                  style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "12px 0", textAlign: "left", borderBottom: i < txRows.length - 1 ? "1px solid var(--line-2)" : "none" }}
+                  style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "12px 0", minHeight: 62, textAlign: "left", borderBottom: i < txRows.length - 1 ? "1px solid var(--line-2)" : "none" }}
                 >
                   <div style={{ position: "relative", flex: "none" }}>
                     <TokenLogo symbol={t.symbol} size={38} />
                     <span style={{ position: "absolute", right: -2, bottom: -2, width: 18, height: 18, borderRadius: 99, display: "grid", placeItems: "center", background: incoming ? "var(--primary)" : "var(--surface-2)", color: incoming ? "var(--primary-ink)" : "var(--ink-2)", boxShadow: "0 0 0 2px var(--surface)" }}>
-                      <Icon name={incoming ? "arrowDR" : "arrowUR"} size={11} stroke={2.6} />
+                      <Icon name={invest ? "spark" : incoming ? "arrowDR" : "arrowUR"} size={11} stroke={2.6} />
                     </span>
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: 15 }}>{incoming ? "Received" : "Sent"} {t.symbol}</div>
-                    <div className="mono" style={{ fontSize: 11.5, color: "var(--ink-2)", marginTop: 2 }}>
-                      {shortAddress(t.counterparty)}{t.timestamp ? ` · ${relTime(t.timestamp)}` : ""}
+                    <div style={{ fontWeight: 600, fontSize: 15 }}>
+                      {invest ? "Invested in a plan" : `${incoming ? "Received" : "Sent"} ${t.symbol}`}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 2, minWidth: 0 }}>
+                      <span className={invest ? "tnum" : "mono"} style={{ fontSize: 11.5, color: "var(--ink-2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {invest ? txDate(t.timestamp) || "Placed on-chain" : txDate(t.timestamp) || shortAddress(t.counterparty)}
+                      </span>
+                      {symbols && symbols.length > 0 && (
+                        <LogoCluster assets={symbols.map((s) => ({ symbol: s }))} size={20} max={4} />
+                      )}
                     </div>
                   </div>
-                  <div className="tnum" style={{ fontWeight: 700, fontSize: 15, color: incoming ? "var(--primary)" : "var(--ink)" }}>
+                  <div className="tnum" style={{ fontWeight: 700, fontSize: 15, flex: "none", color: incoming ? "var(--primary)" : "var(--ink)" }}>
                     {incoming ? "+" : "−"}{hide ? DOTS : fmtAmt(t.amount)} {t.symbol}
                   </div>
                 </button>
               );
             })}
-          </div>
+          </Reveal>
         )}
         {txList.length > 10 && <Pager page={txSafePage} pageCount={txPageCount} onPage={setTxPage} />}
+        {txList.length > 0 && (
+          <p style={{ fontSize: 12.5, color: "var(--ink-3)", margin: "12px 4px 0", lineHeight: 1.5 }}>
+            What you own lives under Owned. This is only money moving in and out.
+          </p>
+        )}
       </div>
 
       {/* add money sheet — presets, then off to Coinbase in a new tab */}
@@ -420,7 +450,7 @@ export function WalletScreen({
       )}
 
       {/* transaction detail sheet */}
-      <BottomSheet open={!!tx} onClose={() => setTx(null)} title={tx ? (tx.direction === "in" ? "Received" : "Sent") : undefined}>
+      <BottomSheet open={!!tx} onClose={() => setTx(null)} title={tx ? (isInvest(tx) ? "Invested" : tx.direction === "in" ? "Received" : "Sent") : undefined}>
         {tx && (
           <div style={{ display: "flex", flexDirection: "column", gap: 18, padding: "2px 2px 8px" }}>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
@@ -431,7 +461,7 @@ export function WalletScreen({
             </div>
             <div className="card" style={{ padding: "4px 16px" }}>
               <DetailRow label="Status" value="Confirmed" />
-              <DetailRow label={tx.direction === "in" ? "From" : "To"} value={shortAddress(tx.counterparty)} mono borderTop />
+              <DetailRow label={isInvest(tx) ? "Placed by" : tx.direction === "in" ? "From" : "To"} value={isInvest(tx) ? "Vera · Stax executor" : shortAddress(tx.counterparty)} mono={!isInvest(tx)} borderTop />
               <DetailRow label="Network" value={chain.name} borderTop />
               {tx.timestamp && (
                 <DetailRow label="When" value={new Date(tx.timestamp * 1000).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })} borderTop />

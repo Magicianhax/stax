@@ -56,6 +56,8 @@ export interface VeraRecord {
     blockNumber: bigint;
     /** Unix seconds; absent when the source had no block time. */
     timestamp?: number;
+    /** Holdings the plan bought (for logo clusters); absent when not indexed. */
+    symbols?: string[];
   }[];
 }
 
@@ -65,6 +67,12 @@ export interface ActivityRow {
   legCount: number;
   txHash: `0x${string}`;
   blockNumber: bigint;
+  /** Unix seconds; absent when the source had no block time. */
+  timestamp?: number;
+  /** Holdings the plan bought (for logo clusters); absent when not indexed. */
+  symbols?: string[];
+  /** On-chain state; confirmed when absent. */
+  status?: "confirmed" | "pending" | "failed";
 }
 
 function usdcToNumber(raw: bigint): number {
@@ -160,6 +168,7 @@ export function toActivityRows(execs: ExecutionRow[]): ActivityRow[] {
       legCount: e.legCount,
       txHash: e.txHash,
       blockNumber: e.blockNumber,
+      timestamp: e.timestamp,
     }));
 }
 

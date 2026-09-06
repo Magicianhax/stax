@@ -14,8 +14,11 @@ import { useChain } from "@/lib/chains/active";
 import { displayFor, type AssetDisplay } from "@/lib/displayAssets";
 import { usePrices } from "@/hooks/usePrices";
 import { useMarketSummary } from "@/hooks/useMarket";
+import { usePortfolio } from "@/hooks/useBalances";
+import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { Icon, AssetTile, Sparkline, SectionTitle, MarketStatus } from "@/components/design";
-import { usd } from "@/lib/format";
+import { Reveal } from "@/components/motion";
+import { usd, tokenQty } from "@/lib/format";
 
 const CATS = ["All", "Big tech", "Funds", "Safer", "Crypto", "More"] as const;
 type Cat = (typeof CATS)[number];
@@ -51,6 +54,10 @@ export function MarketScreen({
   const chain = useChain();
   const { data: prices } = usePrices();
   const { data: marketData } = useMarketSummary();
+  // What the user already holds, so owned rows carry a quiet "Owned · qty" tag.
+  const { address } = useSmartAccount();
+  const { data: port } = usePortfolio(address ?? undefined);
+  const owned = useMemo(() => new Map((port?.holdings ?? []).map((h) => [h.asset.symbol, h])), [port]);
 
   // Every asset on this chain with its display record; "coming" ones sink to the
   // bottom of their group (stable sort keeps the registry order otherwise).
@@ -74,7 +81,7 @@ export function MarketScreen({
     [rows, cat, query],
   );
 
-  const renderRow = ({ asset, d }: Row) => {
+  const renderRow = ({ asset, d }: Row, i: number, list: Row[]) => {
     // Real market day move + sparkline when the asset has a live source; fall
     // back to the presentational reference so rows never blank.
     const live = marketData?.summary[asset.symbol];
@@ -87,20 +94,22 @@ export function MarketScreen({
     const coming = Boolean(asset.coming || d.coming);
     const safe = asset.tier === "safe";
     const sub = safe ? yieldLine(p?.apy, d.apy, true) ?? (d.ticker ?? asset.symbol) : (d.ticker ?? asset.symbol);
+    const held = owned.get(asset.symbol);
     return (
       <button
         key={asset.symbol}
         onClick={() => go("asset", { symbol: asset.symbol })}
-        className="card tap"
-        aria-label={`${d.name}${coming ? ", coming soon" : ""}`}
+        className="row tap"
+        aria-label={`${d.name}${coming ? ", coming soon" : ""}${held ? ", owned" : ""}`}
         style={{
           width: "100%",
           textAlign: "left",
-          padding: "12px 14px",
-          marginBottom: 9,
+          padding: "11px 0",
+          background: "none",
           display: "flex",
           alignItems: "center",
           gap: 13,
+          borderBottom: i < list.length - 1 ? "1px solid var(--line-2)" : "none",
         }}
       >
         {/* dim the tile, never the words — text stays AA on a "coming" row */}
@@ -123,18 +132,21 @@ export function MarketScreen({
             </span>
             {coming && <ComingTag />}
           </div>
+          {/* owned rows swap the ticker line for a quiet "Owned · qty" tag — the
+              name keeps its room; the ticker sits after the quantity */}
           <div
-            className={safe ? undefined : "mono"}
+            className={safe || held ? "tnum" : "mono"}
             style={{
-              fontSize: safe ? 12.5 : 12,
-              color: "var(--ink-2)",
+              fontSize: safe || held ? 12.5 : 12,
+              color: held ? "var(--primary)" : "var(--ink-2)",
+              fontWeight: held ? 600 : undefined,
               marginTop: 1,
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
             }}
           >
-            {sub}
+            {held ? `Owned · ${tokenQty(held.raw, held.asset.decimals ?? 18)}` : sub}
           </div>
         </div>
         {!coming && !safe && <Sparkline data={spark} color={up ? "var(--pos)" : "var(--neg)"} />}
@@ -158,26 +170,32 @@ export function MarketScreen({
   const groups = GROUPS.map((g) => ({ ...g, rows: rows.filter(g.pick) })).filter((g) => g.rows.length > 0);
 
   return (
-    <div className="screen screen-pad-top" style={{ paddingBottom: 110 }}>
-      {/* title + the stock-market clock. Stocks are the headline here, so the
-          open/closed pill sits beside the title; the issuer moves to a subline. */}
-      <div style={{ padding: "12px 22px 0", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        <h1 className="serif" style={{ margin: 0, fontSize: 32, letterSpacing: "-.015em" }}>Market</h1>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+    <div className="screen screen-pad-top" style={{ paddingBottom: 96 }}>
+      {/* title + the stock-market clock on one line (the pill shrinks, the
+          title never does); the issuer and the Baskets entry share the subline. */}
+      <div style={{ padding: "12px 22px 0", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <h1 className="serif" style={{ margin: 0, fontSize: 32, letterSpacing: "-.015em", flex: "none" }}>Market</h1>
+        <div style={{ minWidth: 0, display: "flex", justifyContent: "flex-end" }}>
           <MarketStatus />
-          {/* Baskets entry: ready-made mixes live one tap from the asset list. */}
-          <button
-            type="button"
-            className="tap"
-            onClick={() => go("baskets")}
-            aria-label="Baskets"
-            style={{ minHeight: 44, minWidth: 44, padding: "0 2px", background: "none", border: 0, display: "grid", placeItems: "center", cursor: "pointer" }}
-          >
-            <span className="chip" style={{ fontWeight: 600, fontSize: 12.5 }}>Baskets</span>
-          </button>
         </div>
       </div>
-      <div style={{ padding: "2px 22px 0", fontSize: 13, color: "var(--ink-2)", fontWeight: 500 }}>{chain.issuer}</div>
+      <div style={{ padding: "2px 22px 0", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <span style={{ fontSize: 13, color: "var(--ink-2)", fontWeight: 500, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {chain.issuer}
+        </span>
+        {/* Baskets entry: ready-made mixes live one tap from the asset list. */}
+        <button
+          type="button"
+          className="tap"
+          onClick={() => go("baskets")}
+          aria-label="Baskets"
+          style={{ minHeight: 44, margin: "-8px 0", padding: 0, background: "none", border: 0, display: "inline-flex", alignItems: "center", cursor: "pointer", flex: "none" }}
+        >
+          <span className="chip" style={{ fontWeight: 600, fontSize: 12.5, gap: 6, height: 28 }}>
+            <Icon name="grid" size={14} /> Baskets
+          </span>
+        </button>
+      </div>
 
       {/* search */}
       <div style={{ padding: "14px 22px 0" }}>
@@ -201,28 +219,37 @@ export function MarketScreen({
         </div>
       </div>
 
-      {/* categories — scroll row; the trailing spacer keeps the last chip off the edge */}
+      {/* categories: scroll row whose right edge fades so the overflow reads as scrollable */}
       <div
-        style={{ display: "flex", gap: 8, padding: "14px 0 4px 22px", overflowX: "auto", flexShrink: 0 }}
+        style={{
+          flexShrink: 0,
+          maskImage: "linear-gradient(to right, black 0, black calc(100% - 36px), transparent 100%)",
+          WebkitMaskImage: "linear-gradient(to right, black 0, black calc(100% - 36px), transparent 100%)",
+        }}
       >
-        {CATS.map((c) => (
-          <button
-            key={c}
-            onClick={() => setCat(c)}
-            aria-pressed={cat === c}
-            className={`chip tap ${cat === c ? "is-on" : ""}`}
-            style={{ flex: "none" }}
-          >
-            {c}
-          </button>
-        ))}
-        <span aria-hidden style={{ flex: "none", width: 14 }} />
+        <div style={{ display: "flex", gap: 8, padding: "14px 0 4px 22px", overflowX: "auto" }}>
+          {CATS.map((c) => (
+            <button
+              key={c}
+              onClick={() => setCat(c)}
+              aria-pressed={cat === c}
+              className={`chip tap ${cat === c ? "is-on" : ""}`}
+              style={{ flex: "none" }}
+            >
+              {c}
+            </button>
+          ))}
+          <span aria-hidden style={{ flex: "none", width: 36 }} />
+        </div>
       </div>
 
       {filtering ? (
-        <div style={{ padding: "8px 22px 0" }} className="stagger">
-          {filtered.map(renderRow)}
-          {filtered.length === 0 && (
+        <div style={{ padding: "8px 22px 0" }}>
+          {filtered.length > 0 ? (
+            <Reveal key={cat} className="card" style={{ padding: "2px 14px" }}>
+              {filtered.map(renderRow)}
+            </Reveal>
+          ) : (
             <div className="card" style={{ padding: "26px 18px", textAlign: "center", color: "var(--ink-2)", marginTop: 6 }}>
               <div style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)" }}>Nothing matches that</div>
               <div style={{ fontSize: 13.5, marginTop: 4, lineHeight: 1.5 }}>
@@ -235,7 +262,10 @@ export function MarketScreen({
         groups.map((g, gi) => (
           <div key={g.key} style={{ padding: `${gi === 0 ? 10 : 16}px 22px 0` }}>
             <SectionTitle>{g.title}</SectionTitle>
-            <div className="stagger">{g.rows.map(renderRow)}</div>
+            {/* one card per tier, rows divided by hairlines */}
+            <Reveal delay={gi * 0.05} className="card" style={{ padding: "2px 14px" }}>
+              {g.rows.map(renderRow)}
+            </Reveal>
           </div>
         ))
       )}

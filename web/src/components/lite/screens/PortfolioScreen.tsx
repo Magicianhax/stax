@@ -1,31 +1,51 @@
 "use client";
 
-// Portfolio — faithful re-skin of the design (screens_portfolio.jsx · Portfolio)
-// wired to REAL data: holdings + approximate USD value from usePortfolio, cash
-// from useUsdcBalance. Animated Donut allocation, labeled legend, holdings list,
-// total (CountUp), and an empty state.
+// Owned — the performance screen. Portfolio value over a range (1D 1W 1M 1Y All)
+// as an interactive area chart with a value + date readout, the range's P&L,
+// every holding with its gain for that range, and the allocation donut (centre =
+// total) with a legend from the fixed brand ramp.
 //
-// Note on P&L: we don't track cost basis on-chain, so we DON'T fabricate an
-// "all time" gain (the design's demo gain pill is intentionally omitted). The
-// hero shows real total value; per-holding rows show approximate current value.
+// Data: holdings + cash from usePortfolio (server-valued, rendered verbatim);
+// per-holding history for the range from /api/market (demo: deterministic
+// priceSeries). The portfolio line is the holdings' series blended by current
+// value plus flat cash, so it always ends exactly at the real total. Range P&L
+// is price movement over the window, not cost basis (we don't track that
+// on-chain), and the copy says so.
+import { useMemo, useState } from "react";
 import { usePortfolio, type Holding } from "@/hooks/useBalances";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import {
   Icon,
   VeraOrb,
-  CountUp,
   Donut,
   HoldingRow,
+  PriceChart,
   SectionTitle,
   VerifiedBadge,
+  type PricePoint,
 } from "@/components/design";
-import { displayFor, toTile } from "@/lib/displayAssets";
+import { Money, Reveal, formatMoney } from "@/components/motion";
+import { toTile } from "@/lib/displayAssets";
 import { usd, tokenQty } from "@/lib/format";
+import { rampColor } from "./basketPrimitives";
+import { blendSeries, changeOf, readoutDate, useSymbolSeries, type MarketRange } from "./useRangeSeries";
+import type { LoopParams } from "../LiteApp";
+
+const RANGES = ["1D", "1W", "1M", "1Y", "All"] as const;
+const RANGE_WORD: Record<MarketRange, string> = {
+  "1D": "today",
+  "1W": "past week",
+  "1M": "past month",
+  "1Y": "past year",
+  All: "all time",
+};
 
 export function PortfolioScreen({
   go,
+  loop,
 }: {
   go: (screen: string, params?: Record<string, unknown>) => void;
+  loop?: LoopParams;
 }) {
   const { address } = useSmartAccount();
   // Cash, invested, and total all arrive pre-computed from /api/portfolio —
@@ -35,9 +55,27 @@ export function PortfolioScreen({
   const cash = port?.cashUsd ?? 0;
   const holdings: Holding[] = port?.holdings ?? [];
   const invested = port?.investedUsd ?? 0;
-  // Only holdings we could price contribute to the donut/legend share.
+  // Only holdings we could price contribute to the chart/donut.
   const priced = holdings.filter((h) => h.valueUsd !== undefined && h.valueUsd > 0);
   const total = port?.totalUsd ?? 0;
+
+  const [range, setRange] = useState<MarketRange>("1M");
+  const [hover, setHover] = useState<(PricePoint & { index: number }) | null>(null);
+  const symbols = useMemo(() => priced.map((h) => h.asset.symbol), [priced]);
+  const { series, loading: seriesLoading } = useSymbolSeries(symbols, range);
+
+  // Portfolio line for the range: each holding's series scaled to its current
+  // value, plus flat cash — ends exactly at the real total.
+  const points = useMemo(
+    () =>
+      blendSeries(
+        priced.map((h) => ({ points: series.get(h.asset.symbol) ?? [], weight: h.valueUsd ?? 0 })),
+        { base: cash, anchor: "end" },
+      ),
+    [priced, series, cash],
+  );
+  const pnl = changeOf(points);
+  const up = pnl.abs >= 0;
 
   // ── First-load skeleton — don't flash the empty state before holdings resolve.
   if (portLoading && holdings.length === 0) {
@@ -49,23 +87,15 @@ export function PortfolioScreen({
           </h1>
         </div>
         <div style={{ padding: "14px 22px 0" }}>
-          <div className="card" style={{ padding: 20, display: "flex", gap: 18, alignItems: "center" }}>
-            <div style={{ flex: 1 }}>
-              <div className="skeleton" style={{ width: 90, height: 11, borderRadius: 6 }} />
-              <div className="skeleton" style={{ width: 140, height: 30, borderRadius: 10, marginTop: 12 }} />
-              <div className="skeleton" style={{ width: 165, height: 12, borderRadius: 6, marginTop: 14 }} />
-            </div>
-            <div
-              className="skeleton"
-              style={{ width: 104, height: 104, borderRadius: "50%", flex: "none" }}
-            />
+          <div className="card" style={{ padding: 20 }}>
+            <div className="skeleton" style={{ width: 90, height: 11, borderRadius: 6 }} />
+            <div className="skeleton" style={{ width: 160, height: 30, borderRadius: 10, marginTop: 12 }} />
+            <div className="skeleton" style={{ width: 130, height: 12, borderRadius: 6, marginTop: 12 }} />
+            <div className="skeleton" style={{ width: "100%", height: 170, borderRadius: 14, marginTop: 16 }} />
           </div>
         </div>
         <div style={{ padding: "22px 22px 0" }}>
-          <div
-            className="skeleton"
-            style={{ width: 96, height: 16, borderRadius: 6, marginBottom: 12 }}
-          />
+          <div className="skeleton" style={{ width: 96, height: 16, borderRadius: 6, marginBottom: 12 }} />
           <div className="card" style={{ padding: "8px 16px" }}>
             {[0, 1, 2].map((i) => (
               <div
@@ -131,7 +161,17 @@ export function PortfolioScreen({
     );
   }
 
-  const donutTotal = priced.reduce((s, h) => s + (h.valueUsd ?? 0), 0) || 1;
+  const donutTotal = priced.reduce((s, h) => s + (h.valueUsd ?? 0), 0) + cash || 1;
+  const legend = [
+    ...priced.map((h, i) => ({
+      key: h.asset.symbol,
+      name: toTile(h.asset.symbol, h.asset.name).name,
+      value: h.valueUsd ?? 0,
+      color: rampColor(i),
+    })),
+    ...(cash > 0 ? [{ key: "cash", name: "Cash", value: cash, color: "color-mix(in srgb, var(--ink-3) 45%, var(--surface-2))" }] : []),
+  ];
+  const chartReady = points.length > 1;
 
   return (
     <div className="screen screen-pad-top" style={{ paddingBottom: 110 }}>
@@ -141,36 +181,126 @@ export function PortfolioScreen({
         </h1>
       </div>
 
-      {/* total + donut */}
-      <div className="anim-rise" style={{ padding: "14px 22px 0" }}>
-        <div className="card" style={{ padding: 20 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
-            <div style={{ flex: 1 }}>
-              <div className="label-eyebrow">Total value</div>
-              <div
-                style={{ fontSize: 34, fontWeight: 700, letterSpacing: "-.03em", marginTop: 4 }}
-              >
-                <CountUp to={total} />
+      <Reveal once="owned">
+        {/* performance hero: readout + range chart */}
+        <div style={{ padding: "14px 22px 0" }}>
+          <div className="card" style={{ padding: "18px 16px 12px" }}>
+            <div style={{ padding: "0 4px" }}>
+              <div className="label-eyebrow" aria-live="polite">
+                {hover ? readoutDate(hover.t, range) : "Total value"}
               </div>
-              <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 8 }}>
-                {usd(invested)} invested · {usd(cash)} cash
+              <div style={{ fontSize: 34, fontWeight: 700, letterSpacing: "-.03em", marginTop: 4, minHeight: 41 }}>
+                {hover ? (
+                  <span className="tnum">{usd(hover.v)}</span>
+                ) : (
+                  <Money value={total} prev={loop?.prevTotal} />
+                )}
+              </div>
+              <div className="tnum" style={{ fontSize: 13.5, fontWeight: 600, marginTop: 6, minHeight: 20 }}>
+                {chartReady ? (
+                  <>
+                    <span style={{ color: up ? "var(--pos)" : "var(--neg)" }}>
+                      {up ? "+" : "-"}
+                      <Money value={Math.abs(pnl.abs)} /> · {up ? "+" : ""}
+                      {pnl.pct.toFixed(2)}%
+                    </span>
+                    <span style={{ color: "var(--ink-3)", marginLeft: 6 }}>{RANGE_WORD[range]}</span>
+                  </>
+                ) : (
+                  <span className="skeleton" style={{ display: "inline-block", width: 150, height: 14, borderRadius: 6 }} />
+                )}
               </div>
             </div>
+            <div style={{ marginTop: 12 }}>
+              {chartReady ? (
+                <PriceChart
+                  points={points}
+                  up={up}
+                  area
+                  height={170}
+                  ranges={RANGES}
+                  range={range}
+                  onRange={(r) => {
+                    setHover(null);
+                    setRange(r as MarketRange);
+                  }}
+                  onScrub={setHover}
+                  formatValue={(v) => usd(v)}
+                  label={`Your portfolio value, ${up ? "up" : "down"} ${Math.abs(pnl.pct).toFixed(1)}% ${RANGE_WORD[range]}`}
+                />
+              ) : (
+                <div
+                  className={seriesLoading ? "skeleton" : undefined}
+                  style={{ height: 170, borderRadius: 14, display: "grid", placeItems: "center", background: seriesLoading ? undefined : "var(--surface-2)", color: "var(--ink-2)", fontSize: 13.5, fontWeight: 600 }}
+                >
+                  {!seriesLoading && "Not enough history to draw yet"}
+                </div>
+              )}
+            </div>
+            <div style={{ fontSize: 12.5, color: "var(--ink-3)", padding: "10px 4px 0", lineHeight: 1.45 }}>
+              {usd(invested)} invested · {usd(cash)} cash. Change is price movement over the range.
+            </div>
+          </div>
+        </div>
+
+        {/* holdings — each with its gain for the selected range */}
+        <div style={{ padding: "20px 22px 0" }}>
+          <SectionTitle>Holdings</SectionTitle>
+          <div className="card" style={{ padding: "4px 14px" }}>
+            {holdings.map((h, i) => {
+              const base = toTile(h.asset.symbol, h.asset.name);
+              // Real 1D market data (from the server) replaces the presentational
+              // tint whenever the asset has a live source.
+              const tile = {
+                ...base,
+                day: h.dayChangePct ?? base.day,
+                spark: h.spark ?? base.spark,
+              };
+              const s = series.get(h.asset.symbol);
+              const rc = s && s.length > 1 ? changeOf(s) : null;
+              // Gain for the range on today's value: value − value / (1 + pct).
+              const abs = rc && h.valueUsd !== undefined ? h.valueUsd - h.valueUsd / (1 + rc.pct / 100) : undefined;
+              const qty = tokenQty(h.raw, h.asset.decimals ?? 18);
+              const flashed = loop?.flash.includes(h.asset.symbol);
+              return (
+                <div
+                  key={h.asset.symbol}
+                  style={{ borderBottom: i < holdings.length - 1 ? "1px solid var(--line-2)" : "none" }}
+                >
+                  <HoldingRow
+                    asset={tile}
+                    qty={qty}
+                    symbol={h.asset.symbol}
+                    showSpark={false}
+                    onClick={() => go("asset", { symbol: h.asset.symbol })}
+                    value={h.valueUsd !== undefined ? usd(h.valueUsd) : qty}
+                    change={
+                      rc
+                        ? { abs, pct: rc.pct, label: range === "1D" ? "today" : range }
+                        : h.dayChangePct !== undefined
+                          ? { pct: h.dayChangePct, label: "today" }
+                          : undefined
+                    }
+                    flashKey={flashed && loop ? `${h.asset.symbol}:${loop.txHash}` : undefined}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* allocation — donut centre is the total; legend from the brand ramp */}
+        <div style={{ padding: "20px 22px 0" }}>
+          <SectionTitle>Allocation</SectionTitle>
+          <div className="card" style={{ padding: 20, display: "flex", alignItems: "center", gap: 18 }}>
             <Donut
-              size={104}
+              size={112}
               thickness={15}
-              segments={
-                priced.length
-                  ? priced.map((h) => ({
-                      value: (h.valueUsd ?? 0) / donutTotal,
-                      color: displayFor(h.asset.symbol, h.asset.name).color,
-                    }))
-                  : [{ value: 1, color: "var(--surface-2)" }]
-              }
+              segments={legend.map((l) => ({ value: l.value / donutTotal, color: l.color }))}
               center={
                 <div>
-                  <div className="tnum" style={{ fontSize: 17, fontWeight: 700, lineHeight: 1 }}>
-                    {holdings.length}
+                  <div className="tnum" style={{ fontSize: 15, fontWeight: 700, lineHeight: 1, letterSpacing: "-.02em" }}>
+                    {formatMoney(total, "USD", 0)}
                   </div>
                   <div
                     style={{
@@ -179,84 +309,37 @@ export function PortfolioScreen({
                       color: "var(--ink-2)",
                       letterSpacing: ".05em",
                       textTransform: "uppercase",
+                      marginTop: 3,
                     }}
                   >
-                    held
+                    total
                   </div>
                 </div>
               }
             />
-          </div>
-          {/* legend */}
-          {priced.length > 0 && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px", marginTop: 16 }}>
-              {priced.map((h) => {
-                const d = displayFor(h.asset.symbol, h.asset.name);
-                return (
-                  <span
-                    key={h.asset.symbol}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 6,
-                      fontSize: 12.5,
-                      color: "var(--ink-2)",
-                    }}
-                  >
-                    <span
-                      style={{ width: 9, height: 9, borderRadius: 3, background: d.color }}
-                    />
-                    {d.name}
-                    <span className="tnum" style={{ color: "var(--ink-2)", fontWeight: 600 }}>
-                      {Math.round(((h.valueUsd ?? 0) / donutTotal) * 100)}%
-                    </span>
+            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 7 }}>
+              {legend.map((l) => (
+                <div
+                  key={l.key}
+                  style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--ink-2)" }}
+                >
+                  <span style={{ width: 9, height: 9, borderRadius: 3, background: l.color, flex: "none" }} />
+                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {l.name}
                   </span>
-                );
-              })}
+                  <span className="tnum" style={{ color: "var(--ink)", fontWeight: 600 }}>
+                    {Math.round((l.value / donutTotal) * 100)}%
+                  </span>
+                </div>
+              ))}
             </div>
-          )}
+          </div>
         </div>
-      </div>
 
-      {/* holdings list */}
-      <div style={{ padding: "20px 22px 0" }}>
-        <SectionTitle>Holdings</SectionTitle>
-        <div className="card stagger-in" style={{ padding: "4px 14px" }}>
-          {holdings.map((h, i) => {
-            const base = toTile(h.asset.symbol, h.asset.name);
-            // Real 1D market data (from the server) replaces the presentational
-            // tint whenever the asset has a live source.
-            const tile = {
-              ...base,
-              day: h.dayChangePct ?? base.day,
-              spark: h.spark ?? base.spark,
-            };
-            const day = h.dayChangePct;
-            return (
-              <div
-                key={h.asset.symbol}
-                style={{
-                  borderBottom: i < holdings.length - 1 ? "1px solid var(--line-2)" : "none",
-                }}
-              >
-                <HoldingRow
-                  asset={tile}
-                  qty={tokenQty(h.raw, h.asset.decimals ?? 18)}
-                  symbol={h.asset.symbol}
-                  showSpark
-                  onClick={() => go("asset", { symbol: h.asset.symbol })}
-                  value={h.valueUsd !== undefined ? usd(h.valueUsd) : tokenQty(h.raw, h.asset.decimals ?? 18)}
-                  change={day !== undefined ? { pct: day, label: "today" } : undefined}
-                />
-              </div>
-            );
-          })}
+        <div style={{ padding: "18px 22px 0", display: "flex", justifyContent: "center" }}>
+          <VerifiedBadge label="Every plan signed & recorded by Vera" onClick={() => go("vera")} />
         </div>
-      </div>
-
-      <div style={{ padding: "18px 22px 0", display: "flex", justifyContent: "center" }}>
-        <VerifiedBadge label="Every plan signed & recorded by Vera" onClick={() => go("vera")} />
-      </div>
+      </Reveal>
     </div>
   );
 }

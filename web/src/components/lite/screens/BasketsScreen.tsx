@@ -5,6 +5,7 @@
 // filtered to what is fully investable on the active chain). Every tile leads to
 // BasketDetail, where Invest hands a basketToAllocation() plan to PlanScreen.
 import { Icon, SectionTitle } from "@/components/design";
+import { Reveal } from "@/components/motion";
 import { useBaskets } from "@/hooks/useBaskets";
 import { useChain } from "@/lib/chains/active";
 import { iconBtn } from "./primitives";
@@ -20,18 +21,19 @@ export function BasketsScreen({
 
   return (
     <div className="screen screen-pad-top" style={{ paddingBottom: 36 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 22px 0" }}>
+      {/* title shares the back-button row (no dead band under the chrome) */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 22px 0" }}>
         <button onClick={() => go(-1)} style={iconBtn} className="tap" aria-label="Back">
           <Icon name="back" size={20} />
         </button>
+        <h1 className="serif" style={{ margin: 0, fontSize: 27, letterSpacing: "-.01em" }}>Baskets</h1>
       </div>
 
-      <div className="anim-rise" style={{ padding: "16px 22px 0" }}>
-        <h1 className="serif" style={{ margin: 0, fontSize: 32, letterSpacing: "-.015em" }}>Baskets</h1>
-        <p className="body" style={{ margin: "8px 0 0", maxWidth: 320 }}>
+      <Reveal style={{ padding: "10px 22px 0" }}>
+        <p className="body" style={{ margin: 0, maxWidth: 320 }}>
           Ready-made mixes you can invest in with one tap. Vera still checks the risk before anything is placed.
         </p>
-      </div>
+      </Reveal>
 
       {/* Yours */}
       <div style={{ padding: "24px 22px 0" }}>
@@ -51,11 +53,11 @@ export function BasketsScreen({
             </button>
           </div>
         ) : (
-          <div className="stagger">
+          <Reveal>
             {mine.map((b) => (
               <BasketTile key={b.id} basket={b} onClick={() => go("basket", { id: b.id })} />
             ))}
-          </div>
+          </Reveal>
         )}
       </div>
 
@@ -70,11 +72,11 @@ export function BasketsScreen({
             </div>
           </div>
         ) : (
-          <div className="stagger">
+          <Reveal delay={0.06}>
             {curated.map((b) => (
               <BasketTile key={b.id} basket={b} onClick={() => go("basket", { id: b.id })} />
             ))}
-          </div>
+          </Reveal>
         )}
       </div>
 

@@ -4,10 +4,31 @@
 // Built from the incumbent design primitives (.card/.chip/.skeleton, displayFor
 // colors) — nothing here reaches into components/design/*.
 import type { CSSProperties } from "react";
-import { displayFor } from "@/lib/displayAssets";
+import { LogoCluster } from "@/components/design";
 import { BasketIconGlyph } from "@/components/BasketIcon";
 import { basketShareUrl, riskWord, type Basket } from "@/lib/baskets";
 import { useBasketPerformance } from "@/hooks/useBasketPerformance";
+
+/**
+ * Fixed brand ramp for allocation colours (weight bars, the Owned donut + legend):
+ * primary, accent, ink-3, terracotta-soft. Cycles with a lighter pass past four so
+ * the brand green is never doubled next to itself.
+ */
+export const BRAND_RAMP = [
+  "var(--primary)",
+  "var(--accent)",
+  "var(--ink-3)",
+  "color-mix(in srgb, var(--neg) 58%, var(--surface))",
+] as const;
+export function rampColor(i: number): string {
+  const c = BRAND_RAMP[i % BRAND_RAMP.length];
+  return i < BRAND_RAMP.length ? c : `color-mix(in srgb, ${c} 55%, var(--surface-2))`;
+}
+
+/** The holdings of a basket as LogoCluster input (heaviest first). */
+export function clusterOf(basket: { items: { symbol: string; weightPct: number }[] }): { symbol: string }[] {
+  return [...basket.items].sort((a, b) => b.weightPct - a.weightPct).map((i) => ({ symbol: i.symbol }));
+}
 
 /** Emoji on a tinted disc — the basket's glyph. Tint is the basket color, never a raw fill. */
 export function BasketDisc({ basket, size = 48 }: { basket: Basket; size?: number }) {
@@ -32,8 +53,46 @@ export function BasketDisc({ basket, size = 48 }: { basket: Basket; size?: numbe
   );
 }
 
-import { WeightBar } from "@/components/WeightBar";
+// PlanScreen keeps the shared, display-coloured, animating bar; baskets use the ramp one below.
 export { usePrefersReducedMotion, WeightBar } from "@/components/WeightBar";
+
+const SEG_GAP = 2;
+
+/** Stacked weight bar coloured from the brand ramp (heaviest holding = primary). Static: baskets never morph. */
+export function RampWeightBar({
+  items,
+  height = 8,
+}: {
+  items: { symbol: string; weightPct: number }[];
+  height?: number;
+}) {
+  const order = [...items].sort((a, b) => b.weightPct - a.weightPct);
+  const gaps = Math.max(0, order.length - 1) * SEG_GAP;
+  // Cumulative start (%) of each segment.
+  const starts = order.map((_, idx) => order.slice(0, idx).reduce((sum, x) => sum + x.weightPct, 0));
+  return (
+    <div aria-hidden style={{ position: "relative", height, borderRadius: 99, overflow: "hidden", width: "100%", background: "var(--surface-2)" }}>
+      {order.map((i, idx) => {
+        const left = starts[idx];
+        return (
+          <span
+            key={i.symbol}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              height: "100%",
+              width: `calc(100% - ${gaps}px)`,
+              background: rampColor(idx),
+              transformOrigin: "left center",
+              transform: `translateX(calc(${left}% + ${idx * SEG_GAP}px)) scaleX(${i.weightPct / 100})`,
+            }}
+          />
+        );
+      })}
+    </div>
+  );
+}
 
 /** Signed percent, tabular. */
 export function fmtPct(v: number): string {
@@ -106,8 +165,7 @@ export function BasketTile({ basket, onClick }: { basket: Basket; onClick: () =>
       aria-label={`${basket.name}. ${basket.tagline} ${riskWord(basket.riskScore)}.`}
       style={{ width: "100%", textAlign: "left", padding: "14px 16px 14px 14px", marginBottom: 10, display: "block" }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
-        <BasketDisc basket={basket} />
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 700, fontSize: 16.5, letterSpacing: "-.01em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {basket.name}
@@ -116,10 +174,11 @@ export function BasketTile({ basket, onClick }: { basket: Basket; onClick: () =>
             {basket.tagline}
           </div>
         </div>
+        <LogoCluster assets={clusterOf(basket)} size={28} />
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 13 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <WeightBar items={basket.items} />
+          <RampWeightBar items={basket.items} />
         </div>
         <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink-2)", flex: "none" }}>
           {riskWord(basket.riskScore)}
@@ -141,7 +200,7 @@ export function BasketRailTile({ basket, onClick }: { basket: Basket; onClick: (
       style={{ width: 164, flex: "none", textAlign: "left", padding: 14, display: "block", scrollSnapAlign: "start" }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-        <BasketDisc basket={basket} size={40} />
+        <LogoCluster assets={clusterOf(basket)} size={26} max={3} />
         <ReturnChip value={perf.returns["1M"]} loading={perf.loading} label="1M" />
       </div>
       <div style={{ fontWeight: 700, fontSize: 15, letterSpacing: "-.01em", marginTop: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -149,7 +208,7 @@ export function BasketRailTile({ basket, onClick }: { basket: Basket; onClick: (
       </div>
       <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 2 }}>{riskWord(basket.riskScore)}</div>
       <div style={{ marginTop: 10 }}>
-        <WeightBar items={basket.items} height={6} />
+        <RampWeightBar items={basket.items} height={6} />
       </div>
     </button>
   );

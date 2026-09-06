@@ -7,12 +7,35 @@
 // linking to its real explorer tx on the active chain). Empty history degrades to
 // an honest 0-state; a chain whose contracts aren't deployed yet shows the calm
 // "being switched on" state instead of zeros.
+import { useMemo, useState } from "react";
 import { useAgentIdentity } from "@/hooks/useAgentIdentity";
 import { useVeraRecord } from "@/hooks/useVeraRecord";
+import { useDemo } from "@/components/demo/DemoProvider";
 import { VERA } from "@/lib/veraData";
-import { Icon, VeraOrb, SectionTitle, Seal, ChainLaunching, type IconName } from "@/components/design";
+import {
+  Icon,
+  VeraOrb,
+  SectionTitle,
+  Seal,
+  ChainLaunching,
+  LogoCluster,
+  PriceChart,
+  Sparkline,
+  type IconName,
+  type PricePoint,
+} from "@/components/design";
+import { Reveal } from "@/components/motion";
 import { addressUrl, shortAddress, usd, riskLabel } from "@/lib/format";
+import { planSeriesSince, trackRecordSeries } from "@/lib/demoSeries";
 import { useChainReady } from "../useChainReady";
+
+function fmtPct(v: number): string {
+  return `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}%`;
+}
+
+function shortDate(sec: number): string {
+  return new Date(sec * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
 
 export function VeraScreen({
   go,
@@ -20,8 +43,16 @@ export function VeraScreen({
   go: (target: string | number, params?: Record<string, unknown>) => void;
 }) {
   const { chain, ready } = useChainReady();
+  const demo = useDemo();
   const { data: identity } = useAgentIdentity();
   const { data: record, isLoading: recordLoading } = useVeraRecord();
+
+  // Track record: $100 following every recorded plan. Only the demo has a
+  // series today — the real record has no cost basis yet, so the card is
+  // hidden there rather than drawn from nothing.
+  const track = useMemo<PricePoint[]>(() => (demo ? trackRecordSeries() : []), [demo]);
+  const trackChange = track.length > 1 ? ((track[track.length - 1].v - track[0].v) / track[0].v) * 100 : 0;
+  const [hover, setHover] = useState<(PricePoint & { index: number }) | null>(null);
 
   const totalRecs = record?.totalRecommendations ?? 0;
   const totalUsd = record?.totalExecutedUsd ?? 0;
@@ -207,6 +238,47 @@ export function VeraScreen({
         </div>
       </div>
 
+      {/* track record — what $100 following every plan would be worth now */}
+      {ready && track.length > 1 && (
+        <div style={{ padding: "22px 22px 0" }}>
+          <SectionTitle>Track record</SectionTitle>
+          <div className="card" style={{ padding: "14px 16px 12px" }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, minHeight: 22 }}>
+              <span style={{ fontSize: 13, color: "var(--ink-2)", fontWeight: 600 }}>
+                {hover ? usd(hover.v) : "$100 following every plan"}
+              </span>
+              <span
+                className="tnum"
+                style={{
+                  fontSize: 14,
+                  fontWeight: 700,
+                  flex: "none",
+                  color: hover ? "var(--ink-2)" : trackChange >= 0 ? "var(--pos)" : "var(--neg)",
+                }}
+              >
+                {hover
+                  ? new Date(hover.t as number).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+                  : `${fmtPct(trackChange)} · 6M`}
+              </span>
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <PriceChart
+                points={track}
+                up={trackChange >= 0}
+                area
+                height={120}
+                onScrub={setHover}
+                formatValue={(v) => usd(v)}
+                label={`$100 following every recorded plan, ${trackChange >= 0 ? "up" : "down"} ${Math.abs(trackChange).toFixed(1)}% over six months`}
+              />
+            </div>
+            <p style={{ fontSize: 12, color: "var(--ink-3)", margin: "16px 0 0", lineHeight: 1.5 }}>
+              Past results don&apos;t promise future ones.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* recorded recommendations — REAL, from the on-chain log (none to read
           until the chain's contracts are switched on) */}
       {ready && (
@@ -247,10 +319,14 @@ export function VeraScreen({
             </div>
           </div>
         ) : (
-          <div className="card stagger-in" style={{ padding: "4px 16px" }}>
+          <Reveal className="card" style={{ padding: "4px 16px" }}>
             {recents.map((r, i) => {
               const placed = r.usdcSpent !== undefined;
               const risk = riskLabel(r.riskScore);
+              const symbols = r.symbols ?? [];
+              const spark = symbols.length && r.timestamp ? planSeriesSince(symbols, r.timestamp * 1000) : [];
+              const sparkUp = spark.length > 1 ? spark[spark.length - 1] >= spark[0] : true;
+              const when = r.timestamp ? shortDate(r.timestamp) : undefined;
               return (
                 <button
                   key={r.txHash + i}
@@ -264,23 +340,30 @@ export function VeraScreen({
                   }
                   style={{
                     padding: "13px 0",
+                    minHeight: 64,
                     borderBottom: i < recents.length - 1 ? "1px solid var(--line-2)" : "none",
                   }}
                 >
-                  <span
-                    style={{
-                      width: 38,
-                      height: 38,
-                      borderRadius: 11,
-                      flex: "none",
-                      display: "grid",
-                      placeItems: "center",
-                      background: "var(--primary-soft)",
-                      color: "var(--primary)",
-                    }}
-                  >
-                    <Icon name={placed ? "check" : "shield"} size={18} stroke={2.2} />
-                  </span>
+                  {symbols.length > 0 ? (
+                    <span style={{ display: "inline-flex", minWidth: 38, flex: "none" }}>
+                      <LogoCluster assets={symbols.map((s) => ({ symbol: s }))} size={24} max={3} />
+                    </span>
+                  ) : (
+                    <span
+                      style={{
+                        width: 38,
+                        height: 38,
+                        borderRadius: 11,
+                        flex: "none",
+                        display: "grid",
+                        placeItems: "center",
+                        background: "var(--primary-soft)",
+                        color: "var(--primary)",
+                      }}
+                    >
+                      <Icon name={placed ? "check" : "shield"} size={18} stroke={2.2} />
+                    </span>
+                  )}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div
                       style={{
@@ -291,17 +374,21 @@ export function VeraScreen({
                         whiteSpace: "nowrap",
                       }}
                     >
-                      {risk.label} plan{placed ? ` · ${usd(r.usdcSpent as number)}` : ""}
+                      {risk.label} plan
                     </div>
-                    <div style={{ fontSize: 11.5, color: "var(--ink-2)", marginTop: 2 }}>
-                      {placed ? "Placed on-chain" : "Recommended on-chain"}
+                    <div className="tnum" style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 2 }}>
+                      {placed ? `${usd(r.usdcSpent as number)} · ${when ? `Placed ${when}` : "Placed on-chain"}` : when ? `Recommended ${when}` : "Recommended on-chain"}
                     </div>
                   </div>
-                  <Icon name="chevR" size={16} style={{ color: "var(--ink-3)" }} />
+                  {spark.length > 1 && (
+                    <Sparkline data={spark} w={60} h={22} color={sparkUp ? "var(--pos)" : "var(--neg)"} />
+                  )}
+                  {/* the sparkline is the row's affordance; the chevron only fills in without one */}
+                  {spark.length < 2 && <Icon name="chevR" size={16} style={{ color: "var(--ink-3)", flex: "none" }} />}
                 </button>
               );
             })}
-          </div>
+          </Reveal>
         )}
         <p
           style={{

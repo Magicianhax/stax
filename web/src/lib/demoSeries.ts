@@ -147,3 +147,47 @@ export function projection({ amount, cadence, riskBps, months }: ProjectionInput
   }
   return { contributed, projected };
 }
+
+// ── Vera track record ────────────────────────────────────────────────────────
+
+/**
+ * Value of $100 that followed every recorded plan, weekly for the last 26 weeks,
+ * ending a little ahead. Presentational: the real record has no cost basis yet.
+ */
+export function trackRecordSeries(end = 107.9): SeriesPoint[] {
+  const n = 26;
+  const vs = walk("vera:track", n, end, end - 100, 0.009);
+  const ts = stamp(n, 7 * DAY);
+  return vs.map((v, i) => ({ t: ts[i], v: Number(v.toFixed(2)) }));
+}
+
+function rangeCovering(ageMs: number): MarketRange {
+  if (ageMs <= DAY) return "1D";
+  if (ageMs <= 7 * DAY) return "1W";
+  if (ageMs <= 31 * DAY) return "1M";
+  if (ageMs <= 366 * DAY) return "1Y";
+  return "All";
+}
+
+/**
+ * Equal-weight blend of the plan's holdings since it was placed, normalised so
+ * the first point is 100 (a sparkline "since placed"). At least two points.
+ */
+export function planSeriesSince(symbols: string[], placedAtMs: number): number[] {
+  if (!symbols.length) return [];
+  const range = rangeCovering(Math.max(0, DEMO_NOW - placedAtMs));
+  const per = symbols.map((s) => priceSeries(s, range).filter((p) => p.t >= placedAtMs));
+  const n = Math.min(...per.map((p) => p.length));
+  if (n < 2) {
+    // Younger than one step: draw flat start → the latest blended value.
+    const last = symbols.reduce((sum, s) => sum + priceSeries(s, range).at(-1)!.v / priceSeries(s, range).at(-2)!.v, 0) / symbols.length;
+    return [100, Number((100 * last).toFixed(2))];
+  }
+  const out: number[] = [];
+  for (let k = 0; k < n; k++) {
+    let v = 0;
+    for (const p of per) v += p[p.length - n + k].v / p[p.length - n].v;
+    out.push(Number(((100 * v) / symbols.length).toFixed(3)));
+  }
+  return out;
+}
