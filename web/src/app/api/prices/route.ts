@@ -6,8 +6,10 @@
 // s), and Coinbase B20 stocks carry `sharesPerToken` (multiplier / 1e18). All of
 // it is one multicall per request burst. No live source → priceUsd: null.
 import type { NextRequest } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { priceAll } from "@/lib/prices";
 import { chainFromRequest, serverClient } from "@/lib/server/chain";
+import { recordPriceSnapshots } from "@/lib/server/priceSnapshots";
 import { rateLimit, clientIp } from "@/lib/server/rateLimit";
 import { tooManyRequests, serverError } from "@/lib/server/respond";
 
@@ -24,6 +26,9 @@ export async function GET(req: NextRequest) {
   try {
     // serverClient batches the parallel pool/feed reads into one multicall eth_call.
     const prices = await priceAll(chain, serverClient(chain));
+    // Write-through snapshot (≤ one per 15 min per chain). Off the response path:
+    // never awaited, never throws; waitUntil keeps the instance alive to finish it.
+    waitUntil(recordPriceSnapshots(chain, prices));
     return Response.json(
       { chain: chain.key, prices, asOf: new Date().toISOString() },
       {

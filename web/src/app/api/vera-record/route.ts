@@ -1,14 +1,18 @@
 // GET /api/vera-record[?user=0x…] — Vera's on-chain track record on the request
 // chain (global, or scoped to one user) + her IdentityRegistry reputation there.
-// Public chain data, no auth — rate limited per IP, and the underlying scan is
-// cached server-side. Exists because browsers can't eth_getLogs the full
-// deploy→latest range against the public RPC (10k-block cap); the server uses
-// Etherscan's index. A chain Stax isn't deployed on yet yields a clean 0-state.
+// Public chain data, no auth — rate limited per IP. Served from the indexer's copy
+// in Postgres (browsers can't eth_getLogs the full deploy→latest range against the
+// public RPC); the indexer is nudged first, bounded so a backfill never stalls the
+// response. A chain Stax isn't deployed on yet yields a clean 0-state.
 import type { NextRequest } from "next/server";
 import { isAddress } from "viem";
 import { explorerTx } from "@/lib/chains";
 import { chainFromRequest } from "@/lib/server/chain";
 import { getVeraRecordServer, getReputationServer } from "@/lib/server/executorLogs";
+import { syncExecutorEvents } from "@/lib/server/indexer";
+
+/** Longest a request waits on the indexer before serving what Postgres already has. */
+const SYNC_WAIT_MS = 8_000;
 import { rateLimit, clientIp } from "@/lib/server/rateLimit";
 import { badRequest, tooManyRequests, serverError } from "@/lib/server/respond";
 
@@ -24,6 +28,7 @@ export async function GET(req: NextRequest) {
   const chain = chainFromRequest(req);
 
   try {
+    await syncExecutorEvents(chain, { maxWaitMs: SYNC_WAIT_MS }); // never throws
     const [record, reputation] = await Promise.all([
       getVeraRecordServer(chain, (user as `0x${string}`) ?? undefined),
       getReputationServer(chain),

@@ -1,21 +1,22 @@
 import "server-only";
 
-// Autopilot store — Supabase Postgres (durable source of truth).
+// Autopilot store — Postgres on Neon via Drizzle (durable source of truth).
 //   autopilots      one row per user: the config + run accounting.
 //   autopilot_runs  append-only audit log of every run (success/skipped/error).
 //
-// Scheduling safety: the cron claims due rows via claim_due_autopilots(), an
-// atomic UPDATE ... RETURNING that advances next_run_at (and resets the period
-// spend) as it reads — so two overlapping cron invocations can never run the same
-// autopilot twice. recordRun() therefore never touches next_run_at; the claim owns
-// the schedule. See supabase/migrations/*_autopilot.sql.
+// Scheduling safety: the cron claims due rows with ONE atomic UPDATE … RETURNING
+// that stamps `claimed_at` (claimDueAutopilots). A claimed row is invisible to
+// other cron invocations for 30 minutes, so two overlapping crons can never run
+// the same autopilot twice. When the run finishes (ok or not) the cron calls
+// releaseAutopilot(), which clears the claim and advances next_run_at.
+// recordRun() only writes run accounting and never touches the schedule.
+//
+// Time: AutopilotConfig / RunLog carry unix SECONDS; the tables use timestamptz.
+// Money: numeric columns come back as strings; Number() them here, once.
+import { and, desc, eq, isNull, lt, lte, or, sql } from "drizzle-orm";
 import type { AutopilotConfig } from "@/lib/autopilot";
 import { isChainKey, type ChainKey } from "@/lib/chains";
-import { supabaseAdmin } from "@/lib/server/supabase";
-
-const TABLE = "autopilots";
-
-type Row = Record<string, unknown>;
+import { autopilotRuns, autopilots, db, type AutopilotRow, type NewAutopilotRow } from "@/lib/db";
 
 /**
  * Rows written before the multi-chain migration have no `chain`. Stax was Mantle-only
@@ -26,80 +27,109 @@ function chainOf(v: unknown): ChainKey {
   return isChainKey(v) ? v : "mantle";
 }
 
-function rowToConfig(r: Row): AutopilotConfig {
+const toSeconds = (d: Date): number => Math.floor(d.getTime() / 1000);
+const toDate = (s: number): Date => new Date(s * 1000);
+
+function rowToConfig(r: AutopilotRow): AutopilotConfig {
   return {
-    id: String(r.id),
-    userId: String(r.user_id),
-    walletId: String(r.wallet_id),
+    id: r.id,
+    userId: r.userId,
+    walletId: r.walletId,
     owner: r.owner as `0x${string}`,
-    smartAccount: r.smart_account as `0x${string}`,
+    smartAccount: r.smartAccount as `0x${string}`,
     chain: chainOf(r.chain),
-    goal: String(r.goal),
-    amountUsd: Number(r.amount_usd),
+    goal: r.goal,
+    amountUsd: Number(r.amountUsd),
     cadence: r.cadence as AutopilotConfig["cadence"],
-    riskCeilingBps: Number(r.risk_ceiling_bps),
-    maxPerPeriodUsd: Number(r.max_per_period_usd),
-    active: Boolean(r.active),
-    createdAt: Number(r.created_at),
-    nextRunAt: Number(r.next_run_at),
-    lastRunAt: r.last_run_at == null ? undefined : Number(r.last_run_at),
-    runs: Number(r.runs),
-    spentThisPeriod: Number(r.spent_this_period),
+    riskCeilingBps: r.riskCeilingBps,
+    maxPerPeriodUsd: Number(r.maxPerPeriodUsd),
+    active: r.active,
+    createdAt: toSeconds(r.createdAt),
+    nextRunAt: toSeconds(r.nextRunAt),
+    lastRunAt: r.lastRunAt == null ? undefined : toSeconds(r.lastRunAt),
+    runs: r.runs,
+    spentThisPeriod: Number(r.spentThisPeriod),
   };
 }
 
-function configToRow(c: AutopilotConfig) {
+function configToRow(c: AutopilotConfig): NewAutopilotRow {
   return {
-    user_id: c.userId,
     id: c.id,
-    wallet_id: c.walletId,
+    userId: c.userId,
+    walletId: c.walletId,
     owner: c.owner,
-    smart_account: c.smartAccount,
+    smartAccount: c.smartAccount,
     chain: c.chain,
     goal: c.goal,
-    amount_usd: c.amountUsd,
+    amountUsd: String(c.amountUsd),
     cadence: c.cadence,
-    risk_ceiling_bps: c.riskCeilingBps,
-    max_per_period_usd: c.maxPerPeriodUsd,
+    riskCeilingBps: c.riskCeilingBps,
+    maxPerPeriodUsd: String(c.maxPerPeriodUsd),
     active: c.active,
-    created_at: c.createdAt,
-    next_run_at: c.nextRunAt,
-    last_run_at: c.lastRunAt ?? null,
+    createdAt: toDate(c.createdAt),
+    nextRunAt: toDate(c.nextRunAt),
+    lastRunAt: c.lastRunAt == null ? null : toDate(c.lastRunAt),
     runs: c.runs,
-    spent_this_period: c.spentThisPeriod,
+    spentThisPeriod: String(c.spentThisPeriod),
   };
 }
 
 export async function getAutopilot(userId: string): Promise<AutopilotConfig | null> {
-  const { data, error } = await supabaseAdmin().from(TABLE).select("*").eq("user_id", userId).maybeSingle();
-  if (error) throw new Error(error.message);
-  return data ? rowToConfig(data) : null;
-}
-
-export async function upsertAutopilot(cfg: AutopilotConfig): Promise<AutopilotConfig> {
-  const { data, error } = await supabaseAdmin()
-    .from(TABLE)
-    .upsert(configToRow(cfg), { onConflict: "user_id" })
-    .select("*")
-    .single();
-  if (error) throw new Error(error.message);
-  return rowToConfig(data);
-}
-
-export async function deleteAutopilot(userId: string): Promise<void> {
-  const { error } = await supabaseAdmin().from(TABLE).delete().eq("user_id", userId);
-  if (error) throw new Error(error.message);
+  const [row] = await db.select().from(autopilots).where(eq(autopilots.userId, userId)).limit(1);
+  return row ? rowToConfig(row) : null;
 }
 
 /**
- * Atomically claim every due autopilot: advances next_run_at and resets the
- * period spend in one UPDATE ... RETURNING, so a row can't be claimed twice.
- * The returned configs already reflect the fresh period (spentThisPeriod = 0).
+ * Create or replace the user's single autopilot (one per user: `user_id` is unique).
+ * Requires the `users` row to exist — callers run touchUser() first. Re-configuring
+ * also clears any stale claim so the new schedule takes effect immediately.
+ */
+export async function upsertAutopilot(cfg: AutopilotConfig): Promise<AutopilotConfig> {
+  const row = configToRow(cfg);
+  const [saved] = await db
+    .insert(autopilots)
+    .values(row)
+    // Drizzle drops `undefined` from SET: keep the existing id / user_id on conflict.
+    .onConflictDoUpdate({
+      target: autopilots.userId,
+      set: { ...row, id: undefined, userId: undefined, claimedAt: null },
+    })
+    .returning();
+  return rowToConfig(saved);
+}
+
+export async function deleteAutopilot(userId: string): Promise<void> {
+  await db.delete(autopilots).where(eq(autopilots.userId, userId));
+}
+
+/** A claim older than this is considered abandoned (crashed run) and may be re-claimed. */
+const CLAIM_TTL = sql`interval '30 minutes'`;
+
+/**
+ * Atomically claim every due autopilot: one UPDATE … RETURNING that stamps
+ * `claimed_at`, so a row can't be claimed twice while a run is in flight.
+ * Due = active AND next_run_at <= now AND (unclaimed OR claim older than 30 min).
+ * The caller MUST releaseAutopilot() each returned row when its run ends.
  */
 export async function claimDueAutopilots(nowSeconds: number): Promise<AutopilotConfig[]> {
-  const { data, error } = await supabaseAdmin().rpc("claim_due_autopilots", { now_seconds: nowSeconds });
-  if (error) throw new Error(error.message);
-  return ((data as Row[]) ?? []).map(rowToConfig);
+  const now = toDate(nowSeconds);
+  const rows = await db
+    .update(autopilots)
+    .set({ claimedAt: sql`now()` })
+    .where(
+      and(
+        eq(autopilots.active, true),
+        lte(autopilots.nextRunAt, now),
+        or(isNull(autopilots.claimedAt), lt(autopilots.claimedAt, sql`now() - ${CLAIM_TTL}`)),
+      ),
+    )
+    .returning();
+  return rows.map(rowToConfig);
+}
+
+/** Release a claim and schedule the next run. Called by the cron on success AND failure. */
+export async function releaseAutopilot(id: string, nextRunAt: number): Promise<void> {
+  await db.update(autopilots).set({ claimedAt: null, nextRunAt: toDate(nextRunAt) }).where(eq(autopilots.id, id));
 }
 
 /** Persist run accounting after a successful run. Never touches next_run_at. */
@@ -107,11 +137,10 @@ export async function recordRun(
   userId: string,
   patch: { lastRunAt: number; runs: number; spentThisPeriod: number },
 ): Promise<void> {
-  const { error } = await supabaseAdmin()
-    .from(TABLE)
-    .update({ last_run_at: patch.lastRunAt, runs: patch.runs, spent_this_period: patch.spentThisPeriod })
-    .eq("user_id", userId);
-  if (error) throw new Error(error.message);
+  await db
+    .update(autopilots)
+    .set({ lastRunAt: toDate(patch.lastRunAt), runs: patch.runs, spentThisPeriod: String(patch.spentThisPeriod) })
+    .where(eq(autopilots.userId, userId));
 }
 
 export interface RunHolding {
@@ -135,22 +164,21 @@ export interface RunLog {
 
 /** Recent runs for a user, newest first (the audit trail shown in the app). */
 export async function listRuns(userId: string, limit = 20): Promise<RunLog[]> {
-  const { data, error } = await supabaseAdmin()
-    .from("autopilot_runs")
-    .select("*")
-    .eq("user_id", userId)
-    .order("ran_at", { ascending: false })
+  const rows = await db
+    .select()
+    .from(autopilotRuns)
+    .where(eq(autopilotRuns.userId, userId))
+    .orderBy(desc(autopilotRuns.ranAt))
     .limit(limit);
-  if (error) throw new Error(error.message);
-  return ((data as Row[]) ?? []).map((r) => ({
-    userId: String(r.user_id),
+  return rows.map((r) => ({
+    userId: r.userId,
     chain: chainOf(r.chain),
-    ranAt: Number(r.ran_at),
-    amountUsd: Number(r.amount_usd),
-    assessedRiskBps: r.assessed_risk_bps == null ? undefined : Number(r.assessed_risk_bps),
+    ranAt: toSeconds(r.ranAt),
+    amountUsd: Number(r.amountUsd),
+    assessedRiskBps: r.assessedRiskBps ?? undefined,
     status: r.status as RunLog["status"],
-    reason: r.reason == null ? undefined : String(r.reason),
-    txHash: r.tx_hash == null ? undefined : String(r.tx_hash),
+    reason: r.reason ?? undefined,
+    txHash: r.txHash ?? undefined,
     holdings: Array.isArray(r.holdings) ? (r.holdings as RunHolding[]) : undefined,
   }));
 }
@@ -158,19 +186,20 @@ export async function listRuns(userId: string, limit = 20): Promise<RunLog[]> {
 /** Append to the audit log. A logging failure must never break a run. */
 export async function logRun(entry: RunLog): Promise<void> {
   try {
-    const { error } = await supabaseAdmin().from("autopilot_runs").insert({
-      user_id: entry.userId,
+    await db.insert(autopilotRuns).values({
+      // Link to the user's autopilot if it still exists (FK is ON DELETE SET NULL).
+      autopilotId: sql`(select ${autopilots.id} from ${autopilots} where ${autopilots.userId} = ${entry.userId} limit 1)`,
+      userId: entry.userId,
       chain: entry.chain,
-      ran_at: entry.ranAt,
-      amount_usd: entry.amountUsd,
-      assessed_risk_bps: entry.assessedRiskBps ?? null,
+      ranAt: toDate(entry.ranAt),
+      amountUsd: String(entry.amountUsd),
+      assessedRiskBps: entry.assessedRiskBps ?? null,
       status: entry.status,
       reason: entry.reason ?? null,
-      tx_hash: entry.txHash ?? null,
+      txHash: entry.txHash ?? null,
       holdings: entry.holdings ?? null,
     });
-    if (error) console.error("[autopilot] logRun failed:", error.message);
   } catch (e) {
-    console.error("[autopilot] logRun threw:", e instanceof Error ? e.message : e);
+    console.error("[autopilot] logRun failed:", e instanceof Error ? e.message : e);
   }
 }

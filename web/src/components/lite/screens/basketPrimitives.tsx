@@ -157,10 +157,10 @@ export function BasketRailTile({ basket, onClick }: { basket: Basket; onClick: (
 
 /**
  * Share a basket: the native share sheet on phones, else copy the link.
- * Resolves to what happened so the caller can toast honestly.
+ * `url` defaults to the self-contained encoded link; pass a short `/app?b=` link when
+ * the basket was saved to the server. Resolves to what happened so the caller can toast honestly.
  */
-export async function shareBasket(basket: Basket): Promise<"shared" | "copied" | "failed"> {
-  const url = basketShareUrl(basket);
+export async function shareBasket(basket: Basket, url: string = basketShareUrl(basket)): Promise<"shared" | "copied" | "failed"> {
   const nav = typeof navigator !== "undefined" ? navigator : undefined;
   if (nav?.share && /Android|iPhone|iPad/i.test(nav.userAgent)) {
     try {

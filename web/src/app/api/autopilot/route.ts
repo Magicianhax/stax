@@ -13,6 +13,7 @@ import { verifyRequest } from "@/lib/server/privyAuth";
 import { rateLimit } from "@/lib/server/rateLimit";
 import { unauthorized, badRequest, tooManyRequests, serverError } from "@/lib/server/respond";
 import { getAutopilot, upsertAutopilot, deleteAutopilot } from "@/lib/server/autopilotStore";
+import { touchUser } from "@/lib/server/users";
 import { AUTOPILOT_DEFAULTS, CADENCE_SECONDS, nextRunAfter, type AutopilotConfig } from "@/lib/autopilot";
 
 export const dynamic = "force-dynamic";
@@ -71,6 +72,7 @@ export async function POST(req: NextRequest) {
       runs: existing?.runs ?? 0,
       spentThisPeriod: 0,
     };
+    await touchUser(user.userId); // autopilots.user_id references users.id
     return Response.json({ autopilot: await upsertAutopilot(cfg), cadenceSeconds: CADENCE_SECONDS[body.cadence] });
   } catch (err) {
     return serverError("autopilot", err);

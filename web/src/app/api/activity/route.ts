@@ -1,13 +1,18 @@
 // GET /api/activity?address=0x… — a user's Stax on-chain activity (AI invests
 // via the executor) on the request chain, newest first. Public chain data, no
-// auth — rate limited per IP, scan cached server-side. Same reason as
-// /api/vera-record: the full deploy→latest eth_getLogs range exceeds the public
-// RPC's 10k-block cap. Returns an empty list on a chain Stax isn't deployed on yet.
+// auth — rate limited per IP. Served from the indexer's copy in Postgres (same
+// reason as /api/vera-record: the full deploy→latest eth_getLogs range exceeds the
+// public RPC's 10k-block cap), after a bounded nudge to the indexer. Returns an
+// empty list on a chain Stax isn't deployed on yet.
 import type { NextRequest } from "next/server";
 import { isAddress } from "viem";
 import { explorerTx } from "@/lib/chains";
 import { chainFromRequest } from "@/lib/server/chain";
 import { getUserActivityServer } from "@/lib/server/executorLogs";
+import { syncExecutorEvents } from "@/lib/server/indexer";
+
+/** Longest a request waits on the indexer before serving what Postgres already has. */
+const SYNC_WAIT_MS = 8_000;
 import { rateLimit, clientIp } from "@/lib/server/rateLimit";
 import { badRequest, tooManyRequests, serverError } from "@/lib/server/respond";
 
@@ -23,6 +28,7 @@ export async function GET(req: NextRequest) {
   const chain = chainFromRequest(req);
 
   try {
+    await syncExecutorEvents(chain, { maxWaitMs: SYNC_WAIT_MS }); // never throws
     const activity = await getUserActivityServer(chain, address as `0x${string}`);
     return Response.json(
       {

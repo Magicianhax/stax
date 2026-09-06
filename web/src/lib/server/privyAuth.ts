@@ -9,6 +9,8 @@ import "server-only";
 // Uses @privy-io/node (the current server SDK). The client builds the app's JWKS
 // from its credentials, so no separate verification key is needed.
 import { PrivyClient } from "@privy-io/node";
+import { waitUntil } from "@vercel/functions";
+import { touchUser } from "@/lib/server/users";
 
 const APP_ID = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
 const APP_SECRET = process.env.PRIVY_APP_SECRET;
@@ -36,6 +38,23 @@ function bearer(req: Request): string | null {
   return scheme?.toLowerCase() === "bearer" && token ? token.trim() : null;
 }
 
+// users.last_seen_at upkeep: one write per user per 5 minutes per instance,
+// off the request's critical path (waitUntil keeps the instance alive for it).
+// Routes that INSERT rows referencing users.id still `await touchUser()` themselves.
+const TOUCH_EVERY_MS = 5 * 60_000;
+const lastTouched = new Map<string, number>();
+function touchInBackground(userId: string) {
+  const now = Date.now();
+  if ((lastTouched.get(userId) ?? 0) + TOUCH_EVERY_MS > now) return;
+  lastTouched.set(userId, now);
+  waitUntil(
+    touchUser(userId).catch((e) => {
+      lastTouched.delete(userId);
+      console.warn("[auth] touchUser failed:", e instanceof Error ? e.message : e);
+    }),
+  );
+}
+
 /**
  * Verify the caller's Privy session. Returns the user on success, or null when
  * the token is missing, malformed, expired, or invalid. Never throws on a bad
@@ -46,6 +65,7 @@ export async function verifyRequest(req: Request): Promise<AuthedUser | null> {
   if (!token) return null;
   try {
     const claims = await privy().utils().auth().verifyAccessToken(token);
+    touchInBackground(claims.user_id);
     return { userId: claims.user_id };
   } catch {
     return null;

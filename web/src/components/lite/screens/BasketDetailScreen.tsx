@@ -45,7 +45,7 @@ export function BasketDetailScreen({
   shared?: Basket;
 }) {
   const { chain, ready } = useChainReady();
-  const { byId, mine, save, remove } = useBaskets();
+  const { byId, mine, save, remove, publish } = useBaskets();
   const { notify } = useToast();
   const { address } = useSmartAccount();
   const { data: bal } = useUsdcBalance(address ?? undefined);
@@ -90,7 +90,10 @@ export function BasketDetailScreen({
 
   const onShare = async () => {
     haptic.light();
-    const r = await shareBasket(basket);
+    // Signed in: a short server link (`/app?b=…`); otherwise, or if that fails, the
+    // self-contained encoded link — sharing always works.
+    const short = await publish(basket);
+    const r = await shareBasket(basket, short ?? undefined);
     if (r === "copied") notify("Link copied", "link");
     else if (r === "failed") notify("Couldn't copy the link. Try again.", "info");
   };

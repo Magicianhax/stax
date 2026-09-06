@@ -7,11 +7,28 @@
 // on save/remove. Curated baskets come from code and are filtered at read time to
 // what is fully investable on the chain today. Demo mode uses its own storage
 // prefix, seeded with one basket, so the landing phones never touch real data.
+//
+// Sharing: `publish()` saves a basket to the server (POST /api/baskets) and returns
+// its short `/app?b=<id>` link — only when signed in and not in demo; otherwise
+// null, and callers fall back to the self-contained encoded link. `fetchSharedBasket()`
+// resolves a short id back into a basket (re-validated client-side, trusting nothing).
 import { useCallback, useMemo, useSyncExternalStore } from "react";
+import { usePrivy } from "@privy-io/react-auth";
 import type { ChainKey, StaxChain } from "@/lib/chains";
 import { useChain } from "@/lib/chains/active";
 import { useDemo } from "@/components/demo/DemoProvider";
-import { curatedBaskets, isBasketInvestable, normalizeWeights, riskScoreFor, type Basket } from "@/lib/baskets";
+import { authedFetch } from "@/lib/authedFetch";
+import {
+  basketShortUrl,
+  curatedBaskets,
+  isBasketInvestable,
+  isBasketShortId,
+  normalizeWeights,
+  riskScoreFor,
+  sharedBasketFrom,
+  type Basket,
+  type DecodeResult,
+} from "@/lib/baskets";
 import { demoSeedBaskets } from "@/lib/demo/demoData";
 
 const EMPTY: Basket[] = [];
@@ -74,6 +91,32 @@ function rehydrate(chain: StaxChain, b: Basket): Basket {
   return { ...b, chain: chain.key, items, riskScore: riskScoreFor(chain, items) };
 }
 
+// ── sharing ───────────────────────────────────────────────────────────────────
+/** Short ids already minted this session, by basket contents — sharing twice reuses the link. */
+const publishedIds = new Map<string, string>();
+
+function contentsKey(b: Basket): string {
+  return `${b.chain}|${b.name}|${b.tagline}|${b.icon}|${b.items.map((i) => `${i.symbol}:${i.weightPct}`).join(",")}`;
+}
+
+/** Resolve `/app?b=<id>` into a basket. Never throws; the server's answer is re-validated here. */
+export async function fetchSharedBasket(id: string): Promise<DecodeResult> {
+  const bad = { ok: false as const, reason: "That link doesn't look like a Stax basket." };
+  if (!isBasketShortId(id)) return bad;
+  try {
+    const res = await fetch(`/api/baskets/${id}`);
+    const json = (await res.json().catch(() => null)) as { basket?: Record<string, unknown>; error?: string } | null;
+    if (!res.ok || !json?.basket) return { ok: false, reason: json?.error || "That basket isn't here. It may have been removed." };
+    const b = json.basket;
+    return sharedBasketFrom(
+      { id, chain: b.chain, name: b.name, tagline: b.tagline, icon: b.icon, items: b.items, source: b.source as { goal?: unknown } | undefined },
+      typeof b.createdAt === "number" ? b.createdAt : undefined,
+    );
+  } catch {
+    return { ok: false, reason: "Couldn't load that basket. Check your connection and try again." };
+  }
+}
+
 export interface UseBaskets {
   /** Made by Stax — only baskets fully investable on the active chain. */
   curated: Basket[];
@@ -83,11 +126,14 @@ export interface UseBaskets {
   save: (basket: Basket) => void;
   remove: (id: string) => void;
   byId: (id: string | undefined) => Basket | undefined;
+  /** Save to the server for a short link. Null when signed out, in demo, or on any failure. */
+  publish: (basket: Basket) => Promise<string | null>;
 }
 
 export function useBaskets(): UseBaskets {
   const chain = useChain();
   const demo = useDemo();
+  const { authenticated } = usePrivy();
   const key = storageKey(chain.key, demo !== null);
 
   const stored = useSyncExternalStore(
@@ -128,7 +174,38 @@ export function useBaskets(): UseBaskets {
 
   const byId = useCallback((id: string | undefined) => (id ? all.find((b) => b.id === id) : undefined), [all]);
 
-  return { curated, mine, all, save, remove, byId };
+  const publish = useCallback(
+    async (basket: Basket): Promise<string | null> => {
+      if (demo || !authenticated) return null; // demo never touches the network
+      const ck = contentsKey(basket);
+      const known = publishedIds.get(ck);
+      if (known) return basketShortUrl(known);
+      try {
+        const res = await authedFetch("/api/baskets", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            chain: basket.chain,
+            name: basket.name,
+            tagline: basket.tagline,
+            icon: basket.icon,
+            items: basket.items.map((i) => ({ symbol: i.symbol, weightPct: i.weightPct })),
+            ...(basket.source?.goal ? { source: { goal: basket.source.goal } } : {}),
+          }),
+        });
+        if (!res.ok) return null;
+        const { id } = (await res.json()) as { id?: unknown };
+        if (!isBasketShortId(id)) return null;
+        publishedIds.set(ck, id);
+        return basketShortUrl(id);
+      } catch {
+        return null;
+      }
+    },
+    [demo, authenticated],
+  );
+
+  return { curated, mine, all, save, remove, byId, publish };
 }
 
 export { isBasketInvestable };

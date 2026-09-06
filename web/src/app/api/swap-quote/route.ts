@@ -22,6 +22,7 @@ import { chainFromRequest } from "@/lib/server/chain";
 import { KyberError, KyberNoRoute, kyberBuild, kyberRoute } from "@/lib/server/kyber";
 import { verifyRequest } from "@/lib/server/privyAuth";
 import { rateLimit } from "@/lib/server/rateLimit";
+import { getSmartAccount } from "@/lib/server/users";
 import { unauthorized, badRequest, tooManyRequests, serverError, jsonError } from "@/lib/server/respond";
 
 export const dynamic = "force-dynamic";
@@ -32,6 +33,9 @@ const DEFAULT_SLIPPAGE_BPS = 100;
 const DEADLINE_SECONDS = 15 * 60;
 /** How long a returned quote / calldata is considered fresh by the client. */
 const QUOTE_TTL_MS = 10_000;
+
+/** Users we've already warned about (no smart_accounts row yet) — once per instance. */
+const warnedNoAccount = new Set<string>();
 
 const SwapQuoteRequestSchema = z.object({
   symbol: z.string().min(1).max(16),
@@ -92,6 +96,17 @@ export async function POST(req: NextRequest) {
   // stray allowance to the public Kyber router can never be redirected through Stax.
   if (sender.toLowerCase() !== recipient.toLowerCase()) {
     return badRequest("sender and recipient must be the same account.");
+  }
+  // …and that account must be the caller's own smart account on this chain (the one
+  // useSmartAccount() registered via /api/me/account). No row yet → allow, warn once.
+  const account = await getSmartAccount(user.userId, chain.key);
+  if (account) {
+    if (account.address.toLowerCase() !== sender.toLowerCase()) {
+      return jsonError(403, "Quote must be for your own account.");
+    }
+  } else if (!warnedNoAccount.has(user.userId)) {
+    warnedNoAccount.add(user.userId);
+    console.warn(`[swap-quote] no smart_accounts row for user ${user.userId} on ${chain.key}; sender unverified`);
   }
 
   try {

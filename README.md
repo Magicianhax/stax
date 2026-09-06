@@ -128,9 +128,24 @@ npm run dev                     # http://localhost:3000  (landing) · /app (the 
 
 **Required env** (full list in `web/.env.example`): `NEXT_PUBLIC_PRIVY_APP_ID` + `PRIVY_APP_SECRET`,
 `PIMLICO_API_KEY`, `ANTHROPIC_API_KEY`, `AGENT_SIGNER_PRIVATE_KEY` (server-only — signs risk
-inferences), `ETHERSCAN_API_KEY`, the deployed contract addresses, and
-`NEXT_PUBLIC_STAX_EXECUTOR_BLOCK`. Optional: `ALCHEMY_API_KEY`, plus `PRIVY_AUTHORIZATION_KEY` +
-`AUTOPILOT_CRON_SECRET` for Autopilot.
+inferences), `ETHERSCAN_API_KEY`, the deployed contract addresses,
+`NEXT_PUBLIC_STAX_EXECUTOR_BLOCK`, and `DATABASE_URL` + `DATABASE_URL_UNPOOLED` (Postgres on
+[Neon](https://neon.com) — pooled for the app, direct for migrations). Optional:
+`ALCHEMY_API_KEY`, plus `PRIVY_AUTHORIZATION_KEY` + `AUTOPILOT_CRON_SECRET` (or Vercel's
+`CRON_SECRET`) for Autopilot.
+
+**Database** (Neon Postgres + Drizzle, `web/src/lib/db/`): the schema lives in `schema.ts`;
+SQL migrations are generated into `web/drizzle/` and applied with
+
+```bash
+npm run db:generate   # after editing schema.ts
+npm run db:migrate    # applies pending migrations over DATABASE_URL_UNPOOLED
+npm run db:smoke      # round-trips an autopilot claim against the database, prints OK
+```
+
+Autopilot scheduling is a Vercel Cron on `/api/cron/autopilot` (`web/vercel.json`), daily at
+09:00 UTC — the most a Hobby plan allows. On Pro, change the schedule to `0 * * * *` (hourly)
+so daily-cadence autopilots run closer to their slot.
 
 > Funds live on the **smart-account** address (the ERC-4337 account), not the Privy embedded EOA
 > that owns it. The app always derives and shows the smart account.

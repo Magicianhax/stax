@@ -43,7 +43,8 @@ import { SendScreen } from "./screens/SendScreen";
 import { AutopilotScreen } from "./screens/AutopilotScreen";
 import { BasketsScreen } from "./screens/BasketsScreen";
 import { BasketDetailScreen } from "./screens/BasketDetailScreen";
-import { decodeBasketLink, type Basket } from "@/lib/baskets";
+import { decodeBasketLink, type Basket, type DecodeResult } from "@/lib/baskets";
+import { fetchSharedBasket } from "@/hooks/useBaskets";
 import type { AllocateResult } from "@/lib/invest-types";
 
 type Screen =
@@ -213,22 +214,32 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
     void invest.invest(activeAllocation, amount, address);
   }, [invest, activeAllocation, address, amount, notify]);
 
-  // Shared basket links: `/app?basket=<param>` (and `/demo?basket=`) open the
-  // decoded basket on load. The link is never trusted — decodeBasketLink validates
-  // symbols, renormalizes weights and recomputes risk — and a bad one just toasts.
-  // The param is then stripped so a refresh doesn't re-open it.
+  // Shared basket links open the basket on load:
+  //   `/app?b=<id>`         a server-stored basket, fetched from /api/baskets/<id>
+  //   `/app?basket=<param>` the self-contained encoded link (also `/demo?basket=`)
+  // Neither is trusted — both go through sharedBasketFrom, which validates symbols,
+  // renormalizes weights and recomputes risk — and a bad one just toasts. Demo never
+  // hits the network, so `?b=` is ignored there. The params are stripped so a refresh
+  // doesn't re-open the basket.
   useEffect(() => {
     if (demoPlay) return; // the landing's auto-playing phones ignore the page URL
-    if (!new URL(window.location.href).searchParams.has("basket")) return;
+    const initial = new URL(window.location.href).searchParams;
+    if (!initial.has("basket") && !initial.has("b")) return;
+    let cancelled = false;
     // Deferred a tick so the route push happens after first paint (and never
     // synchronously inside the effect).
-    const t = setTimeout(() => {
+    const t = setTimeout(async () => {
       const url = new URL(window.location.href);
+      const shortId = url.searchParams.get("b");
       const param = url.searchParams.get("basket");
-      if (!param) return;
+      url.searchParams.delete("b");
       url.searchParams.delete("basket");
       window.history.replaceState(window.history.state, "", url.toString());
-      const res = decodeBasketLink(param);
+      let res: DecodeResult;
+      if (shortId && !demo) res = await fetchSharedBasket(shortId);
+      else if (param) res = decodeBasketLink(param);
+      else return;
+      if (cancelled) return;
       if (res.ok) {
         setDir("push");
         setStack((s) => [...s, { screen: "basket", params: { basket: res.basket } }]);
@@ -236,7 +247,10 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
         notify(res.reason, "info");
       }
     }, 0);
-    return () => clearTimeout(t);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
     // Run once on mount only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

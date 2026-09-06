@@ -9,10 +9,32 @@
 // per-chain client wiring in lib/aa.ts is warmed up for the network in use.
 import { useEffect, useRef, useState } from "react";
 import { getSmartAccountClient } from "@/lib/aa";
+import { authedFetch } from "@/lib/authedFetch";
 import { asViemProvider } from "@/lib/provider";
 import { useChain } from "@/lib/chains/active";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { useActiveWallet } from "@/hooks/useActiveWallet";
+
+/**
+ * Tell the server which smart account this user trades from on `chain`, once per
+ * (chain, address) per browser session. Fire-and-forget: the UI never waits on it,
+ * and a failure only means /api/swap-quote can't verify `sender` yet (it warns).
+ */
+const registered = new Set<string>();
+function registerSmartAccount(chain: string, owner: `0x${string}`, address: `0x${string}`) {
+  const key = `${chain}:${address.toLowerCase()}`;
+  if (registered.has(key)) return;
+  registered.add(key);
+  void authedFetch("/api/me/account", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ chain, owner, address }),
+  })
+    .then((r) => {
+      if (!r.ok) registered.delete(key); // retry on the next derivation
+    })
+    .catch(() => registered.delete(key));
+}
 
 export function useSmartAccount() {
   const demo = useDemo();
@@ -53,7 +75,11 @@ export function useSmartAccount() {
       try {
         const provider = asViemProvider(await w.getEthereumProvider());
         const { account } = await getSmartAccountClient(provider, chain);
-        if (!cancelled) setAddress(account.address as `0x${string}`);
+        if (!cancelled) {
+          const smart = account.address as `0x${string}`;
+          setAddress(smart);
+          registerSmartAccount(chain.key, w.address as `0x${string}`, smart);
+        }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Couldn't load your account.");
       } finally {

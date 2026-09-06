@@ -6,7 +6,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "db:generate": "node --env-file=.env.local node_modules/drizzle-kit/bin.cjs generate",
+    "db:migrate": "node --env-file=.env.local node_modules/drizzle-kit/bin.cjs migrate",
+    "db:studio": "node --env-file=.env.local node_modules/drizzle-kit/bin.cjs studio",
+    "db:smoke": "tsx --conditions=react-server --env-file=.env.local scripts/db-smoke.ts",
+    "db:import": "tsx --conditions=react-server --env-file=.env.local scripts/import-supabase.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.81",
@@ -15,14 +20,16 @@
     "@privy-io/react-auth": "^3.28.0",
     "@react-three/drei": "^10.7.8",
     "@react-three/fiber": "^9.7.0",
-    "@supabase/supabase-js": "^2.107.0",
     "@tanstack/react-query": "^5.100.14",
     "@vercel/analytics": "^2.0.1",
+    "@vercel/functions": "^3.9.5",
     "ai": "^6.0.193",
+    "drizzle-orm": "^0.45.2",
     "gsap": "^3.15.0",
     "lucide-react": "^1.17.0",
     "next": "16.2.6",
     "permissionless": "^0.2.57",
+    "pg": "^8.23.0",
     "qrcode.react": "^4.2.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
@@ -35,12 +42,15 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/three": "^0.185.4",
+    "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
     "tailwindcss": "^4",
+    "tsx": "^4.23.13",
     "typescript": "^5"
   }
 }

@@ -8,6 +8,8 @@
 //   riskScoreFor()       — blended bps by tier; the server re-derives it so a link
 //                          can never understate risk
 //   basketToAllocation() — the AllocateResult PlanScreen expects (one-tap invest)
+//   sharedBasketFrom()   — one untrusted-input validator for links AND stored baskets
+//   short ids            — 8-char `/app?b=<id>` links for server-stored baskets
 //   encode/decodeBasketLink — base64url `{v:1,c,n,t,e,i:[[sym,pct],…]}`; decode
 //                          trusts nothing: validates symbols, renormalizes, recomputes
 import { getChain, isChainKey, isRoutable, type ChainKey, type StaxChain } from "@/lib/chains";
@@ -426,6 +428,78 @@ export function encodeBasketLink(basket: Basket): string {
 
 export type DecodeResult = { ok: true; basket: Basket } | { ok: false; reason: string };
 
+/** Untrusted basket contents (a share link or a POST body) before validation. */
+export interface SharedBasketInput {
+  chain: unknown;
+  name: unknown;
+  tagline: unknown;
+  icon: unknown;
+  /** `[symbol, pct]` tuples (links) or `{symbol, weightPct}` objects (API). */
+  items: unknown;
+  /** Id for the result (a server short id); defaults to a hash of the contents. */
+  id?: string;
+  source?: { goal?: unknown };
+}
+
+/**
+ * Validate untrusted basket contents into a "shared" basket. Trusts nothing: chain
+ * must be known, symbols must be routable on that chain, weights are renormalized
+ * (rejected if they add up past 100), risk is recomputed, and the author is always
+ * "shared". Shared by decodeBasketLink (links) and the baskets API (stored baskets).
+ */
+export function sharedBasketFrom(input: SharedBasketInput, now = Math.floor(Date.now() / 1000)): DecodeResult {
+  const bad = { ok: false as const, reason: "That link doesn't look like a Stax basket." };
+  if (!isChainKey(input.chain) || !Array.isArray(input.items)) return bad;
+  const chain = getChain(input.chain);
+
+  if (input.items.length === 0 || input.items.length > BASKET_MAX_ITEMS) {
+    return { ok: false, reason: `A basket can hold 1 to ${BASKET_MAX_ITEMS} holdings.` };
+  }
+  const items: BasketItem[] = [];
+  let total = 0;
+  for (const entry of input.items as unknown[]) {
+    const [rawSymbol, rawWeight] = Array.isArray(entry)
+      ? [entry[0], entry[1]]
+      : entry && typeof entry === "object"
+        ? [(entry as { symbol?: unknown }).symbol, (entry as { weightPct?: unknown }).weightPct]
+        : [undefined, undefined];
+    const symbol = cleanText(rawSymbol, 12);
+    const w = Number(rawWeight);
+    if (!symbol || !Number.isFinite(w)) return bad;
+    if (w <= 0) continue;
+    total += w;
+    // Symbols are case-sensitive in the registry ("aUSDC", "mETH"): match exactly.
+    if (!isRoutable(chain, symbol)) {
+      return { ok: false, reason: `This basket includes something you can't buy on ${chain.name} yet.` };
+    }
+    items.push({ symbol, weightPct: w });
+  }
+  if (total > 100.5) return { ok: false, reason: "The weights in that link add up to more than 100%." };
+  const normalized = normalizeWeights(items);
+  if (normalized.length === 0) return bad;
+
+  const name = cleanText(input.name, BASKET_NAME_MAX) || "Shared basket";
+  const tagline = cleanText(input.tagline, BASKET_TAGLINE_MAX) || "A basket someone shared with you.";
+  const contents = `${chain.key}|${name}|${normalized.map((i) => `${i.symbol}:${i.weightPct}`).join(",")}`;
+  const goal = cleanText(input.source?.goal, 200);
+  return {
+    ok: true,
+    basket: {
+      id: input.id ?? `s_${hashStr(contents).toString(36)}`,
+      chain: chain.key,
+      name,
+      tagline,
+      icon: cleanIcon(input.icon),
+      color: colorFor(name),
+      items: normalized,
+      riskScore: riskScoreFor(chain, normalized),
+      author: "shared",
+      createdAt: now,
+      ...(goal ? { source: { goal } } : {}),
+    },
+  };
+}
+
 /**
  * Decode a shared link. Trusts nothing: chain must be known, symbols must be routable on
  * that chain, weights are renormalized (rejected if they add up past 100), risk is
@@ -444,53 +518,31 @@ export function decodeBasketLink(param: string | null | undefined, now = Math.fl
   }
   if (!raw || typeof raw !== "object") return bad;
   const p = raw as Partial<LinkPayload>;
-  if (p.v !== 1 || !isChainKey(p.c) || !Array.isArray(p.i)) return bad;
-  const chain = getChain(p.c);
+  if (p.v !== 1) return bad;
+  return sharedBasketFrom({ chain: p.c, name: p.n, tagline: p.t, icon: p.e, items: p.i }, now);
+}
 
-  if (p.i.length === 0 || p.i.length > BASKET_MAX_ITEMS) {
-    return { ok: false, reason: `A basket can hold 1 to ${BASKET_MAX_ITEMS} holdings.` };
-  }
-  const items: BasketItem[] = [];
-  let total = 0;
-  for (const entry of p.i) {
-    if (!Array.isArray(entry) || entry.length < 2) return bad;
-    const symbol = cleanText(entry[0], 12);
-    const w = Number(entry[1]);
-    if (!symbol || !Number.isFinite(w)) return bad;
-    if (w <= 0) continue;
-    total += w;
-    // Symbols are case-sensitive in the registry ("aUSDC", "mETH"): match exactly.
-    if (!isRoutable(chain, symbol)) {
-      return { ok: false, reason: `This basket includes something you can't buy on ${chain.name} yet.` };
-    }
-    items.push({ symbol, weightPct: w });
-  }
-  if (total > 100.5) return { ok: false, reason: "The weights in that link add up to more than 100%." };
-  const normalized = normalizeWeights(items);
-  if (normalized.length === 0) return bad;
+// ── short links ───────────────────────────────────────────────────────────────
+// Server-stored baskets (POST /api/baskets) get an 8-char base62 id and a short
+// `/app?b=<id>` link. The encoded `?basket=` link above keeps working everywhere.
+export const BASKET_SHORT_ID_LENGTH = 8;
+const SHORT_ID_RE = /^[0-9A-Za-z]{8}$/;
 
-  const name = cleanText(p.n, BASKET_NAME_MAX) || "Shared basket";
-  const tagline = cleanText(p.t, BASKET_TAGLINE_MAX) || "A basket someone shared with you.";
-  const contents = `${p.c}|${name}|${normalized.map((i) => `${i.symbol}:${i.weightPct}`).join(",")}`;
-  return {
-    ok: true,
-    basket: {
-      id: `s_${hashStr(contents).toString(36)}`,
-      chain: chain.key,
-      name,
-      tagline,
-      icon: cleanIcon(p.e),
-      color: colorFor(name),
-      items: normalized,
-      riskScore: riskScoreFor(chain, normalized),
-      author: "shared",
-      createdAt: now,
-    },
-  };
+/** True for a well-formed short id — a cheap pre-check before any fetch or query. */
+export function isBasketShortId(v: unknown): v is string {
+  return typeof v === "string" && SHORT_ID_RE.test(v);
+}
+
+function siteOrigin(origin?: string): string {
+  return origin ?? (typeof window !== "undefined" ? window.location.origin : "https://www.stax.best");
+}
+
+/** Absolute short share URL (`/app?b=<id>`) for a server-stored basket. */
+export function basketShortUrl(id: string, origin?: string): string {
+  return `${siteOrigin(origin)}/app?b=${id}`;
 }
 
 /** Absolute share URL for a basket (`/app?basket=…`). */
 export function basketShareUrl(basket: Basket, origin?: string): string {
-  const base = origin ?? (typeof window !== "undefined" ? window.location.origin : "https://www.stax.best");
-  return `${base}/app?basket=${encodeBasketLink(basket)}`;
+  return `${siteOrigin(origin)}/app?basket=${encodeBasketLink(basket)}`;
 }

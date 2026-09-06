@@ -47,8 +47,9 @@ switches in Settings; the choice persists in `localStorage["stax.chain"]`.
 - **Server libs** (`allocate.ts`, `marketData.ts`, `executorLogs.ts`, `walletTransfers.ts`,
   `autopilotExecutor.ts`, `legBuilder.ts`, `prices.ts`, `eip712.ts`): take `chain: StaxChain` as an
   explicit parameter. No module-level chain constants.
-- **Autopilot:** the stored config carries `chain` (`base` | `mantle`, default `base`); the cron
-  executor runs each config on its chain.
+- **Autopilot:** the stored config (Postgres on Neon, `autopilots.chain`, checked `base` |
+  `mantle`, default `base`) carries the chain it runs on; the cron claims due rows atomically and
+  runs each config on its chain. Rows with no chain are treated as `mantle` (pre-multi-chain).
 
 ## Swap execution kinds (`Asset.via` / `chain.routers.v3Kind`)
 
