@@ -89,8 +89,15 @@ async function main() {
     agentId = (await registry.read.nextAgentId()) - 1n;
     console.log(`  Vera already registered -> agentId ${agentId}`);
   } else {
+    const before = await registry.read.nextAgentId();
     await writeSafe(() => registry.write.register([me, AGENT_CARD]), "register(Vera)");
-    agentId = (await registry.read.nextAgentId()) - 1n;
+    // Poll until the RPC reflects the mint (load-balanced nodes can lag a block or two).
+    let next = before;
+    for (let i = 0; i < 20 && next === before; i++) {
+      await new Promise((r) => setTimeout(r, 1500));
+      next = await registry.read.nextAgentId();
+    }
+    agentId = next - 1n;
     console.log(`  Vera registered -> agentId ${agentId}`);
   }
 

@@ -57,16 +57,14 @@ entire history on-chain — nothing is editable after the fact.
 
 ## Deployed contracts (Base mainnet · chainId 8453)
 
-Base is the default chain (Coinbase tokenized stocks · Uniswap V3 · Aave v3). Same three contracts,
-same source; deployed with `npm run deploy:base` (see [Deploy to Base](#deploy-to-base)).
-
 | Contract | Address | Role |
 |---|---|---|
-| **StaxExecutor** | _pending deploy_ | Commits the recommendation, calls the verifier, runs the swaps (non-custodial), emits the tracking events. Whitelists: Uniswap V3 SwapRouter02 + Aave v3 Pool; Coinbase stocks (NVDAc, GOOGLc, AAPLc, METAc, SPCXc + the coming TSLAc, AMZNc, MSFTc, MSTRc, COINc, CRCLc), cbBTC, WETH, aBasUSDC. |
-| **InferenceVerifier** | _pending deploy_ | EIP-712 gate: `verify()` reverts unless the signature recovers to the agent signer, `assessedRisk ≤ maxRisk`, and `block.timestamp ≤ expiry`. |
-| **IdentityRegistry** | _pending deploy_ | ERC-8004-style agent identity (Vera = **agentId 1**) + reputation/feedback. |
+| **StaxExecutor** | [`0xed08d94c2722083b0b742ef9b55e81046c54deb3`](https://basescan.org/address/0xed08d94c2722083b0b742ef9b55e81046c54deb3) | Commits the recommendation, calls the verifier, runs the swaps (non-custodial), emits the tracking events. Whitelisted venues: KyberSwap MetaAggregationRouterV2, Uniswap V3 SwapRouter02, Aave v3 Pool. |
+| **InferenceVerifier** | [`0x9a08b9d39170eb07268a5ac99015e062e2f39256`](https://basescan.org/address/0x9a08b9d39170eb07268a5ac99015e062e2f39256) | EIP-712 gate: `verify()` reverts unless the signature recovers to the agent signer, `assessedRisk ≤ maxRisk`, and `block.timestamp ≤ expiry`. |
+| **IdentityRegistry** | [`0x0a2028dd72dd1e000f40c2c81171dd345d240a23`](https://basescan.org/address/0x0a2028dd72dd1e000f40c2c81171dd345d240a23) | ERC-8004-style agent identity (Vera = **agentId 1**) + reputation/feedback. |
 
-Agent signer _pending deploy_ · executor deploy block _pending deploy_ · verified on Basescan _pending deploy_.
+Agent signer `0xA3F76200c22cA671Df1a2c951B521E1EA99C3E12` · executor deploy block `50954408` · deployed 2026-09-06.
+Assets: Coinbase tokenized stocks (NVDAc GOOGLc AAPLc METAc SPCXc TSLAc AMZNc MSFTc MSTRc COINc CRCLc), cbBTC, WETH, aBasUSDC.
 
 ## Deployed contracts (Mantle mainnet · chainId 5000 · verified on Mantlescan)
 
