@@ -43,3 +43,5 @@ next-env.d.ts
 
 # one-off data import (contains user ids)
 scripts/supabase-dump.json
+
+.vercel
