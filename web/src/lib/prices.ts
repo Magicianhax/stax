@@ -2,6 +2,9 @@
 // DEX pools via a read-only public client (no third-party price API).
 //
 //   - Single-hop assets (stocks, cbBTC/WETH on Base): their USDC V3 pool slot0.
+//   - Kyber-routed assets WITHOUT a direct pool (Base TSLA/AMZN/MSFT/MSTR): the
+//     aggregator's quote for 100 USDC (`priceUsd = 100 / amountOut`), cached 30s
+//     per asset so a burst of clients costs one Kyber call.
 //   - Routed assets (Mantle sUSDe / mETH): chained spot across the validated route
 //     hops, so the headline price reflects the real route a buy would take.
 //   - Aave v3 aToken (Base aUSDC): priced 1:1 with USDC; `apy` from the Pool's
@@ -22,13 +25,17 @@
 import type { PublicClient } from "viem";
 import { AAVE_POOL_ABI, AGGREGATOR_V3_ABI, B20_ABI, V3_POOL_ABI } from "./abis";
 import type { Asset, RouteHop, StaxChain } from "./chains/types";
+import { kyberRoute } from "./server/kyber";
 
 const Q192 = (BigInt(2) ** BigInt(96)) ** BigInt(2);
 const ZERO = BigInt(0);
 const RAY = 1e27;
 const SECONDS_PER_YEAR = 31_536_000;
+const KYBER_PRICE_TTL_MS = 30_000;
+/** Reference notional for the Kyber price probe: $100 in USDC (6dp). */
+const KYBER_PROBE_USDC = BigInt(100) * BigInt(1_000_000);
 
-export type PriceSource = "fluxion" | "uniswap_v3" | "agni_route" | "aave_v3" | "none";
+export type PriceSource = "fluxion" | "uniswap_v3" | "agni_route" | "aave_v3" | "kyber" | "none";
 
 export interface AssetPrice {
   symbol: string;
@@ -123,6 +130,35 @@ async function priceFromRoute(client: PublicClient, hops: RouteHop[]): Promise<n
   }
 }
 
+// ── Kyber price cache (promise-deduped, 30s per chain+asset) ─────────────────
+const kyberPriceCache = new Map<string, { at: number; value: Promise<number | undefined> }>();
+
+/**
+ * Price one whole `asset` in USD from the KyberSwap aggregator's quote for 100 USDC.
+ * Best-effort: no route / upstream error ⇒ undefined (never throws). Failures are not
+ * cached so the next request retries.
+ */
+function priceFromKyber(chain: StaxChain, asset: Asset): Promise<number | undefined> {
+  if (!asset.address || !asset.decimals || !chain.routers.kyber) return Promise.resolve(undefined);
+  const key = `${chain.key}:${asset.symbol}`;
+  const hit = kyberPriceCache.get(key);
+  if (hit && Date.now() - hit.at < KYBER_PRICE_TTL_MS) return hit.value;
+  const decimals = asset.decimals;
+  const value = kyberRoute(chain, { tokenIn: chain.usdc.address, tokenOut: asset.address, amountIn: KYBER_PROBE_USDC })
+    .then((route) => {
+      if (!route) return undefined;
+      const qty = Number(route.amountOut) / Number(pow10(decimals));
+      return qty > 0 ? 100 / qty : undefined;
+    })
+    .catch(() => undefined)
+    .then((price) => {
+      if (price === undefined) kyberPriceCache.delete(key);
+      return price;
+    });
+  kyberPriceCache.set(key, { at: Date.now(), value });
+  return value;
+}
+
 /** Chainlink AggregatorV3 reference price (8 dec) → USD number + updatedAt, or undefined. */
 async function marketPriceFromFeed(
   client: PublicClient,
@@ -200,6 +236,9 @@ export async function priceAsset(
   } else if (asset.pool && asset.address) {
     priceUsd = await priceFromPool(chain, client, asset);
     if (priceUsd !== undefined) source = chain.routers.v3Kind === "fluxion" ? "fluxion" : "uniswap_v3";
+  } else if (asset.via === "kyber" && asset.address && chain.routers.kyber && !asset.coming) {
+    priceUsd = await priceFromKyber(chain, asset);
+    if (priceUsd !== undefined) source = "kyber";
   } else if (chain.routes[asset.symbol]) {
     priceUsd = await priceFromRoute(client, chain.routes[asset.symbol].hops);
     if (priceUsd !== undefined) source = "agni_route";

@@ -7,6 +7,12 @@
 //   - multi-hop V3    `chain.routes[symbol]` → `exactInput(path)` on the route's router
 //                     (Agni on Mantle, Router02 when route.kind === "uniswap_v3")
 //   - Aave v3 supply  asset.via === "aave_v3" → Pool.supply(USDC, amt, executor, 0) → aToken
+//   - Kyber           chains with `chain.routers.kyber` (Base): EVERY non-Aave leg is routed by
+//                     the KyberSwap aggregator — GET /routes then POST /route/build with
+//                     sender = recipient = executor, so the router pulls USDC from the executor's
+//                     per-leg approval and drops the asset on the executor, which forwards it.
+//                     No route + a `pool` ⇒ Router02 single-hop fallback; no route + no pool ⇒
+//                     the leg is dropped (noted) and the remaining weights re-split.
 //   - `coming` assets (and anything with no validated route) are DROPPED and the
 //     remaining weights re-normalized; `notes` surfaces that so the UI stays honest.
 //
@@ -26,6 +32,7 @@ import {
 } from "./abis";
 import { priceLimitSqrtX96 } from "./swapGuards";
 import { assetBySymbol } from "./chains";
+import { kyberBuild, kyberRoute } from "./server/kyber";
 import type { Asset, AssetRoute, RouteHop, StaxChain } from "./chains/types";
 import type { Allocation } from "./allocation-schema";
 
@@ -304,7 +311,116 @@ function buildAaveLeg(chain: StaxChain, asset: Asset, usdcIn: bigint): Leg {
   return { router: pool, tokenOut: asset.address!, usdcIn, minOut: usdcIn - ONE, swapData };
 }
 
-type LegKind = "single" | "route" | "aave";
+/**
+ * KyberSwap aggregator leg (USDC -> asset). sender = recipient = executor: the executor
+ * `forceApprove`s the router for `usdcIn` and the router pulls it from msg.sender, then the
+ * asset lands on the executor which forwards it. Returns null when Kyber has no route.
+ * `minOut` is our own floor on top of Kyber's minReturn (both derived from `slippageBps`).
+ */
+async function buildKyberLeg(
+  chain: StaxChain,
+  asset: Asset,
+  usdcIn: bigint,
+  slippageBps: bigint,
+  deadline: bigint,
+): Promise<Leg | null> {
+  const router = chain.routers.kyber!;
+  const tokenOut = asset.address!;
+  const executor = chain.contracts.executor;
+  const route = await kyberRoute(chain, { tokenIn: chain.usdc.address, tokenOut, amountIn: usdcIn });
+  if (!route) return null;
+  const built = await kyberBuild(chain, {
+    routeSummary: route.routeSummary,
+    sender: executor,
+    recipient: executor,
+    slippageBps: Number(slippageBps),
+    deadline: Number(deadline),
+  });
+  if (built.amountIn !== usdcIn) {
+    throw new Error(`Kyber built a ${asset.symbol} leg for a different amount than requested.`);
+  }
+  const minOut = (built.amountOut * (BPS - slippageBps)) / BPS;
+  if (minOut <= ZERO) return null;
+  return { router, tokenOut, usdcIn, minOut, swapData: built.data };
+}
+
+type LegKind = "single" | "route" | "aave" | "kyber";
+
+interface LegEntry {
+  asset: Asset;
+  kind: LegKind;
+  route?: AssetRoute;
+  weightPct: number;
+}
+
+/**
+ * Split `usdcTotal` across `entries` and build every leg in parallel. A Kyber leg with no
+ * route and no fallback pool is dropped; the survivors are re-split so the whole net amount
+ * is still deployed (the executor would refund leftovers, but the user paid the fee on them).
+ */
+async function buildAll(
+  chain: StaxChain,
+  client: PublicClient,
+  entries: LegEntry[],
+  usdcTotal: bigint,
+  slippageBps: bigint,
+  deadline: bigint,
+  notes: string[],
+): Promise<Leg[]> {
+  if (entries.length === 0) {
+    throw new Error(
+      `No investable assets in this allocation on ${chain.name}. (No validated swap route for any requested asset.)`,
+    );
+  }
+  const split = splitByWeight(
+    entries.map((e) => ({ asset: e.asset, weightPct: e.weightPct })),
+    usdcTotal,
+  );
+  const entryBySymbol = new Map(entries.map((e) => [e.asset.symbol, e]));
+
+  // All legs in parallel: Kyber legs are two HTTP round-trips each; pool reads fold into
+  // one multicall via the client's batcher.
+  const built = await Promise.all(
+    split.map(async ({ asset, usdcIn }): Promise<Leg | null> => {
+      const entry = entryBySymbol.get(asset.symbol)!;
+      switch (entry.kind) {
+        case "aave":
+          return buildAaveLeg(chain, asset, usdcIn);
+        case "route":
+          return buildRouteLeg(chain, client, asset, entry.route!, usdcIn, slippageBps, deadline);
+        case "kyber": {
+          const leg = await buildKyberLeg(chain, asset, usdcIn, slippageBps, deadline);
+          if (leg) return leg;
+          if (asset.pool && asset.feeTier !== undefined) {
+            notes.push(`${asset.symbol}: no aggregator route right now, used its direct USDC pool instead.`);
+            return buildSingleHopLeg(chain, client, asset, usdcIn, slippageBps, deadline);
+          }
+          return null;
+        }
+        default:
+          return buildSingleHopLeg(chain, client, asset, usdcIn, slippageBps, deadline);
+      }
+    }),
+  );
+
+  const dropped = split.filter((_, i) => built[i] === null).map((s) => s.asset.symbol);
+  if (dropped.length === 0) return built as Leg[];
+
+  for (const sym of dropped) {
+    const e = entryBySymbol.get(sym)!;
+    notes.push(`Skipped ${sym} (${e.weightPct}%): no swap route on ${chain.name} right now.`);
+  }
+  notes.push(`Re-split the amount across the remaining assets.`);
+  return buildAll(
+    chain,
+    client,
+    entries.filter((e) => !dropped.includes(e.asset.symbol)),
+    usdcTotal,
+    slippageBps,
+    deadline,
+    notes,
+  );
+}
 
 export async function buildLegs(args: BuildLegsArgs): Promise<BuildLegsResult> {
   const { chain, allocation, usdcTotal, client, nowSeconds } = args;
@@ -312,7 +428,7 @@ export async function buildLegs(args: BuildLegsArgs): Promise<BuildLegsResult> {
   const notes: string[] = [];
 
   // Keep any allocation entry we can build a validated leg for on this chain.
-  const entries: { asset: Asset; kind: LegKind; route?: AssetRoute; weightPct: number }[] = [];
+  const entries: LegEntry[] = [];
   for (const a of allocation.allocations) {
     const asset = assetBySymbol(chain, a.symbol);
     const route = chain.routes[a.symbol];
@@ -320,10 +436,13 @@ export async function buildLegs(args: BuildLegsArgs): Promise<BuildLegsResult> {
       notes.push(`Skipped ${a.symbol} (${a.weightPct}%): not listed on ${chain.name}.`);
     } else if (asset.coming) {
       notes.push(`Skipped ${a.symbol} (${a.weightPct}%): coming soon on ${chain.name}, not buyable yet.`);
-    } else if (asset.address && asset.pool && asset.feeTier !== undefined) {
-      entries.push({ asset, kind: "single", weightPct: a.weightPct });
     } else if (asset.via === "aave_v3" && asset.address && chain.routers.aavePool) {
       entries.push({ asset, kind: "aave", weightPct: a.weightPct });
+    } else if (chain.routers.kyber && asset.address && asset.via !== "route") {
+      // Aggregator chain: Kyber first, direct pool (if any) as the fallback inside buildAll.
+      entries.push({ asset, kind: "kyber", weightPct: a.weightPct });
+    } else if (asset.address && asset.pool && asset.feeTier !== undefined) {
+      entries.push({ asset, kind: "single", weightPct: a.weightPct });
     } else if (route) {
       entries.push({ asset, kind: "route", route, weightPct: a.weightPct });
     } else {
@@ -331,39 +450,14 @@ export async function buildLegs(args: BuildLegsArgs): Promise<BuildLegsResult> {
     }
   }
 
-  if (entries.length === 0) {
-    throw new Error(
-      `No investable assets in this allocation on ${chain.name}. (No validated swap route for any requested asset.)`,
-    );
-  }
-
   const droppedWeight = 100 - entries.reduce((s, e) => s + e.weightPct, 0);
-  if (Math.abs(droppedWeight) > 0.5) {
+  if (entries.length > 0 && Math.abs(droppedWeight) > 0.5) {
     notes.push(
       `Re-normalized weights to 100% after dropping ${droppedWeight.toFixed(1)}% of unsupported assets.`,
     );
   }
 
-  const split = splitByWeight(
-    entries.map((e) => ({ asset: e.asset, weightPct: e.weightPct })),
-    usdcTotal,
-  );
-  const entryBySymbol = new Map(entries.map((e) => [e.asset.symbol, e]));
   const deadline = BigInt(nowSeconds + DEADLINE_SECONDS);
-
-  const legs: Leg[] = [];
-  for (const { asset, usdcIn } of split) {
-    const entry = entryBySymbol.get(asset.symbol)!;
-    let leg: Leg;
-    if (entry.kind === "aave") {
-      leg = buildAaveLeg(chain, asset, usdcIn);
-    } else if (entry.kind === "route") {
-      leg = await buildRouteLeg(chain, client, asset, entry.route!, usdcIn, slippageBps, deadline);
-    } else {
-      leg = await buildSingleHopLeg(chain, client, asset, usdcIn, slippageBps, deadline);
-    }
-    legs.push(leg);
-  }
-
+  const legs = await buildAll(chain, client, entries, usdcTotal, slippageBps, deadline, notes);
   return { legs, usdcTotal, notes };
 }

@@ -7,9 +7,12 @@
 // Sell = one sponsored UserOp:
 //   [ asset.approve(venue, amt), venue.swap({ ..., recipient: USER }) ]
 //
-// Venue by `chain.routers.v3Kind` / `Asset.via` / `chain.routes[symbol]`:
+// Venue by `chain.routers.kyber` / `chain.routers.v3Kind` / `Asset.via` / `chain.routes[symbol]`:
+//   kyber       (Base)    KyberSwap aggregator: calldata from POST /api/swap-quote (build=true,
+//                         sender = recipient = the user's smart account) fetched right before
+//                         sending; [ approve(router, amountIn), { to: router, data } ]
 //   fluxion     (Mantle)  exactInputSingle WITH deadline on chain.routers.v3
-//   uniswap_v3  (Base)    SwapRouter02 exactInputSingle, NO deadline
+//   uniswap_v3  (Base)    SwapRouter02 exactInputSingle, NO deadline (kept as the fallback)
 //   agni route  (Mantle)  exactInput(path) WITH deadline, multi-hop
 //   aave_v3     (Base)    Pool.supply(USDC) -> aUSDC / Pool.withdraw(USDC) (no approval on sell)
 //
@@ -26,6 +29,7 @@ import { AAVE_POOL_ABI, AGNI_ROUTER_ABI, ERC20_ABI, FLUXION_ROUTER_ABI, UNISWAP_
 import { isRoutable, reverseRoute, type Asset, type RouteHop, type StaxChain } from "@/lib/chains";
 import { useChain } from "@/lib/chains/active";
 import { encodeV3Path, singleHopSqrtLimit } from "@/lib/swapRouting";
+import { fetchSwapQuote, usesAggregator } from "@/lib/swapQuote";
 import { feeOf, STAX_TREASURY } from "@/lib/fees";
 
 type Phase = "idle" | "swapping" | "done" | "error";
@@ -98,6 +102,33 @@ function singleHopSwapCall(
     to: chain.routers.v3,
     data: encodeFunctionData({ abi: UNISWAP_ROUTER02_ABI, functionName: "exactInputSingle", args: [p] }),
   };
+}
+
+/**
+ * Aggregator swap: [ approve(kyberRouter, amountIn), router.swap(data) ]. The calldata is
+ * built server-side for sender = recipient = `account` and is only good for ~10s, so this
+ * runs immediately before sendSponsoredCalls. The router must be the one the chain config
+ * (and the executor whitelist) names — anything else is refused.
+ */
+async function aggregatorCalls(
+  chain: StaxChain,
+  p: { symbol: string; side: "buy" | "sell"; tokenIn: `0x${string}`; amountIn: bigint; account: `0x${string}`; slippageBps: number },
+): Promise<{ calls: Call[]; minOut: bigint }> {
+  const q = await fetchSwapQuote({
+    symbol: p.symbol,
+    side: p.side,
+    amountIn: p.amountIn,
+    sender: p.account,
+    recipient: p.account,
+    slippageBps: p.slippageBps,
+    build: true,
+  });
+  const router = chain.routers.kyber!;
+  if (q.router.toLowerCase() !== router.toLowerCase() || !q.data) {
+    throw new Error("The swap route didn't match this network. Please try again.");
+  }
+  if (q.amountIn !== p.amountIn) throw new Error("The swap amount changed. Please try again.");
+  return { calls: [approve(p.tokenIn, router, p.amountIn), { to: router, data: q.data }], minOut: q.minOut };
 }
 
 export interface SwapResult {
@@ -179,6 +210,21 @@ export function useSwap() {
               data: encodeFunctionData({ abi: AAVE_POOL_ABI, functionName: "supply", args: [usdc, netIn, recipient, 0] }),
             },
           ];
+        } else if (usesAggregator(chain, asset)) {
+          // Kyber builds the swap for the NET amount; its minReturn + our quote floor both
+          // derive from the user's slippage pick. Fee transfer is prepended below as usual.
+          const agg = await aggregatorCalls(chain, {
+            symbol: asset.symbol,
+            side: "buy",
+            tokenIn: usdc,
+            amountIn: netIn,
+            account: recipient,
+            slippageBps,
+          });
+          if (agg.minOut < minOut / BigInt(2)) {
+            throw new Error("The price moved too much since your quote. Please try again.");
+          }
+          calls = agg.calls;
         } else if (route) {
           // Multi-hop exactInput(path) has no per-hop price limit; minOut guards it alone.
           calls = [approve(usdc, route.router, netIn), routeSwapCall(chain, asset.symbol, route.hops, recipient, netIn, minOut)];
@@ -239,8 +285,11 @@ export function useSwap() {
       minUsdcOut: bigint; // raw 6dp USDC floor
       estUsdcValue: number; // for the receipt headline
       recipient: string;
+      /** Slippage the aggregator should enforce (Base); defaults to 1%. */
+      slippageBps?: number;
     }) => {
       const { asset, amountIn, minUsdcOut, estUsdcValue, recipient: rcpt } = params;
+      const slippageBps = params.slippageBps ?? 100;
       const recipient = rcpt as `0x${string}`;
       setError(null);
       setResult(null);
@@ -256,7 +305,9 @@ export function useSwap() {
         const wallet = activeWallet;
         if (!wallet) throw new Error("No account found. Please sign in again.");
         const route = chain.routes[asset.symbol];
-        const sellable = asset.address && (asset.via === "aave_v3" ? Boolean(chain.routers.aavePool) : asset.pool || route);
+        const aggregator = usesAggregator(chain, asset);
+        const sellable =
+          asset.address && (asset.via === "aave_v3" ? Boolean(chain.routers.aavePool) : aggregator || asset.pool || route);
         if (!sellable) throw new Error(`${asset.symbol} can't be sold here yet.`);
         if (amountIn <= BigInt(0)) throw new Error("Nothing to sell.");
 
@@ -270,6 +321,19 @@ export function useSwap() {
               data: encodeFunctionData({ abi: AAVE_POOL_ABI, functionName: "withdraw", args: [usdc, amountIn, recipient] }),
             },
           ];
+        } else if (aggregator) {
+          const agg = await aggregatorCalls(chain, {
+            symbol: asset.symbol,
+            side: "sell",
+            tokenIn: asset.address!,
+            amountIn,
+            account: recipient,
+            slippageBps,
+          });
+          if (agg.minOut < minUsdcOut / BigInt(2)) {
+            throw new Error("The price moved too much since your quote. Please try again.");
+          }
+          calls = agg.calls;
         } else if (route) {
           calls = [
             approve(asset.address!, route.router, amountIn),

@@ -35,8 +35,10 @@ export function assetBySymbol(chain: StaxChain, symbol: string): Asset | undefin
 export function isRoutable(chain: StaxChain, symbol: string): boolean {
   const a = assetBySymbol(chain, symbol);
   if (!a || a.coming) return false;
-  if (a.pool && a.feeTier !== undefined) return true; // single-hop V3
   if (a.via === "aave_v3") return Boolean(chain.routers.aavePool);
+  // Aggregator chains (Base): every listed, non-coming asset with an address routes via Kyber.
+  if (chain.routers.kyber && a.address && a.via !== "route") return true;
+  if (a.pool && a.feeTier !== undefined) return true; // single-hop V3 (Mantle Fluxion)
   return Boolean(chain.routes[symbol]);
 }
 

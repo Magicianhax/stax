@@ -122,6 +122,7 @@ export function TradeScreen({
       minUsdcOut,
       estUsdcValue: sellQuote.expectedUsd,
       recipient: address,
+      slippageBps: TOL_BPS[tol],
     });
   };
 

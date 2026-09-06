@@ -82,3 +82,37 @@ and the UI must show a calm "Base is being switched on" state instead of firing 
 NVDAc fee 3000 $30k · GOOGLc fee 10000 $48k · SPCXc fee 10000 $30k · AAPLc fee 3000 $4k · METAc fee 3000 $1.5k.
 TSLAc AMZNc MSFTc MSTRc: minted, no USDC pool yet (coming). COINc CRCLc INTCc: not minted.
 cbBTC fee 500 $4.7M · WETH fee 500 $3.6M · Aave v3 USDC ~3.8% APY.
+
+## Kyber on Base (2026-09-06)
+
+**Venue.** On chains with `chain.routers.kyber` (Base only — Kyber does not serve Mantle, which
+keeps Fluxion/Agni untouched) every non-Aave swap goes through the KyberSwap Aggregator
+(MetaAggregationRouterV2 `0x6131B5fae19EA4f9D964eAc0408E4408b66337b5`, whitelisted on the
+executor). All Base stocks + cbBTC/WETH carry `via: "kyber"`; TSLA/AMZN/MSFT/MSTR are now
+buyable (Aerodrome CL / Uniswap v4 routes), COIN/CRCL stay `coming` (not minted). `isRoutable`
+on an aggregator chain = listed, has an address, not `coming`, `via !== "route"`; Aave keeps
+its own rule.
+
+**Server client** `src/lib/server/kyber.ts`: `kyberRoute` (GET `/base/api/v1/routes`) →
+`kyberBuild` (POST `/route/build`, `source: "monvera"`), `x-client-id: $KYBER_CLIENT_ID`
+(default `monvera`), 8s timeout, and a hard assertion that the returned `routerAddress` equals
+`chain.routers.kyber`. Routes are valid ~10s: always build right before sending.
+
+**Sender / recipient semantics.** The router pulls `amountIn` from `sender` via ERC-20 allowance
+and delivers `tokenOut` to `recipient`.
+- Executor legs (`legBuilder.ts`, invest + autopilot): `sender = recipient = executor`. The
+  executor `forceApprove`s the router per leg, calls it, checks the `tokenOut` balance delta ≥
+  `minOut` (= Kyber `amountOut × (1 − slippage)`), then forwards to the user. All Kyber legs are
+  requested in parallel; no route + `pool` ⇒ Router02 single-hop fallback (with the existing
+  sqrtPriceLimit guard); no route + no pool ⇒ leg dropped, noted, remaining weights re-split.
+- Manual buy/sell (`useSwap.ts`): `sender = recipient = the user's smart account`, calldata from
+  `POST /api/swap-quote` with `build: true` fetched immediately before `sendSponsoredCalls`:
+  `[ fee → treasury (buys), ERC20.approve(router, amountIn), { to: router, data } ]`.
+- Quotes (`useQuote` / `useSellQuote`): same route with `build: false`, debounced 400ms.
+
+**Fee stays ours.** The 25 bps platform fee is still the client-batched USDC transfer to the
+treasury and the server deploys the NET. Kyber's `extraFee` is never set — nobody is double-charged.
+
+**Prices.** Kyber assets without a direct pool are priced from a 100-USDC Kyber route
+(`priceUsd = 100 / amountOut`, cached 30s, source `"kyber"`); pool-bearing assets keep slot0;
+Chainlink `marketPrice` unchanged.

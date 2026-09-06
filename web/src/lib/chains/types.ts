@@ -12,10 +12,12 @@ export type AssetTier = "stock" | "safe" | "crypto";
  *  - "agni"        Mantle Agni ISwapRouter fork, multi-hop exactInput(path) (has `deadline`)
  *  - "uniswap_v3"  Uniswap SwapRouter02 (Base), exactInputSingle / exactInput — NO `deadline` field
  *  - "aave_v3"     Aave v3 Pool.supply(USDC) → aToken (Base "safe dollars"); sell = Pool.withdraw
+ *  - "kyber"       KyberSwap Aggregator (Base): server-built calldata for MetaAggregationRouterV2
+ *                  (`chain.routers.kyber`); `pool`/`feeTier` kept as the Router02 fallback + price source
  *  - "merchant_moe" Mantle LB router (recorded, not routable)
  *  - "route"       listed only, no permissionless route (shown as "coming soon")
  */
-export type SwapVia = "fluxion" | "agni" | "uniswap_v3" | "aave_v3" | "merchant_moe" | "route";
+export type SwapVia = "fluxion" | "agni" | "uniswap_v3" | "aave_v3" | "kyber" | "merchant_moe" | "route";
 
 export interface Asset {
   symbol: string; // user-facing ticker, shared across chains ("AAPL" on both Base and Mantle)
@@ -85,6 +87,8 @@ export interface StaxChain {
     quoterV2?: `0x${string}`;
     /** Aave v3 Pool when the safe tier is an aToken (Base). */
     aavePool?: `0x${string}`;
+    /** KyberSwap MetaAggregationRouterV2 when the chain swaps through the aggregator (Base). */
+    kyber?: `0x${string}`;
     /** Every router the executor must whitelist (deploy script + docs). */
     all: `0x${string}`[];
   };

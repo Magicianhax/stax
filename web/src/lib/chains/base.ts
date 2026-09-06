@@ -39,20 +39,24 @@ export const CBBTC = "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf" as const;
 // Coinbase tokenized stocks registry: B20Created events announce new tokens.
 export const COINBASE_STOCK_REGISTRY = "0x3f3E8cf41cdd3b1D118c16471aB0113DfDDd5CaD" as const;
 
-// Buyable today: a liquid USDC Uniswap V3 pool exists. `pool` is the deepest pool.
+// Every buyable asset swaps through the KyberSwap aggregator (`via: "kyber"`), which routes
+// across Aerodrome / Aerodrome CL / Uniswap v3+v4. `pool` (when present) is the deepest direct
+// USDC Uniswap V3 pool: it stays as the Router02 fallback leg and the slot0 price source;
+// assets without a pool are priced off a Kyber 100-USDC route.
 const STOCKS: Asset[] = [
-  { symbol: "NVDA",  name: "Nvidia",    tier: "stock", address: "0xb20000000000000000000078ee7ce2fE4908108C", pool: "0x60661b315553EB81872deEA9a66d567Cf0CCd33B", feeTier: 3000,  decimals: 8, via: "uniswap_v3", onchainSymbol: "NVDAc",  priceFeed: "0x04689a41629776563E6822F76f2e57D148d28513" },
-  { symbol: "GOOGL", name: "Alphabet",  tier: "stock", address: "0xb2000000000000000000002D0BA3164cc74f58B7", pool: "0x1f52F46BaC657564c31122b12b43A459E09273C8", feeTier: 10000, decimals: 8, via: "uniswap_v3", onchainSymbol: "GOOGLc", priceFeed: "0x5bF49E0ffA937CE2FfF033c739aD7C634c4D34F2" },
-  { symbol: "AAPL",  name: "Apple",     tier: "stock", address: "0xb200000000000000000000C2e324d24d7eEcd1fb", pool: "0x97F35d1E92795327614BE000cd18cba1Be2c1931", feeTier: 3000,  decimals: 8, via: "uniswap_v3", onchainSymbol: "AAPLc",  priceFeed: "0x787f13dEa48Db0897CbCDD985de77809D837F988" },
-  { symbol: "META",  name: "Meta",      tier: "stock", address: "0xb2000000000000000000008bC8786B856E61707C", pool: "0x583919ec1975a1238C50e1940911894ee6912476", feeTier: 3000,  decimals: 8, via: "uniswap_v3", onchainSymbol: "METAc",  priceFeed: "0x6526aE6797A76123638b863AeE4dD27Ba4E4b27D" },
-  { symbol: "SPCX",  name: "SpaceX",    tier: "stock", address: "0xb2000000000000000000007b9fcbd005511aCBd5", pool: "0x127a12FC0953ab2ab89558c67Ba6D597D7140431", feeTier: 10000, decimals: 8, via: "uniswap_v3", onchainSymbol: "SPCXc",  priceFeed: "0x6A634B235903C4ad6376892180d6fF8612e3Fa68" },
-  // Minted by Coinbase but no USDC pool yet (2026-09-05) → coming soon. Flip `coming` + add `pool` once liquid.
-  { symbol: "TSLA",  name: "Tesla",     tier: "stock", address: "0xb2000000000000000000001e800a7f5189430cD0", decimals: 8, via: "uniswap_v3", onchainSymbol: "TSLAc", priceFeed: "0xFaf869185383a24F8cb00e27BdA6b63B9905DCb4", coming: true },
-  { symbol: "AMZN",  name: "Amazon",    tier: "stock", address: "0xb200000000000000000000d9192b6B456483C2E8", decimals: 8, via: "uniswap_v3", onchainSymbol: "AMZNc", priceFeed: "0x06A8E4b3aBB3B7543d8396FB2B763d22820cB295", coming: true },
-  { symbol: "MSFT",  name: "Microsoft", tier: "stock", address: "0xB200000000000000000000Ab99cFa739E253872B", decimals: 8, via: "uniswap_v3", onchainSymbol: "MSFTc", priceFeed: "0xeB10A6c9aa7E537aEd766C08c35Dae35B321b18c", coming: true },
-  { symbol: "MSTR",  name: "Strategy",  tier: "stock", address: "0xb2000000000000000000004884b426556b92883d", decimals: 8, via: "uniswap_v3", onchainSymbol: "MSTRc", priceFeed: "0xB3cE282CD188b35DA0E38D8Bc7d58e33173D202a", coming: true },
-  { symbol: "COIN",  name: "Coinbase",  tier: "stock", address: "0xb200000000000000000000c85a31389D71F3ecfb", decimals: 8, via: "uniswap_v3", onchainSymbol: "COINc", priceFeed: "0x408e44f504A7371a345F03a73dDC96A4b48e8aa7", coming: true },
-  { symbol: "CRCL",  name: "Circle",    tier: "stock", address: "0xB20000000000000000000019f6E7C675b73C2e4D", decimals: 8, via: "uniswap_v3", onchainSymbol: "CRCLc", priceFeed: "0x0231cF2635D1E17bB5c2462cc7504Ba1fBd61f33", coming: true },
+  { symbol: "NVDA",  name: "Nvidia",    tier: "stock", address: "0xb20000000000000000000078ee7ce2fE4908108C", pool: "0x60661b315553EB81872deEA9a66d567Cf0CCd33B", feeTier: 3000,  decimals: 8, via: "kyber", onchainSymbol: "NVDAc",  priceFeed: "0x04689a41629776563E6822F76f2e57D148d28513" },
+  { symbol: "GOOGL", name: "Alphabet",  tier: "stock", address: "0xb2000000000000000000002D0BA3164cc74f58B7", pool: "0x1f52F46BaC657564c31122b12b43A459E09273C8", feeTier: 10000, decimals: 8, via: "kyber", onchainSymbol: "GOOGLc", priceFeed: "0x5bF49E0ffA937CE2FfF033c739aD7C634c4D34F2" },
+  { symbol: "AAPL",  name: "Apple",     tier: "stock", address: "0xb200000000000000000000C2e324d24d7eEcd1fb", pool: "0x97F35d1E92795327614BE000cd18cba1Be2c1931", feeTier: 3000,  decimals: 8, via: "kyber", onchainSymbol: "AAPLc",  priceFeed: "0x787f13dEa48Db0897CbCDD985de77809D837F988" },
+  { symbol: "META",  name: "Meta",      tier: "stock", address: "0xb2000000000000000000008bC8786B856E61707C", pool: "0x583919ec1975a1238C50e1940911894ee6912476", feeTier: 3000,  decimals: 8, via: "kyber", onchainSymbol: "METAc",  priceFeed: "0x6526aE6797A76123638b863AeE4dD27Ba4E4b27D" },
+  { symbol: "SPCX",  name: "SpaceX",    tier: "stock", address: "0xb2000000000000000000007b9fcbd005511aCBd5", pool: "0x127a12FC0953ab2ab89558c67Ba6D597D7140431", feeTier: 10000, decimals: 8, via: "kyber", onchainSymbol: "SPCXc",  priceFeed: "0x6A634B235903C4ad6376892180d6fF8612e3Fa68" },
+  // No direct USDC Uniswap V3 pool, but Kyber routes them (Aerodrome CL / Uniswap v4, verified 2026-09-06).
+  { symbol: "TSLA",  name: "Tesla",     tier: "stock", address: "0xb2000000000000000000001e800a7f5189430cD0", decimals: 8, via: "kyber", onchainSymbol: "TSLAc", priceFeed: "0xFaf869185383a24F8cb00e27BdA6b63B9905DCb4" },
+  { symbol: "AMZN",  name: "Amazon",    tier: "stock", address: "0xb200000000000000000000d9192b6B456483C2E8", decimals: 8, via: "kyber", onchainSymbol: "AMZNc", priceFeed: "0x06A8E4b3aBB3B7543d8396FB2B763d22820cB295" },
+  { symbol: "MSFT",  name: "Microsoft", tier: "stock", address: "0xB200000000000000000000Ab99cFa739E253872B", decimals: 8, via: "kyber", onchainSymbol: "MSFTc", priceFeed: "0xeB10A6c9aa7E537aEd766C08c35Dae35B321b18c" },
+  { symbol: "MSTR",  name: "Strategy",  tier: "stock", address: "0xb2000000000000000000004884b426556b92883d", decimals: 8, via: "kyber", onchainSymbol: "MSTRc", priceFeed: "0xB3cE282CD188b35DA0E38D8Bc7d58e33173D202a" },
+  // Not minted by Coinbase yet (Kyber: "route not found" on 2026-09-06) → coming soon.
+  { symbol: "COIN",  name: "Coinbase",  tier: "stock", address: "0xb200000000000000000000c85a31389D71F3ecfb", decimals: 8, via: "kyber", onchainSymbol: "COINc", priceFeed: "0x408e44f504A7371a345F03a73dDC96A4b48e8aa7", coming: true },
+  { symbol: "CRCL",  name: "Circle",    tier: "stock", address: "0xB20000000000000000000019f6E7C675b73C2e4D", decimals: 8, via: "kyber", onchainSymbol: "CRCLc", priceFeed: "0x0231cF2635D1E17bB5c2462cc7504Ba1fBd61f33", coming: true },
 ];
 
 const SAFE: Asset[] = [
@@ -62,8 +66,8 @@ const SAFE: Asset[] = [
 ];
 
 const CRYPTO: Asset[] = [
-  { symbol: "BTC", name: "Bitcoin (cbBTC)", tier: "crypto", address: CBBTC, pool: "0xfBB6Eed8e7aa03B138556eeDaF5D271A5E1e43ef", feeTier: 500, decimals: 8,  via: "uniswap_v3", onchainSymbol: "cbBTC" },
-  { symbol: "ETH", name: "Ethereum",        tier: "crypto", address: WETH,  pool: "0xd0b53D9277642d899DF5C87A3966A349A798F224", feeTier: 500, decimals: 18, via: "uniswap_v3", onchainSymbol: "WETH" },
+  { symbol: "BTC", name: "Bitcoin (cbBTC)", tier: "crypto", address: CBBTC, pool: "0xfBB6Eed8e7aa03B138556eeDaF5D271A5E1e43ef", feeTier: 500, decimals: 8,  via: "kyber", onchainSymbol: "cbBTC" },
+  { symbol: "ETH", name: "Ethereum",        tier: "crypto", address: WETH,  pool: "0xd0b53D9277642d899DF5C87A3966A349A798F224", feeTier: 500, decimals: 18, via: "kyber", onchainSymbol: "WETH" },
 ];
 
 const ALL = [...STOCKS, ...SAFE, ...CRYPTO];
@@ -97,6 +101,7 @@ export const BASE: StaxChain = {
     v3Kind: "uniswap_v3",
     quoterV2: UNISWAP_QUOTER_V2,
     aavePool: AAVE_V3_POOL,
+    kyber: KYBER_ROUTER,
     all: [KYBER_ROUTER, UNISWAP_ROUTER02, AAVE_V3_POOL],
   },
   assets: { stocks: STOCKS, safe: SAFE, crypto: CRYPTO, all: ALL },

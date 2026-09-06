@@ -110,7 +110,8 @@ subscription. (`web/src/lib/fees.ts`, configurable via `NEXT_PUBLIC_STAX_FEE_BPS
 
 Next.js 16 (App Router, PWA) · Tailwind v4 · **Privy** (email/passkey embedded wallet,
 delegated session signers) · **Pimlico + permissionless** (gasless ERC-4337, SimpleAccount v0.7)
-· viem / wagmi · **Anthropic** via the AI SDK (Vera) · Uniswap V3 + Aave v3 (Base) · Fluxion /
+· viem / wagmi · **Anthropic** via the AI SDK (Vera) · **KyberSwap Aggregator** (Base swap venue:
+Aerodrome / Uniswap v3+v4 routing, Router02 fallback) + Aave v3 (Base) · Fluxion /
 Agni / Merchant Moe (Mantle DEXes) · Coinbase tokenized stocks + Backed xStocks · Alchemy RPC +
 Etherscan V2 (tx history) · Hardhat contracts.
 
