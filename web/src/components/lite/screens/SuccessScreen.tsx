@@ -92,11 +92,7 @@ export function SuccessScreen({
                 asset={toTile(h.symbol, h.name)}
                 sub={catFor(h.symbol, h.name)}
                 showSpark={false}
-                right={
-                  <div className="tnum" style={{ fontWeight: 700, fontSize: 16 }}>
-                    {usd(h.amountUsd)}
-                  </div>
-                }
+                value={usd(h.amountUsd)}
               />
             </div>
           ))}

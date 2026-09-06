@@ -17,7 +17,7 @@ import { PickStep } from "./PickStep";
 import { RefundAddressStep } from "./RefundAddressStep";
 import { AddressCard } from "./AddressCard";
 import { SheetHeader } from "./SheetHeader";
-import s from "./receive.module.css";
+import { SheetStep } from "@/components/motion";
 
 type Step = "pick" | "refund" | "address";
 
@@ -103,7 +103,7 @@ export function AnyNetwork({
   return (
     <>
       <SheetHeader title={title} onBack={back} onClose={onClose} />
-      <div key={step} className={`${s.step} ${dir === "back" ? s.stepBack : ""}`}>
+      <SheetStep step={step} dir={dir}>
         {step === "pick" && (
           <PickStep
             networks={networks.data}
@@ -147,7 +147,7 @@ export function AnyNetwork({
             </div>
           )
         )}
-      </div>
+      </SheetStep>
     </>
   );
 }

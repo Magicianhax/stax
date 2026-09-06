@@ -1,0 +1,190 @@
+/* Stax motion kit — the keyframes + state classes the kit pieces need.
+   Every rule is transform/opacity/colour only; the reduced-motion block at the
+   bottom strips transforms and leaves an opacity-only version of each. Screens
+   never reference these classes directly — they import the components. */
+
+/* ── Money: text flashes to pos/neg for 0.9 s on change (set → cleared by JS). */
+.money {
+  transition: color 0.5s var(--ease-out);
+}
+.money[data-dir="up"] {
+  color: var(--pos);
+}
+.money[data-dir="down"] {
+  color: var(--neg);
+}
+
+/* ── Tick: live price cell wash + digit crossfade. */
+.tick {
+  display: inline-block;
+  padding: 2px 6px;
+  margin: -2px -6px;
+  border-radius: 6px;
+  background-color: transparent;
+  transition: background-color 0.5s var(--ease-out);
+}
+.tick[data-dir="up"] {
+  background-color: var(--primary-soft);
+}
+.tick[data-dir="down"] {
+  background-color: color-mix(in srgb, var(--neg) 18%, transparent);
+}
+.tickDigits {
+  display: inline-block;
+  animation: tickIn 0.28s var(--ease-out) both;
+}
+@keyframes tickIn {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: none;
+  }
+}
+
+/* ── DrawCheck: disc pops with --ease-soft, then the check draws. */
+.checkDisc {
+  transform-origin: 50% 50%;
+  animation: checkPop 0.42s var(--ease-soft) both;
+}
+@keyframes checkPop {
+  from {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.checkPath {
+  stroke-dasharray: 48;
+  stroke-dashoffset: 48;
+  animation: checkDraw 0.5s var(--ease-out) both;
+}
+@keyframes checkDraw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* ── Burst: one-shot brand confetti (900 ms). --tx/--ty/--r set per piece. */
+.burstPiece {
+  position: absolute;
+  top: 32%;
+  left: 50%;
+  animation: burst 0.9s var(--ease-out) both;
+}
+@keyframes burst {
+  0% {
+    transform: translate(0, 0) rotate(0deg) scale(0.6);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--tx), var(--ty)) rotate(var(--r)) scale(1);
+    opacity: 0;
+  }
+}
+
+/* ── useFlashRow: one-time --primary-soft wash. Runs as an animation so it wins
+   over a row's inline `background`. */
+.flashRow {
+  animation: rowFlash 1.2s var(--ease-out) both;
+}
+@keyframes rowFlash {
+  0% {
+    background-color: transparent;
+  }
+  15% {
+    background-color: var(--primary-soft);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+/* ── SheetStep: step in/out inside a sheet (moved from receive.module.css). */
+.step {
+  animation: stepFwd 0.26s var(--ease-out) both;
+}
+.stepBack {
+  animation-name: stepBack;
+}
+@keyframes stepFwd {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes stepBack {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* ── HoldButton: the ring around the label. */
+.holdBtn {
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.holdRing {
+  flex: none;
+  transform: rotate(-90deg);
+}
+.holdRingTrack {
+  opacity: 0.28;
+}
+.holdRingFill {
+  transition: stroke-dashoffset 0.2s var(--ease-out);
+}
+.holdBtn[data-holding="true"] .holdRingFill {
+  transition: none;
+}
+
+/* ── Reduced motion: opacity only, no transforms. */
+@media (prefers-reduced-motion: reduce) {
+  .tickDigits {
+    animation: fadeOnly 0.2s var(--ease-out) both;
+  }
+  .checkDisc,
+  .step,
+  .stepBack {
+    animation: fadeOnly 0.2s var(--ease-out) both;
+  }
+  .checkPath {
+    stroke-dashoffset: 0;
+    animation: none;
+  }
+  .burstPiece {
+    display: none;
+  }
+  .holdRingFill {
+    transition: none;
+  }
+}
+@keyframes fadeOnly {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

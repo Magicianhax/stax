@@ -329,29 +329,14 @@ export function HomeScreen({
                     sub={hideBalance ? catFor(h.asset.symbol, h.asset.name) : qtyLine}
                     showSpark
                     onClick={() => go("asset", { symbol: h.asset.symbol })}
-                    right={
-                      <div className="tnum" style={{ textAlign: "right" }}>
-                        <div style={{ fontWeight: 600, fontSize: 16 }}>
-                          {hideBalance
-                            ? DOTS
-                            : h.valueUsd !== undefined
-                              ? usd(h.valueUsd)
-                              : tokenQty(h.raw, h.asset.decimals ?? 18)}
-                        </div>
-                        {day !== undefined && (
-                          <div
-                            style={{
-                              fontSize: 12.5,
-                              fontWeight: 600,
-                              marginTop: 2,
-                              color: day >= 0 ? "var(--pos)" : "var(--neg)",
-                            }}
-                          >
-                            {(day >= 0 ? "+" : "") + day.toFixed(2)}% today
-                          </div>
-                        )}
-                      </div>
+                    value={
+                      hideBalance
+                        ? DOTS
+                        : h.valueUsd !== undefined
+                          ? usd(h.valueUsd)
+                          : tokenQty(h.raw, h.asset.decimals ?? 18)
                     }
+                    change={day !== undefined ? { pct: day, label: "today" } : undefined}
                   />
                 </div>
               );

@@ -1,33 +1,7 @@
 /* Receive flow — the bits inline styles can't do: hover gated to real pointers,
-   keyboard focus rings, the step change, and the reduced-motion branch. Every
+   keyboard focus rings, and the reduced-motion branch (step changes use the
+   motion kit's SheetStep). Every
    colour is a design token so light and dark stay in step. */
-
-.step {
-  animation: receiveStepIn 0.26s var(--ease-out) both;
-}
-@keyframes receiveStepIn {
-  from {
-    opacity: 0;
-    transform: translateX(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-.stepBack {
-  animation-name: receiveStepBack;
-}
-@keyframes receiveStepBack {
-  from {
-    opacity: 0;
-    transform: translateX(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
 
 /* Chooser rows + dropdown triggers + the address chip share one press surface. */
 .option {
@@ -237,10 +211,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .step,
-  .stepBack {
-    animation: none;
-  }
   .pendingDot {
     animation: none;
     opacity: 1;

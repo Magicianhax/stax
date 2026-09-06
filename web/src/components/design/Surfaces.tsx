@@ -1,50 +1,82 @@
 "use client";
 
 // Stax surface + layout primitives — ported from the design handoff (components.jsx).
-// BottomSheet, HoldingRow, Eyebrow, VerifiedBadge, Stat, SectionTitle, Confetti.
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+// BottomSheet, HoldingRow, Eyebrow, VerifiedBadge, Stat, SectionTitle.
+// (Confetti now lives in the motion kit as Burst; re-exported below.)
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Icon, type IconName } from "./Icon";
 import { AssetTile, type TileAsset } from "./Brand";
 import { Sparkline } from "./Charts";
 import { useDragDismiss } from "../../hooks/useDragDismiss";
+import { useFlashRow } from "../motion/useFlashRow";
 
 // ── Bottom sheet ────────────────────────────────────────────────────────────
+// A modal dialog (role="dialog", aria-modal) that springs up from the bottom edge
+// (`sheetUp` keyframe: --ease-drawer 0.42 s with a 1.5 % overshoot) and exits in
+// 0.22 s. Focus moves to the panel on open and returns to the opener on close;
+// Escape closes; drag-to-dismiss via useDragDismiss.
 export interface BottomSheetProps {
   open: boolean;
   onClose: () => void;
+  /** Renders the title row and labels the dialog. */
   title?: string;
+  /** Accessible name when there is no `title` (e.g. a custom header inside). */
+  label?: string;
   children?: ReactNode;
 }
 
-export function BottomSheet({ open, onClose, title, children }: BottomSheetProps) {
+export function BottomSheet({ open, onClose, title, label, children }: BottomSheetProps) {
   // Keep the sheet mounted briefly after `open` flips false so the scrim can
   // fade out (exit faster than enter). `mounted` drives presence; `shown`
   // drives the open/closed visual state via data-open.
   const [mounted, setMounted] = useState(open);
   const [shown, setShown] = useState(false);
-  const scrimRef = useRef<HTMLDivElement | null>(null);
+  const titleId = useId();
+  const opener = useRef<HTMLElement | null>(null);
 
   // Drag-to-dismiss wired to the same close path; the drag animates the panel
   // off-screen itself, then calls onClose via onDismiss.
   const { ref, handlers } = useDragDismiss<HTMLDivElement>({ onDismiss: onClose });
 
+  // Presence follows `open` synchronously (derived state); the visual state and
+  // the unmount are scheduled so enter/exit can animate.
+  if (open && !mounted) setMounted(true);
+  if (!open && shown) setShown(false);
+
   useEffect(() => {
     if (open) {
-      setMounted(true);
+      opener.current = (document.activeElement as HTMLElement | null) ?? null;
       // next frame → animate in (avoids appearing-from-nothing on first paint).
-      const r = requestAnimationFrame(() => setShown(true));
+      const r = requestAnimationFrame(() => {
+        setShown(true);
+        ref.current?.focus({ preventScroll: true });
+      });
       return () => cancelAnimationFrame(r);
     }
-    setShown(false);
     const t = setTimeout(() => setMounted(false), 220);
+    const prev = opener.current;
+    opener.current = null;
+    if (prev && document.contains(prev)) prev.focus({ preventScroll: true });
     return () => clearTimeout(t);
-  }, [open]);
+  }, [open, ref]);
+
+  // Escape closes.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
 
   if (!mounted) return null;
 
   return (
     <div
-      ref={scrimRef}
       onClick={onClose}
       data-open={shown ? "true" : "false"}
       style={{
@@ -62,6 +94,13 @@ export function BottomSheet({ open, onClose, title, children }: BottomSheetProps
     >
       <div
         ref={ref}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={title ? titleId : undefined}
+        aria-label={!title ? label : undefined}
+        tabIndex={-1}
+        className="sheet-panel"
+        data-open={shown ? "true" : "false"}
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "100%",
@@ -72,11 +111,13 @@ export function BottomSheet({ open, onClose, title, children }: BottomSheetProps
           boxShadow: "var(--glass-shadow), var(--glass-hi)",
           maxHeight: "88%",
           overflowY: "auto",
+          outline: "none",
           padding: "6px 20px calc(20px + env(safe-area-inset-bottom))",
-          // entrance via transform (slides from edge); drag takes over via direct
-          // style.transform writes, so we only set the initial open transition.
+          // Enter is the `sheetUp` spring (CSS animation, fill backwards so the
+          // drag can write transform directly once it ends); exit is a 0.22 s
+          // transition to the edge.
           transform: shown ? "translateY(0)" : "translateY(100%)",
-          transition: "transform .42s var(--ease-drawer)",
+          transition: "transform .22s var(--ease-drawer)",
           touchAction: "none",
         }}
       >
@@ -113,7 +154,7 @@ export function BottomSheet({ open, onClose, title, children }: BottomSheetProps
               marginBottom: 14,
             }}
           >
-            <h3 className="title-sm" style={{ margin: 0 }}>
+            <h3 id={titleId} className="title-sm" style={{ margin: 0 }}>
               {title}
             </h3>
             <button
@@ -174,46 +215,91 @@ export function Crossfade({ showFirst, first, second, style, className }: Crossf
 }
 
 // ── Holding / asset row ───────────────────────────────────────────────────────
+// One anatomy everywhere: AssetTile 44 · name · sub ("{qty} {symbol}" by default)
+// · right column = value + change (pos/neg coloured), or a custom `right` slot.
+//
+//   <HoldingRow asset={tile} qty="0.4303" symbol="NVDA" value="$99.75"
+//               change={{ pct: 2.41, label: "today" }} onClick={…} flashKey={…} />
+export interface HoldingChange {
+  /** Percent change, e.g. 2.41 → "+2.41%". */
+  pct?: number;
+  /** Absolute USD change, e.g. -12.4 → "-$12.40". Shown before pct when both given. */
+  abs?: number;
+  /** Suffix, e.g. "today", "1M". Alone (no pct/abs) it renders muted. */
+  label?: string;
+}
+
 export interface HoldingRowProps {
   asset: TileAsset & { day?: number; spark?: number[] };
+  /** Ticker used by the default sub-label ("{qty} {symbol}"). */
+  symbol?: string;
+  /** Quantity used by the default sub-label. */
+  qty?: string | number;
+  /** Secondary line under the name; overrides the qty/symbol default. */
+  sub?: ReactNode;
   /** Right-aligned value (e.g. "$642.18"). Ignored when `right` is provided. */
   value?: ReactNode;
-  /** Secondary line under the name. */
-  sub?: ReactNode;
+  /** Change line under the value, coloured pos/neg. */
+  change?: HoldingChange;
   /** Fully custom right-hand content. */
   right?: ReactNode;
   onClick?: () => void;
   dim?: boolean;
   showSpark?: boolean;
+  /** One-time --primary-soft wash when the row enters view (see useFlashRow). */
+  flashKey?: string;
+  size?: number;
+}
+
+function fmtChange(c: HoldingChange): { text: string; up: boolean | null } {
+  const parts: string[] = [];
+  const n = c.abs ?? c.pct;
+  if (c.abs !== undefined) {
+    const a = Math.abs(c.abs).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    parts.push(`${c.abs < 0 ? "-" : "+"}$${a}`);
+  }
+  if (c.pct !== undefined) parts.push(`${c.pct >= 0 ? "+" : ""}${c.pct.toFixed(2)}%`);
+  if (c.label) parts.push(c.label);
+  return { text: parts.join(" "), up: n === undefined ? null : n >= 0 };
 }
 
 export function HoldingRow({
   asset,
-  value,
+  symbol,
+  qty,
   sub,
+  value,
+  change,
   right,
   onClick,
   dim,
   showSpark = true,
+  flashKey,
+  size = 44,
 }: HoldingRowProps) {
   const day = asset.day ?? 0;
   const up = day >= 0;
+  const { ref: flashRef, className: flashClass } = useFlashRow<HTMLButtonElement>(flashKey);
+  const subLine = sub !== undefined ? sub : qty !== undefined && symbol ? `${qty} ${symbol}` : undefined;
+  const ch = change ? fmtChange(change) : null;
   return (
     <button
+      ref={flashRef}
       onClick={onClick}
-      className={onClick ? "tap" : undefined}
+      className={`${onClick ? "tap" : ""} ${flashClass}`.trim() || undefined}
       style={{
         display: "flex",
         alignItems: "center",
         gap: 13,
         width: "100%",
         padding: "12px 4px",
+        borderRadius: 12,
         textAlign: "left",
         background: "none",
         opacity: dim ? 0.5 : 1,
       }}
     >
-      <AssetTile asset={asset} />
+      <AssetTile asset={asset} size={size} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div
           style={{
@@ -227,8 +313,9 @@ export function HoldingRow({
         >
           {asset.name}
         </div>
-        {sub !== undefined && (
+        {subLine !== undefined && (
           <div
+            className="tnum"
             style={{
               fontSize: 13.5,
               color: "var(--ink-3)",
@@ -237,14 +324,14 @@ export function HoldingRow({
               whiteSpace: "nowrap",
             }}
           >
-            {sub}
+            {subLine}
           </div>
         )}
       </div>
       {showSpark && asset.spark && asset.kind !== "safe" && (
         <Sparkline data={asset.spark} color={up ? "var(--pos)" : "var(--neg)"} />
       )}
-      <div style={{ textAlign: "right", minWidth: 64 }}>
+      <div style={{ textAlign: "right", minWidth: 64, flex: "none" }}>
         {right !== undefined ? (
           right
         ) : (
@@ -252,12 +339,19 @@ export function HoldingRow({
             <div className="tnum" style={{ fontWeight: 600, fontSize: 16 }}>
               {value}
             </div>
-            <div
-              className="tnum"
-              style={{ fontSize: 13, fontWeight: 600, color: up ? "var(--pos)" : "var(--neg)" }}
-            >
-              {(up ? "+" : "") + day.toFixed(2)}%
-            </div>
+            {ch && ch.text && (
+              <div
+                className="tnum"
+                style={{
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  marginTop: 2,
+                  color: ch.up === null ? "var(--ink-3)" : ch.up ? "var(--pos)" : "var(--neg)",
+                }}
+              >
+                {ch.text}
+              </div>
+            )}
           </>
         )}
       </div>
@@ -380,61 +474,8 @@ export function SectionTitle({ children, action, onAction }: SectionTitleProps) 
 }
 
 // ── Confetti burst ────────────────────────────────────────────────────────────
-export interface ConfettiProps {
-  count?: number;
-}
-
-export function Confetti({ count = 26 }: ConfettiProps) {
-  const colors = ["var(--primary)", "var(--accent)", "var(--pos)", "var(--ink)"];
-  const pieces = useMemo(
-    () =>
-      Array.from({ length: count }, (_, i) => {
-        const ang = (Math.PI * 2 * i) / count + Math.random();
-        const dist = 70 + Math.random() * 90;
-        return {
-          tx: Math.cos(ang) * dist,
-          ty: Math.sin(ang) * dist - 30,
-          r: Math.random() * 360,
-          d: Math.random() * 0.15,
-          c: colors[i % colors.length],
-          sz: 6 + Math.random() * 6,
-          round: Math.random() > 0.5,
-        };
-      }),
-    [count],
-  );
-  return (
-    <div
-      style={{
-        position: "absolute",
-        inset: 0,
-        overflow: "hidden",
-        pointerEvents: "none",
-        zIndex: 5,
-      }}
-    >
-      {pieces.map((piece, i) => (
-        <span
-          key={i}
-          style={
-            {
-              position: "absolute",
-              top: "32%",
-              left: "50%",
-              width: piece.sz,
-              height: piece.sz,
-              background: piece.c,
-              borderRadius: piece.round ? "50%" : 2,
-              "--tx": `${piece.tx}px`,
-              "--ty": `${piece.ty}px`,
-              "--r": `${piece.r}deg`,
-              animation: `confettiBurst 1.1s ${piece.d}s var(--ease) forwards`,
-            } as CSSProperties
-          }
-        />
-      ))}
-    </div>
-  );
-}
+// Moved to the motion kit as `Burst` (brand palette, 900 ms, `fire` prop).
+// Kept under the old name so existing callers keep working.
+export { Burst as Confetti, type BurstProps as ConfettiProps } from "../motion/Burst";
 
 export type { IconName };

@@ -2,8 +2,10 @@
 
 // Stax brand marks — ported from the design handoff (icons.jsx).
 // StaxMark (wordmark glyph), VeraOrb (the assistant's gradient orb presence),
-// and AssetTile (a clean monogram tile that avoids reproducing real logos).
+// AssetTile (real logo on a white tile, monogram fallback) and LogoCluster
+// (overlapping tiles with a "+N" disc).
 import { useState } from "react";
+import { toTile } from "@/lib/displayAssets";
 
 export interface StaxMarkProps {
   size?: number;
@@ -157,6 +159,70 @@ export function StaxWordmark({ size = 30 }: StaxWordmarkProps) {
       >
         Stax
       </span>
+    </span>
+  );
+}
+
+// ── Logo cluster ─────────────────────────────────────────────────────────────
+// Up to `max` overlapping AssetTiles (2px --surface ring) with a "+N" disc for
+// the rest. Used on basket tiles/rail, Activity rows, Vera's recorded plans.
+//
+//   <LogoCluster assets={[{ symbol: "NVDA" }, { symbol: "AAPL", name: "Apple" }]} size={24} />
+export interface LogoClusterProps {
+  assets: { symbol: string; name?: string }[];
+  /** Tile size in px (default 24). */
+  size?: number;
+  /** Tiles shown before the "+N" disc (default 4). */
+  max?: number;
+  /** Ring colour between tiles (default var(--surface)). */
+  ring?: string;
+}
+
+export function LogoCluster({ assets, size = 24, max = 4, ring = "var(--surface)" }: LogoClusterProps) {
+  const shown = assets.length > max ? assets.slice(0, max) : assets;
+  const rest = assets.length - shown.length;
+  const radius = Math.round(size * 0.295);
+  const overlap = Math.round(size * 0.28);
+  const item = (i: number): React.CSSProperties => ({
+    display: "block",
+    flex: "none",
+    borderRadius: radius,
+    boxShadow: `0 0 0 2px ${ring}`,
+    marginLeft: i === 0 ? 0 : -overlap,
+    position: "relative",
+    zIndex: i + 1,
+  });
+  return (
+    <span
+      aria-label={assets.map((a) => a.name ?? a.symbol).join(", ")}
+      role="img"
+      style={{ display: "inline-flex", alignItems: "center", flex: "none", padding: 2 }}
+    >
+      {shown.map((a, i) => (
+        <span key={a.symbol} style={item(i)}>
+          <AssetTile asset={toTile(a.symbol, a.name)} size={size} radius={radius} />
+        </span>
+      ))}
+      {rest > 0 && (
+        <span
+          className="tnum"
+          style={{
+            ...item(shown.length),
+            width: size,
+            height: size,
+            borderRadius: "50%",
+            background: "var(--surface-2)",
+            color: "var(--ink-2)",
+            display: "grid",
+            placeItems: "center",
+            fontSize: Math.max(9, Math.round(size * 0.42)),
+            fontWeight: 700,
+            letterSpacing: "-.02em",
+          }}
+        >
+          +{rest}
+        </span>
+      )}
     </span>
   );
 }

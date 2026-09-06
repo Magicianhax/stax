@@ -674,13 +674,21 @@
     transform: scale(1);
   }
 }
+/* BottomSheet enter: a drawer spring with a 1.5% overshoot (--ease-drawer, .42s).
+   Fill is `backwards` so the drag can own `transform` once the entrance ends. */
 @keyframes sheetUp {
   from {
     transform: translateY(100%);
   }
+  62% {
+    transform: translateY(-1.5%);
+  }
   to {
     transform: translateY(0);
   }
+}
+.stax .sheet-panel[data-open="true"] {
+  animation: sheetUp 0.42s var(--ease-drawer) backwards;
 }
 @keyframes breathe {
   0%,
@@ -746,15 +754,6 @@
     stroke-dashoffset: 0;
   }
 }
-@keyframes floatY {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-5px);
-  }
-}
 @keyframes toastIn {
   from {
     opacity: 0;
@@ -763,16 +762,6 @@
   to {
     opacity: 1;
     transform: none;
-  }
-}
-@keyframes confettiBurst {
-  0% {
-    transform: translate(0, 0) rotate(0);
-    opacity: 1;
-  }
-  100% {
-    transform: translate(var(--tx), var(--ty)) rotate(var(--r));
-    opacity: 0;
   }
 }
 
@@ -844,11 +833,14 @@
     transform: none;
   }
 }
+/* tab roots: crossfade + an 8px rise */
 @keyframes navFade {
   from {
-    transform: scale(0.985);
+    opacity: 0;
+    transform: translateY(8px);
   }
   to {
+    opacity: 1;
     transform: none;
   }
 }
@@ -859,13 +851,15 @@
   animation: navPop 0.32s var(--ease-out) both;
 }
 .stax .nav-fade {
-  animation: navFade 0.3s var(--ease-out) both;
+  animation: navFade 0.26s var(--ease-out) both;
 }
 @media (prefers-reduced-motion: reduce) {
   .stax .nav-push,
-  .stax .nav-pop,
-  .stax .nav-fade {
+  .stax .nav-pop {
     animation: none;
+  }
+  .stax .nav-fade {
+    animation: fade 0.2s var(--ease-out) both;
   }
 }
 

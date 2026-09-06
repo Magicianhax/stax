@@ -11,6 +11,7 @@ import { usd, shortAddress } from "@/lib/format";
 import { ONRAMP_PRESETS } from "@/lib/onramp";
 import { Spinner } from "../screens/primitives";
 import { SheetHeader } from "./SheetHeader";
+import { SheetStep } from "@/components/motion";
 import s from "./receive.module.css";
 
 function parseAmount(v: string): number {
@@ -67,7 +68,7 @@ export function FromWallet({
   return (
     <>
       <SheetHeader title="From another wallet" onBack={onBack} onClose={onClose} />
-      <div className={s.step} style={{ display: "flex", flexDirection: "column", gap: 14, padding: "2px 0 6px" }}>
+      <SheetStep step="wallet" style={{ display: "flex", flexDirection: "column", gap: 14, padding: "2px 0 6px" }}>
         {!t.walletAddress ? (
           <>
             <p style={{ margin: "0 2px", fontSize: 14.5, color: "var(--ink-2)", lineHeight: 1.55 }}>
@@ -169,7 +170,7 @@ export function FromWallet({
             </p>
           </>
         )}
-      </div>
+      </SheetStep>
     </>
   );
 }
