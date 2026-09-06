@@ -241,6 +241,13 @@ a.row:focus-visible::before {
 
 /* ── narrow: the line runs down the left, steps become rows ─────────────── */
 @media (max-width: 899px) {
+  /* The vertical timeline shrinks to its content and sits centred as a block;
+     the down line is positioned inside .diagram, so it moves with the discs. */
+  .diagram {
+    width: fit-content;
+    max-width: 100%;
+    margin-inline: auto;
+  }
   .diagram .steps {
     grid-auto-rows: 1fr;
     row-gap: 0;
