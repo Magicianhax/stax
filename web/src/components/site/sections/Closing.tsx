@@ -1,9 +1,10 @@
 "use client";
 
-// Close — one line in Fraunces on an ink band with "Open Stax", then the
-// one-line "Built on" marks, then a footer on the grid: brand 4 columns,
-// links 5, legal 3, all on one baseline. The band inverts the page (ink
-// ground, paper type) so the last thing on the page is also the most decisive.
+// Close: one line in Fraunces on an ink band with "Open Stax" beside it, then
+// the "Built on" row, then the footer on the grid: brand 3 columns, links 6
+// (one row, never wraps), legal 3 right-aligned. Under 900px everything
+// stacks left-aligned. The band inverts the page (ink ground, paper type) so
+// the last thing on the page is also the most decisive.
 import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
 import { Reveal } from "../ui/Reveal";
@@ -54,7 +55,7 @@ export function Closing() {
                 {LINKS.map((li) => (
                   <li key={li.href}>
                     {li.external ? (
-                      <a href={li.href} target="_blank" rel="noreferrer" className={s.link}>
+                      <a href={li.href} target="_blank" rel="noopener noreferrer" className={s.link}>
                         {li.label}
                         <ArrowUpRight size={14} strokeWidth={2.4} aria-hidden="true" />
                       </a>
@@ -72,9 +73,7 @@ export function Closing() {
               </ul>
             </nav>
             <div className={s.legal}>
-              <p className={s.elig}>
-                Stocks are issued by Coinbase on Base and Backed on Mantle for eligible non-US users.
-              </p>
+              <p className={s.elig}>Stocks are issued by Coinbase on Base and Backed on Mantle for eligible non-US users.</p>
               <p className={s.copy}>© 2026 Stax</p>
             </div>
           </div>

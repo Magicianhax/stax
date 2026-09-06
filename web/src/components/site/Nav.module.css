@@ -1,19 +1,51 @@
-.nav {
+/* `:global(.site) >` outranks globals.css's `.site > nav { position: relative;
+   z-index: 1 }`, which would otherwise un-stick the bar and paint sections
+   over the open sheet. */
+:global(.site) > .nav {
   position: sticky;
   top: 0;
   z-index: 100;
-  background: var(--s-glass-strong);
-  backdrop-filter: var(--s-glass-blur);
-  -webkit-backdrop-filter: var(--s-glass-blur);
 }
 
-/* The hairline lives on the bar (inside the container padding), so it shares
-   the container edges with every section divider on the page. */
+/* The glass lives on the pseudo-elements, not on .nav itself: an element with
+   backdrop-filter becomes the backdrop root for its children, which would
+   leave the mobile sheet unable to blur the page behind it. ::before is the
+   base glass; ::after is the stronger glass that fades in once the page has
+   scrolled (opacity only, no background transition). */
+.nav::before,
+.nav::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.nav::before {
+  background: var(--s-glass);
+  backdrop-filter: var(--s-glass-blur);
+}
+
+.nav::after {
+  background: var(--s-glass-strong);
+  opacity: 0;
+  transition: opacity 220ms var(--s-ease);
+}
+
+.nav[data-scrolled]::after {
+  opacity: 1;
+}
+
+/* Three columns on the container: brand / links / actions. The hairline sits
+   on the bar (inside the container padding), so it shares the container
+   edges with every section divider. */
 .bar {
-  display: flex;
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 24px;
-  height: 64px;
+  height: 72px;
   border-bottom: 1px solid var(--s-line);
 }
 
@@ -22,9 +54,7 @@
   align-items: center;
   gap: 10px;
   min-height: 44px;
-  font-weight: 800;
-  font-size: 19px;
-  letter-spacing: -0.03em;
+  justify-self: start;
   color: var(--s-ink);
 }
 
@@ -35,15 +65,23 @@
   display: block;
 }
 
+.wordmark {
+  font-family: var(--s-display);
+  font-optical-sizing: auto;
+  font-weight: 500;
+  font-size: 20px;
+  letter-spacing: -0.01em;
+  line-height: 1;
+}
+
 .links {
   display: flex;
   align-items: center;
   gap: 4px;
-  margin-left: 8px;
-  flex: 1;
 }
 
 .link {
+  position: relative;
   display: inline-flex;
   align-items: center;
   min-height: 44px;
@@ -52,28 +90,148 @@
   color: var(--s-ink-2);
   font-size: 15px;
   font-weight: 600;
-  transition: color 180ms var(--s-ease), background 180ms var(--s-ease);
+  transition: color 180ms var(--s-ease);
+}
+
+/* Active-section underline: 2px sage, scales in from the centre. */
+.link::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 6px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--s-primary);
+  transform: scaleX(0);
+  transform-origin: center;
+  transition: transform 260ms var(--s-ease-expo);
+}
+
+.link[data-active] {
+  color: var(--s-ink);
+}
+
+.link[data-active]::after {
+  transform: scaleX(1);
 }
 
 @media (hover: hover) {
   .link:hover {
     color: var(--s-ink);
-    background: var(--s-glass);
+  }
+}
+
+.right {
+  display: flex;
+  align-items: center;
+  justify-self: end;
+  gap: 8px;
+}
+
+.demo {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 12px;
+  color: var(--s-ink-2);
+  font-size: 15px;
+  font-weight: 600;
+  transition: color 180ms var(--s-ease);
+}
+
+@media (hover: hover) {
+  .demo:hover {
+    color: var(--s-ink);
   }
 }
 
 .nav .cta {
-  margin-left: auto;
   height: 44px;
   padding: 0 20px;
   font-size: 14.5px;
 }
 
+.menu {
+  display: none;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 12px;
+  background: none;
+  color: var(--s-ink);
+  cursor: pointer;
+  place-items: center;
+}
+
+/* The sheet: full-width glass under the bar, one column of 52px rows. */
+.sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  background: color-mix(in srgb, var(--s-paper) 94%, transparent);
+  backdrop-filter: var(--s-glass-blur);
+  box-shadow: var(--s-shadow);
+}
+
+.sheetList {
+  list-style: none;
+  margin: 0;
+  padding: 8px 0 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.sheetLink {
+  display: flex;
+  align-items: center;
+  min-height: 52px;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--s-line);
+  color: var(--s-ink);
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.sheetLink[data-active] {
+  color: var(--s-primary-d);
+}
+
+:global(.site[data-mode="dark"]) .sheetLink[data-active] {
+  color: var(--s-primary);
+}
+
+.sheetList li:last-child .sheetLink {
+  border-bottom: 0;
+}
+
 @media (max-width: 719px) {
   .bar {
+    grid-template-columns: 1fr auto;
     gap: 12px;
+    height: 64px;
   }
-  .links {
+  .nav[data-scrolled] .bar {
+    height: 56px;
+  }
+  .links,
+  .demo {
     display: none;
+  }
+  .menu {
+    display: grid;
+  }
+  .nav .cta {
+    padding: 0 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav::after,
+  .bar,
+  .link::after {
+    transition: none;
   }
 }

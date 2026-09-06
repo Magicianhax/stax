@@ -5,9 +5,12 @@
   padding: 128px 0;
   scroll-margin-top: 72px;
 }
+
+/* Line left (8 columns), button right (4), centred on the line. */
 .band .bandGrid {
-  align-items: end;
+  align-items: center;
 }
+
 .line {
   grid-column: 1 / -1;
   margin: 0;
@@ -19,23 +22,26 @@
   letter-spacing: -0.035em;
   text-wrap: balance;
 }
+
 .cta {
   grid-column: 1 / -1;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
 }
 
-/* ── footer: brand 4 / links 5 / legal 3, one baseline ─────────────────── */
+/* ── footer: brand 3 / links 6 / legal 3 ─────────────────────────────────── */
 .footer {
-  padding: 24px 0 40px;
+  padding: 8px 0 40px;
   background: var(--s-paper);
 }
+
 .footer .footGrid {
-  padding-top: 20px;
+  padding-top: 24px;
   border-top: 1px solid var(--s-line);
-  align-items: baseline;
-  row-gap: 16px;
+  align-items: start;
+  row-gap: 20px;
 }
+
 .footer .brand {
   grid-column: 1 / -1;
   display: inline-flex;
@@ -51,39 +57,47 @@
   border-radius: 8px;
   justify-self: start;
 }
+
 .mark {
   width: 26px;
   height: 26px;
   border-radius: 7px;
   display: block;
 }
+
 .nav {
   grid-column: 1 / -1;
+  min-width: 0;
 }
+
+/* One row of links; on desktop it never wraps. */
 .links {
   list-style: none;
-  margin: 0 0 0 -10px;
+  margin: 0;
   padding: 0;
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 0 4px;
+  gap: 0 16px;
 }
+
 .footer .link {
   display: inline-flex;
   align-items: center;
   gap: 3px;
   min-height: 44px;
-  padding: 0 10px;
   font-size: 14.5px;
   font-weight: 500;
+  white-space: nowrap;
   color: var(--s-ink-2);
   border-radius: 8px;
-  transition: color 0.2s var(--s-ease);
+  transition: color 180ms var(--s-ease);
 }
+
 .link svg {
-  transition: transform 0.2s var(--s-ease-soft);
+  transition: transform 180ms var(--s-ease-soft);
 }
+
 @media (hover: hover) {
   .footer .link:hover {
     color: var(--s-ink);
@@ -92,19 +106,21 @@
     transform: translate(2px, -2px);
   }
 }
+
 .link:focus-visible,
 .brand:focus-visible {
   outline: 2px solid var(--s-primary);
   outline-offset: 4px;
 }
+
 .legal {
   grid-column: 1 / -1;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  min-height: 44px;
-  justify-content: center;
+  padding-top: 12px;
 }
+
 .elig {
   margin: 0;
   font-size: 13px;
@@ -112,6 +128,7 @@
   color: var(--s-ink-3);
   text-wrap: pretty;
 }
+
 .copy {
   margin: 0;
   font-size: 13px;
@@ -128,17 +145,26 @@
     justify-content: flex-end;
   }
   .footer .brand {
-    grid-column: span 4;
+    grid-column: span 3;
   }
   .nav {
-    grid-column: span 5;
+    grid-column: span 6;
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  .links {
+    flex-wrap: nowrap;
+    gap: 0 28px;
   }
   .legal {
     grid-column: span 3;
     justify-self: end;
+    align-items: flex-end;
     text-align: right;
   }
 }
+
 @media (max-width: 899px) {
   .band {
     padding: 88px 0;
@@ -147,18 +173,13 @@
     margin-top: 28px;
   }
   .footer {
-    padding: 20px 0 32px;
-  }
-  .footer .footGrid {
-    row-gap: 16px;
+    padding: 4px 0 32px;
   }
   .legal {
-    min-height: 0;
-  }
-  .links {
-    margin-left: -10px;
+    padding-top: 0;
   }
 }
+
 @media (prefers-reduced-motion: reduce) {
   .link,
   .link svg {

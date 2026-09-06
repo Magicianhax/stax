@@ -397,7 +397,6 @@
 .stax .btn-glass {
   background: var(--glass);
   backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   color: var(--ink);
   box-shadow: inset 0 0 0 1px var(--glass-stroke), var(--glass-hi), 0 10px 26px -12px rgba(0, 0, 0, 0.3);
 }
@@ -410,7 +409,6 @@
 .stax .glass {
   background: var(--glass);
   backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   box-shadow: inset 0 0 0 1px var(--glass-stroke), var(--glass-hi);
 }
 
@@ -1072,7 +1070,7 @@ body {
   text-rendering: optimizeLegibility;
   line-height: 1.5;
   min-height: 100dvh;
-  overflow-x: hidden;
+  overflow-x: clip; /* clip, not hidden: hidden makes .site a scroll container and un-sticks the nav */
 }
 .site[data-mode="dark"] {
   --s-paper: #11150f;
@@ -1115,7 +1113,6 @@ body {
 .site .glass {
   background: var(--s-glass);
   backdrop-filter: var(--s-glass-blur);
-  -webkit-backdrop-filter: var(--s-glass-blur);
   border: 1px solid var(--s-glass-line);
   box-shadow: var(--s-glass-hi), var(--s-glass-shadow);
   border-radius: var(--s-r-lg);
@@ -1159,7 +1156,7 @@ body {
 }
 .site .btn-primary { background: var(--s-hero-grad); color: #fff; box-shadow: var(--s-glass-hi), 0 8px 22px color-mix(in srgb, var(--s-primary) 40%, transparent); }
 .site .btn-primary:hover { transform: translateY(-2px); box-shadow: var(--s-glass-hi), 0 14px 30px color-mix(in srgb, var(--s-primary) 50%, transparent); filter: brightness(1.04); }
-.site .btn-glass { background: var(--s-glass-strong); backdrop-filter: var(--s-glass-blur); -webkit-backdrop-filter: var(--s-glass-blur); color: var(--s-ink); border: 1px solid var(--s-glass-line); box-shadow: var(--s-glass-hi); }
+.site .btn-glass { background: var(--s-glass-strong); backdrop-filter: var(--s-glass-blur); color: var(--s-ink); border: 1px solid var(--s-glass-line); box-shadow: var(--s-glass-hi); }
 .site .btn-glass:hover { transform: translateY(-2px); box-shadow: var(--s-glass-hi), var(--s-shadow); }
 .site .btn-sm { height: 44px; padding: 0 20px; font-size: 14.5px; }
 .site .btn:active { transform: scale(0.97); }
@@ -1317,7 +1314,6 @@ body {
   padding: 20px;
   background: rgba(8, 11, 8, 0.84);
   backdrop-filter: blur(18px) saturate(120%);
-  -webkit-backdrop-filter: blur(18px) saturate(120%);
   animation: filmIn 0.32s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .film-lb-frame {
@@ -1373,7 +1369,6 @@ body {
   border-radius: 16px;
   background: var(--s-glass);
   backdrop-filter: var(--s-glass-blur);
-  -webkit-backdrop-filter: var(--s-glass-blur);
   border: 1px solid var(--s-glass-line);
   box-shadow: var(--s-glass-hi);
   white-space: nowrap;

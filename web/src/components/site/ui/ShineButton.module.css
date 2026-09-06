@@ -42,7 +42,6 @@
 .glass {
   background: var(--s-glass-strong);
   backdrop-filter: var(--s-glass-blur);
-  -webkit-backdrop-filter: var(--s-glass-blur);
   color: var(--s-ink);
   border: 1px solid var(--s-glass-line);
   box-shadow: var(--s-glass-hi);

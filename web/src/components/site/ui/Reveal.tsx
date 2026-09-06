@@ -91,7 +91,14 @@ export function Reveal({
     };
   }, [stagger]);
 
-  const Tag = as;
+  // Narrowed to the props used here: with @react-three/fiber's JSX
+  // augmentation in the program, a bare ElementType no longer resolves them.
+  const Tag = as as unknown as React.ComponentType<{
+    ref: React.Ref<HTMLElement>;
+    className?: string;
+    children?: ReactNode;
+    "data-reveal": string;
+  }>;
   return (
     <Tag ref={ref} className={className} data-reveal="">
       {children}

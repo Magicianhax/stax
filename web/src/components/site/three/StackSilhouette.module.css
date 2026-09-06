@@ -1,0 +1,47 @@
+/* Five glass slabs lying flat, seen from the front and above, roughly the
+   pose the 3D stack takes so the swap is quiet. Sizes are percentages of the
+   box so the silhouette scales with the 1:1 / 4:3 stage. */
+.root {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.stage {
+  position: relative;
+  width: 62%;
+  aspect-ratio: 1.6 / 1;
+  transform-style: preserve-3d;
+  perspective: 900px;
+}
+
+.slab {
+  position: absolute;
+  inset: 0;
+  border-radius: 8%/13%;
+  background: var(--s-glass);
+  border: 1px solid var(--s-glass-line);
+  box-shadow: var(--s-glass-hi);
+  transform: perspective(900px) rotateX(58deg) rotateZ(calc(-4deg + var(--i) * 2deg))
+    translateZ(calc(var(--i) * 26px)) translateY(calc(var(--i) * -2px));
+  opacity: calc(0.55 + var(--i) * 0.1);
+}
+
+.shadow {
+  position: absolute;
+  left: 50%;
+  top: 68%;
+  width: 52%;
+  height: 12%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--s-ink) 22%, transparent);
+  filter: blur(22px);
+}
+
+:global(.site[data-mode="dark"]) .shadow {
+  background: rgba(0, 0, 0, 0.5);
+}

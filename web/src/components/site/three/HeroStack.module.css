@@ -1,0 +1,27 @@
+/* The stage: fills the reserved aspect box in Hero.module.css. The
+   silhouette sits under the canvas and fades once the first frame lands. */
+.root {
+  position: absolute;
+  inset: 0;
+}
+
+.canvas {
+  position: absolute !important;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.ghost {
+  transition: opacity 600ms var(--s-ease-expo);
+}
+
+.root[data-ready] .ghost {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ghost {
+    transition: none;
+  }
+}

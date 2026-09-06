@@ -1,12 +1,16 @@
 "use client";
 
 // First viewport. Left, 7 columns: kicker with the two award rosettes, the
-// H1, one sentence, two buttons and the film link. Right, 5 columns: the proof
-// wall. The ground is the DotField (sparse breathing lattice + pointer glow),
-// masked at the edges, on this section only. One staggered entrance; nothing
-// else on the section moves afterwards except the wall's border beam.
+// H1, one sentence, two buttons, the film link and the proof strip. Right,
+// 5 columns: the stack, a 3D object of seven glass share tiles (three, loaded
+// lazily, never server-rendered; a CSS silhouette holds its box until then).
+// The ground is the DotField (sparse breathing lattice + pointer glow), masked
+// at the edges, on this section only. One staggered entrance on the copy; the
+// stack drops in on its own and then only floats.
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import { ArrowRight, Play } from "lucide-react";
+import { StackSilhouette } from "@/components/site/three/StackSilhouette";
 import { FilmLightbox } from "@/components/site/FilmLightbox";
 import { DotField } from "@/components/site/ui/DotField";
 import { Reveal } from "@/components/site/ui/Reveal";
@@ -15,6 +19,11 @@ import L from "@/components/site/layout.module.css";
 import { ProofWall } from "./ProofWall";
 import { AwardMark, AWARD_EVENT } from "./Awards";
 import s from "./Hero.module.css";
+
+const HeroStack = dynamic(() => import("@/components/site/three/HeroStack"), {
+  ssr: false,
+  loading: () => <StackSilhouette />,
+});
 
 export function Hero() {
   const [filmOpen, setFilmOpen] = useState(false);
@@ -64,11 +73,15 @@ export function Hero() {
               Watch the film
             </button>
           </div>
+
+          <div className={s.proof}>
+            <ProofWall />
+          </div>
         </Reveal>
 
-        <Reveal className={s.wall}>
-          <ProofWall />
-        </Reveal>
+        <div className={s.stage} aria-hidden="true">
+          <HeroStack />
+        </div>
       </div>
 
       {filmOpen && <FilmLightbox onClose={() => setFilmOpen(false)} />}

@@ -60,7 +60,6 @@
   border-radius: var(--s-r-lg);
   background: var(--s-glass);
   backdrop-filter: var(--s-glass-blur);
-  -webkit-backdrop-filter: var(--s-glass-blur);
   border: 1px solid var(--s-glass-line);
   box-shadow: var(--s-glass-hi), var(--s-shadow);
   color: var(--s-ink);
