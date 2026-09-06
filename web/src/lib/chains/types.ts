@@ -72,6 +72,8 @@ export interface StaxChain {
   /** viem Chain (with multicall3) for clients + permissionless. */
   chain: Chain;
   rpcUrl: string;
+  /** Ordered fallbacks tried when `rpcUrl` errors or rate-limits (viem `fallback` transport). */
+  rpcFallbacks: string[];
   explorer: { name: string; url: string };
   /** Etherscan V2 `chainid` param for account/tokentx history. */
   etherscanChainId: number;

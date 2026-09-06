@@ -10,7 +10,11 @@ import { base as baseViem } from "viem/chains";
 import { defineChain } from "viem";
 import type { Asset, StaxChain } from "./types";
 
+// Primary RPC: set NEXT_PUBLIC_BASE_RPC_URL to a keyed endpoint. Coinbase's CDP Node
+// (https://api.developer.coinbase.com/rpc/v1/base/<key>) is free and generous for Base.
+// The public endpoints below are rotated in on errors / rate limits (viem `fallback`).
 const RPC_URL = process.env.NEXT_PUBLIC_BASE_RPC_URL || "https://mainnet.base.org";
+const RPC_FALLBACKS = ["https://base-rpc.publicnode.com", "https://base.drpc.org", "https://mainnet.base.org"].filter((u) => u !== RPC_URL);
 export const MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11" as const;
 
 export const baseChain = defineChain({
@@ -81,6 +85,7 @@ export const BASE: StaxChain = {
   name: "Base",
   chain: baseChain,
   rpcUrl: RPC_URL,
+  rpcFallbacks: RPC_FALLBACKS,
   explorer: { name: "Basescan", url: "https://basescan.org" },
   etherscanChainId: 8453,
   nativeSymbol: "ETH",

@@ -1,9 +1,9 @@
 // Multi-chain wagmi + viem wiring. Base (8453) is default; Mantle (5000) is the legacy mode.
 // Privy owns the embedded wallet + signing; wagmi here is read-only chain context.
 // For chain-aware reads use `getPublicClient(chain)`.
-import { createConfig, http } from "wagmi";
+import { createConfig } from "wagmi";
 import { createPublicClient, type PublicClient } from "viem";
-import { BASE, MANTLE, CHAINS, type ChainKey, type StaxChain } from "./chains";
+import { BASE, MANTLE, CHAINS, chainTransport, type ChainKey, type StaxChain } from "./chains";
 
 export const base = BASE.chain;
 export const mantle = MANTLE.chain;
@@ -11,8 +11,8 @@ export const mantle = MANTLE.chain;
 export const wagmiConfig = createConfig({
   chains: [base, mantle],
   transports: {
-    [base.id]: http(BASE.rpcUrl),
-    [mantle.id]: http(MANTLE.rpcUrl),
+    [base.id]: chainTransport(BASE),
+    [mantle.id]: chainTransport(MANTLE),
   },
   ssr: true,
 });
@@ -31,7 +31,7 @@ export function getPublicClient(chain: StaxChain | ChainKey): PublicClient {
     client = createPublicClient({
       chain: c.chain,
       batch: { multicall: { wait: 16 } },
-      transport: http(c.rpcUrl),
+      transport: chainTransport(c),
     }) as PublicClient;
     clients.set(c.key, client);
   }

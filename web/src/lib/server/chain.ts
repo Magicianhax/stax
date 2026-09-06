@@ -3,8 +3,8 @@
 // Unknown/missing → Base (the default).
 import "server-only";
 import type { NextRequest } from "next/server";
-import { createPublicClient, http, type PublicClient } from "viem";
-import { CHAIN_HEADER, getChain, isChainKey, type ChainKey, type StaxChain } from "@/lib/chains";
+import { createPublicClient, type PublicClient } from "viem";
+import { CHAIN_HEADER, chainTransport, getChain, isChainKey, type ChainKey, type StaxChain } from "@/lib/chains";
 
 export { CHAIN_HEADER };
 
@@ -29,7 +29,7 @@ export function serverClient(chain: StaxChain): PublicClient {
   if (!c) {
     c = createPublicClient({
       chain: chain.chain,
-      transport: http(chain.rpcUrl),
+      transport: chainTransport(chain),
       batch: { multicall: { wait: 16 } },
     }) as PublicClient;
     clients.set(chain.key, c);

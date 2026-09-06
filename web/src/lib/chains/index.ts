@@ -4,6 +4,7 @@
 //   client components:  const chain = useChain();            (@/lib/chains/active)
 //   server routes:      const chain = chainFromRequest(req);  (@/lib/server/chain)
 export * from "./types";
+import { fallback, http, type Transport } from "viem";
 import { BASE } from "./base";
 import { MANTLE } from "./mantle";
 import type { Asset, ChainKey, RouteHop, StaxChain } from "./types";
@@ -57,6 +58,19 @@ export function reverseRoute(hops: RouteHop[]): RouteHop[] {
     tokenInDecimals: h.tokenOutDecimals,
     tokenOutDecimals: h.tokenInDecimals,
   }));
+}
+
+/**
+ * HTTP transport for a chain: the configured primary first, then the public fallbacks.
+ * `rank: false` keeps the order deterministic (primary stays primary); viem retries the
+ * next endpoint on HTTP/RPC errors such as "over rate limit".
+ */
+export function chainTransport(chain: StaxChain): Transport {
+  const urls = [chain.rpcUrl, ...chain.rpcFallbacks];
+  return fallback(
+    urls.map((u) => http(u, { timeout: 12_000, retryCount: 1 })),
+    { rank: false, retryCount: 0 },
+  );
 }
 
 export { BASE, MANTLE };

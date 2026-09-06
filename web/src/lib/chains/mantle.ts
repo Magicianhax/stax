@@ -4,6 +4,7 @@ import { defineChain } from "viem";
 import type { Asset, AssetRoute, StaxChain } from "./types";
 
 const RPC_URL = process.env.NEXT_PUBLIC_MANTLE_RPC_URL || "https://rpc.mantle.xyz";
+const RPC_FALLBACKS = ["https://mantle-rpc.publicnode.com", "https://mantle.drpc.org", "https://rpc.mantle.xyz"].filter((u) => u !== RPC_URL);
 export const MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11" as const;
 
 export const mantleChain = defineChain({
@@ -89,6 +90,7 @@ export const MANTLE: StaxChain = {
   name: "Mantle",
   chain: mantleChain,
   rpcUrl: RPC_URL,
+  rpcFallbacks: RPC_FALLBACKS,
   explorer: { name: "Mantlescan", url: "https://mantlescan.xyz" },
   etherscanChainId: 5000,
   nativeSymbol: "MNT",
