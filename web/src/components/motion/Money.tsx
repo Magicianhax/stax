@@ -16,13 +16,10 @@
 //   size      font-size px; className / style pass through (span)
 // On change the text flashes --pos / --neg for 0.9 s (data-dir="up|down").
 // Reduced motion → snaps to the value, still flashes colour.
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import gsap from "gsap";
-import { useGSAP } from "@gsap/react";
 import { reducedMotion } from "./reduced";
 import s from "./motion.module.css";
-
-gsap.registerPlugin(useGSAP);
 
 export interface MoneyProps {
   value: number;
@@ -78,28 +75,38 @@ export function Money({
   const shown = useRef<number | undefined>(undefined);
   const dir = useMoneyDelta(value);
 
-  useGSAP(
-    () => {
-      const el = ref.current;
-      if (!el) return;
-      const from = shown.current === undefined ? prev : shown.current;
-      shown.current = value;
-      if (from === undefined || from === value || reducedMotion()) return;
-      const proxy = { v: from };
-      gsap.to(proxy, {
-        v: value,
-        duration: 0.6,
-        ease: "power2.out",
-        onUpdate: () => {
-          el.textContent = formatMoney(proxy.v, currency, dp, compact);
-        },
-        onComplete: () => {
-          el.textContent = formatMoney(value, currency, dp, compact);
-        },
-      });
-    },
-    { dependencies: [value], scope: ref },
-  );
+  // Plain layout effect, not useGSAP: StrictMode runs effects twice and
+  // useGSAP's cleanup reverts the tween to progress 0, which would leave the
+  // DOM stuck on the start value. Here cleanup only kills the tween and records
+  // what is on screen, so a re-run (or a change mid-count) continues from there.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const from = shown.current === undefined ? prev : shown.current;
+    shown.current = value;
+    if (from === undefined || from === value || reducedMotion()) {
+      el.textContent = formatMoney(value, currency, dp, compact);
+      return;
+    }
+    const proxy = { v: from };
+    const tween = gsap.to(proxy, {
+      v: value,
+      duration: 0.6,
+      ease: "power2.out",
+      onUpdate: () => {
+        el.textContent = formatMoney(proxy.v, currency, dp, compact);
+      },
+      onComplete: () => {
+        el.textContent = formatMoney(value, currency, dp, compact);
+      },
+    });
+    return () => {
+      tween.kill();
+      shown.current = tween.progress() >= 1 ? value : proxy.v;
+    };
+    // `prev` only seeds the first count; formatting props don't restart it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
 
   return (
     <span
