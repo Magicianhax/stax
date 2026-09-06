@@ -89,13 +89,8 @@
 }
 
 @media (min-width: 900px) {
-  .sec .head {
-    grid-column: span 5;
-    position: sticky;
-    top: 112px;
-  }
   .list {
-    grid-column: span 7;
+    grid-column: 3 / span 8;
   }
 }
 @media (max-width: 899px) {

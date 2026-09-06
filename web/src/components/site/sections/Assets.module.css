@@ -37,7 +37,8 @@
 }
 .mantle {
   grid-column: 1 / -1;
-  margin: 32px 0 0;
+  margin: 32px auto 0;
+  text-align: center;
   font-size: 14.5px;
   line-height: 1.5;
   color: var(--s-ink-3);
@@ -45,7 +46,7 @@
 
 @media (min-width: 900px) {
   .mantle {
-    grid-column: span 8;
+    grid-column: 3 / span 8;
   }
 }
 @media (max-width: 899px) {
