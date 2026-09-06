@@ -9,6 +9,10 @@
 // Add money is env-gated (NEXT_PUBLIC_CDP_PROJECT_ID): unset → the button opens
 // the Receive sheet, so the screen never shows a dead primary. On a chain Coinbase
 // can't deliver to (Mantle) the sheet says so and points at Receive.
+//
+// Receive on Base is the three-way chooser (components/lite/receive, docs/RECEIVE.md):
+// from another wallet, add cash, or from any network. Mantle keeps the plain
+// address + QR sheet.
 import { useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { usePrivy } from "@privy-io/react-auth";
@@ -24,6 +28,7 @@ import { haptic } from "@/lib/haptics";
 import { ONRAMP_PRESETS, offrampUrl, onrampEnabled, onrampSupported, onrampUrl } from "@/lib/onramp";
 import type { WalletTx } from "@/lib/walletTx";
 import { iconBtn, Spinner, Pager } from "./primitives";
+import { ReceiveSheet } from "@/components/lite/receive";
 
 const DOTS = "••••••";
 
@@ -408,7 +413,16 @@ export function WalletScreen({
         )}
       </BottomSheet>
 
-      {/* receive sheet */}
+      {/* receive sheet — Base gets the chooser; Mantle keeps the plain address + QR */}
+      {chain.key === "base" ? (
+        <ReceiveSheet
+          open={receiveOpen}
+          onClose={() => setReceiveOpen(false)}
+          recipient={address}
+          addCashEnabled={rampHere}
+          onAddCash={() => { setReceiveOpen(false); setAddOpen(true); }}
+        />
+      ) : (
       <BottomSheet open={receiveOpen} onClose={() => setReceiveOpen(false)} title="Receive">
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16, padding: "4px 4px 8px" }}>
           <p style={{ margin: 0, fontSize: 14, color: "var(--ink-2)", textAlign: "center", lineHeight: 1.5 }}>
@@ -432,6 +446,7 @@ export function WalletScreen({
           </div>
         </div>
       </BottomSheet>
+      )}
 
       {/* transaction detail sheet */}
       <BottomSheet open={!!tx} onClose={() => setTx(null)} title={tx ? (tx.direction === "in" ? "Received" : "Sent") : undefined}>

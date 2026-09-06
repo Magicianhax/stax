@@ -22,6 +22,13 @@
       "when": 1788712214718,
       "tag": "0002_harsh_christian_walker",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788719081045,
+      "tag": "0003_skinny_screwball",
+      "breakpoints": true
     }
   ]
 }

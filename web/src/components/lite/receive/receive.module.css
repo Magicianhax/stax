@@ -1,0 +1,178 @@
+/* Receive flow — the bits inline styles can't do: hover gated to real pointers,
+   keyboard focus rings, the step change, and the reduced-motion branch. Every
+   colour is a design token so light and dark stay in step. */
+
+.step {
+  animation: receiveStepIn 0.26s var(--ease-out) both;
+}
+@keyframes receiveStepIn {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.stepBack {
+  animation-name: receiveStepBack;
+}
+@keyframes receiveStepBack {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Chooser rows + token rows + network tiles share one press surface. */
+.option {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  width: 100%;
+  min-height: 64px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: var(--glass-2);
+  box-shadow: inset 0 0 0 1px var(--glass-stroke), var(--glass-hi);
+  color: var(--ink);
+  text-align: left;
+  transition:
+    background 0.18s var(--ease-out),
+    transform 0.16s var(--ease-out),
+    box-shadow 0.2s var(--ease-out);
+}
+.option:disabled {
+  cursor: default;
+}
+.option:disabled > * {
+  opacity: 0.55;
+}
+.option:not(:disabled):active {
+  transform: scale(0.985);
+}
+@media (hover: hover) {
+  .option:not(:disabled):hover {
+    background: var(--surface-2);
+  }
+}
+.option:focus-visible,
+.tile:focus-visible,
+.iconBtn:focus-visible,
+.disclosure:focus-visible {
+  outline: none;
+  box-shadow:
+    inset 0 0 0 1px var(--glass-stroke),
+    0 0 0 3px color-mix(in srgb, var(--primary) 45%, transparent);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 92px;
+  padding: 14px 6px 12px;
+  border-radius: 18px;
+  background: var(--glass-2);
+  box-shadow: inset 0 0 0 1px var(--glass-stroke), var(--glass-hi);
+  color: var(--ink);
+  transition:
+    background 0.18s var(--ease-out),
+    transform 0.16s var(--ease-out),
+    box-shadow 0.2s var(--ease-out);
+}
+.tile:active {
+  transform: scale(0.96);
+}
+@media (hover: hover) {
+  .tile:hover {
+    background: var(--surface-2);
+  }
+}
+.markDisc {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+/* Pending-deposit dot: a slow breathe, not a spinner. */
+.pendingDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: receiveBreathe 1.6s var(--ease-in-out) infinite;
+}
+@keyframes receiveBreathe {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* "What if I send something else?" — plain text disclosure. */
+.disclosure {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 4px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+  background: none;
+}
+.disclosure svg {
+  transition: transform 0.2s var(--ease-out);
+}
+.disclosure[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.iconBtn {
+  width: 44px;
+  height: 44px;
+  border-radius: 99px;
+  background: var(--surface-2);
+  display: grid;
+  place-items: center;
+  color: var(--ink-2);
+  flex: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .step,
+  .stepBack {
+    animation: none;
+  }
+  .pendingDot {
+    animation: none;
+    opacity: 1;
+  }
+  .disclosure svg {
+    transition: none;
+  }
+}

@@ -87,6 +87,26 @@ rows as `rank() over (order by referrals desc, created_at asc)`, with referrals 
 `(sort_key, -referrals, created_at, id)`. Emails come from Privy linked accounts (cached in
 `users.email`). `npm run db:smoke` covers a two-user join with a referral, positions, approve, access.
 
+## Receive (Relay deposit addresses)
+
+Contract in `docs/RECEIVE.md`; table `deposit_addresses` (migration `0003_skinny_screwball`), one
+OPEN Relay address per `(user_id, chain, origin_chain_id, origin_currency)`, `address` unique. The row
+also keeps `fee_usd` / `min_usd` from the quote that minted it, so a repeat request is a plain read.
+Client: `lib/server/relay.ts` (`GET /chains` cached 1 h in-process, `POST /quote/v2` with
+`useDepositAddress`, `GET /requests/v2?depositAddress=`; 10 s timeouts; `RelayRejected` for 4xx,
+`RelayUnavailable` for the rest → 502). Store: `lib/server/depositAddresses.ts`. Env: `RELAY_API_URL`
+(default `https://api.relay.link`) and optional `RELAY_API_KEY` (sent as `x-api-key`).
+
+Verified 2026-09-06 against the public API without a key: the address is `steps[0].depositAddress`,
+Relay's `user` must be an ORIGIN-chain address (we send `refundTo` as `user`), and each quote mints
+a fresh address (hence the DB row). Solana deposit addresses answer `UNAUTHORIZED … missing an api
+key`, so `curatedNetworks` drops Solana while `RELAY_API_KEY` is unset. `GET /requests/v2` is
+deprecated (throttled from 2026-09-01, retired 2026-11-24); its successor `/requests/v3` requires a
+key and renames `inTxs[].hash` → `txHash` (the parser already accepts both) — switch the path once
+a key is in place. USD amounts come from `data.metadata.currencyIn.amountUsd`.
+`npm run db:smoke` covers find-or-create idempotency, the own-address path, refund validation, and
+the ownership check with Relay mocked.
+
 ## Verification
 
 `npm run db:migrate` against Neon succeeds; a smoke script inserts + claims an autopilot, upserts

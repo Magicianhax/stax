@@ -3,7 +3,14 @@
 // `--conditions=react-server` makes the `server-only` guard a no-op so the app's own
 // store module can run outside Next. Everything it creates is deleted at the end.
 import { eq, inArray } from "drizzle-orm";
-import { autopilotRuns, autopilots, db, pool, users, waitlist } from "../src/lib/db";
+import { autopilotRuns, autopilots, db, depositAddresses, pool, users, waitlist } from "../src/lib/db";
+import {
+  findOwnedDepositAddress,
+  getOrCreateDepositAddress,
+  ReceiveInputError,
+  type ReceiveDeps,
+} from "../src/lib/server/depositAddresses";
+import { curatedNetworks, type DepositAddressParams, type RelayChain, type RelayClient } from "../src/lib/server/relay";
 import {
   claimDueAutopilots,
   deleteAutopilot,
@@ -111,6 +118,88 @@ async function waitlistRoundTrip() {
   expect(ok.changed === 1 && (await getAccess(USER_C)).status === "approved", "add approves an owned address");
 }
 
+/** Receive: find-or-create deposit addresses with Relay mocked, own-address path, ownership check. */
+async function receiveRoundTrip() {
+  const ARB_USDC = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
+  const BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+  const TRON_USDT = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
+  const TRON_REFUND = "TN3W4H6rK2ce4vX9YnFQHwKENnHjoxb3m9";
+  const usdc = (address: string) => ({ symbol: "USDC", name: "USD Coin", address, decimals: 6 });
+  const chains: RelayChain[] = [
+    {
+      id: 8453, name: "base", displayName: "Base", vmType: "evm", depositEnabled: true,
+      currency: { symbol: "ETH", name: "Ether", address: "0x0000000000000000000000000000000000000000", decimals: 18 },
+      solverCurrencies: [usdc(BASE_USDC.toLowerCase()), { symbol: "DEGEN", name: "Degen", address: "0x4ed4e862860bed51a9570b96d89af5e1b0efefed", decimals: 18 }],
+    },
+    { id: 42161, name: "arbitrum", displayName: "Arbitrum", vmType: "evm", depositEnabled: true, solverCurrencies: [usdc(ARB_USDC.toLowerCase())] },
+    { id: 728126428, name: "tron", displayName: "Tron", vmType: "tvm", depositEnabled: true, solverCurrencies: [{ symbol: "USDT", name: "Tether", address: TRON_USDT, decimals: 6 }] },
+    { id: 792703809, name: "solana", displayName: "Solana", vmType: "svm", depositEnabled: true, solverCurrencies: [usdc("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")] },
+    { id: 10, name: "optimism", displayName: "Optimism", vmType: "evm", depositEnabled: false, solverCurrencies: [usdc("0x0b2c639c533813f4aa9d7837caf62653d097ff85")] },
+  ];
+  const nets = curatedNetworks(chains, { hasApiKey: false });
+  expect(nets.map((n) => n.id).join(",") === "8453,42161,728126428", `curated order/filter (got ${nets.map((n) => n.id)})`);
+  expect(nets[0].tokens.length === 1 && nets[0].tokens[0].symbol === "USDC", "non-major tokens dropped");
+  expect(curatedNetworks(chains, { hasApiKey: true }).some((n) => n.vm === "svm"), "Solana served with a key");
+
+  const calls: DepositAddressParams[] = [];
+  const made = () => calls.length; // (a plain `made() === n` gets narrowed by the asserts)
+  const relayMock: RelayClient = {
+    getChains: async () => chains,
+    requestDepositAddress: async (p) => {
+      calls.push(p);
+      return { address: `0x${String(calls.length).padStart(40, "f")}`, requestId: `0xreq${calls.length}`, feeUsd: 0.04, etaSeconds: 2 };
+    },
+  };
+  const deps: ReceiveDeps = {
+    owned: mockOwned,
+    wallets: async (userId) => (userId === USER ? [{ address: OWNER.toLowerCase(), kind: "embedded" }] : []),
+    relay: relayMock,
+    hasApiKey: false,
+  };
+  const ask = (input: Parameters<typeof getOrCreateDepositAddress>[0]) => getOrCreateDepositAddress(input, deps);
+  const rejects = async (input: Parameters<typeof getOrCreateDepositAddress>[0], label: string, re?: RegExp) => {
+    try {
+      await ask(input);
+    } catch (e) {
+      expect(e instanceof ReceiveInputError && (!re || re.test(e.message)), `${label}: wrong error ${String(e)}`);
+      return;
+    }
+    expect(false, `${label}: must be rejected`);
+  };
+
+  // Base + USDC → the account itself, no Relay call, nothing stored.
+  const own = await ask({ userId: USER, chain: "base", originChainId: 8453, originCurrency: BASE_USDC });
+  expect(own.ownAddress && own.address === ADDR_A.toLowerCase() && made() === 0, "Base USDC = own address");
+
+  // Arbitrum USDC → Relay once; the repeat is served from the row (checksum vs lowercase both hit).
+  const first = await ask({ userId: USER, chain: "base", originChainId: 42161, originCurrency: ARB_USDC });
+  expect(made() === 1 && calls[0].recipient === ADDR_A.toLowerCase() && calls[0].refundTo === OWNER.toLowerCase(), "Relay called with the OWNED recipient + embedded EOA refund");
+  expect(calls[0].amount === "50000000" && calls[0].destinationCurrency === BASE_USDC, "representative $50 in USDC units → Base USDC");
+  expect(!first.ownAddress && first.reusable && first.minUsd === 5 && first.feeUsd === 0.04 && first.vm === "evm", `first response (${JSON.stringify(first)})`);
+  const again = await ask({ userId: USER, chain: "base", originChainId: 42161, originCurrency: ARB_USDC.toLowerCase() });
+  expect(made() === 1 && again.address === first.address, "repeat is idempotent, no Relay call");
+  const rows = await db.select().from(depositAddresses).where(eq(depositAddresses.userId, USER));
+  expect(rows.length === 1 && rows[0].originCurrency === ARB_USDC.toLowerCase() && rows[0].requestId === "0xreq1", "one row, currency lowercased");
+
+  // Non-EVM: refund address required + shape-checked; a good one is forwarded and stored.
+  await rejects({ userId: USER, chain: "base", originChainId: 728126428, originCurrency: TRON_USDT }, "tron without refundTo", /Tron address/);
+  await rejects({ userId: USER, chain: "base", originChainId: 728126428, originCurrency: TRON_USDT, refundTo: OWNER }, "EVM-shaped refund on tron", /Tron address/);
+  const tron = await ask({ userId: USER, chain: "base", originChainId: 728126428, originCurrency: TRON_USDT, refundTo: TRON_REFUND });
+  expect(made() === 2 && calls[1].refundTo === TRON_REFUND && tron.vm === "tvm", "tron: user-supplied refund address forwarded");
+  // Unsupported pair / deposit-disabled / gated network / wrong destination → rejected before Relay.
+  await rejects({ userId: USER, chain: "base", originChainId: 10, originCurrency: "0x0b2c639c533813f4aa9d7837caf62653d097ff85" }, "depositEnabled=false chain");
+  await rejects({ userId: USER, chain: "base", originChainId: 792703809, originCurrency: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" }, "Solana without a key");
+  await rejects({ userId: USER, chain: "base", originChainId: 8453, originCurrency: "0x4ed4e862860bed51a9570b96d89af5e1b0efefed" }, "non-curated token");
+  await rejects({ userId: USER, chain: "mantle", originChainId: 42161, originCurrency: ARB_USDC }, "mantle destination");
+  await rejects({ userId: "smoke-nobody", chain: "base", originChainId: 42161, originCurrency: ARB_USDC }, "no account", /Open the app/);
+  expect(made() === 2, "rejections never reach Relay");
+
+  // Ownership: only the minting user can read status for the address.
+  expect((await findOwnedDepositAddress(USER, first.address))?.id === rows[0].id, "owner finds the row");
+  expect((await findOwnedDepositAddress(USER_B, first.address)) === null, "another user does not");
+  expect((await findOwnedDepositAddress(USER, "0xnope")) === null, "unknown address → null");
+}
+
 async function main() {
   await cleanup(); // leftovers from an aborted run
   const now = Math.floor(Date.now() / 1000);
@@ -173,11 +262,13 @@ async function main() {
   expect(released.claimedAt === null, "claim released");
 
   await waitlistRoundTrip();
+  await receiveRoundTrip();
 
   await cleanup();
   expect((await getAutopilot(USER)) === null, "cleanup");
   expect((await getSmartAccount(USER, "base")) === null, "cleanup cascaded to smart_accounts");
   expect((await getAccess(USER)).status === "none", "cleanup removed waitlist rows");
+  expect((await db.select().from(depositAddresses).where(eq(depositAddresses.userId, USER))).length === 0, "cleanup cascaded to deposit_addresses");
   console.log("OK");
 }
 

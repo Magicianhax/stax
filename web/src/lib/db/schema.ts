@@ -259,6 +259,48 @@ export const waitlistEvents = pgTable(
   ],
 );
 
+/**
+ * Relay deposit addresses for "Receive from any network" (docs/RECEIVE.md). One OPEN address
+ * per `(user, chain, origin chain, origin currency)`: anything sent there is bridged to USDC on
+ * `chain` for `recipient`. `refund_to` is an origin-chain address (the embedded EOA on EVM,
+ * user-supplied elsewhere). `fee_usd` / `min_usd` are from the quote that minted the address,
+ * so a repeat request never calls Relay.
+ */
+export const depositAddresses = pgTable(
+  "deposit_addresses",
+  {
+    /** 12-char base64url. */
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Destination chain ('base'). */
+    chain: text("chain").notNull(),
+    /** The smart account that receives USDC, lowercased. */
+    recipient: text("recipient").notNull(),
+    originChainId: integer("origin_chain_id").notNull(),
+    /** Relay currency id on the origin chain (EVM addresses lowercased). */
+    originCurrency: text("origin_currency").notNull(),
+    originSymbol: text("origin_symbol").notNull(),
+    /** 'evm' | 'svm' | 'tvm' | 'bvm' */
+    originVm: text("origin_vm").notNull(),
+    refundTo: text("refund_to").notNull(),
+    /** The deposit address Relay handed out (unique: Relay mints one per request). */
+    address: text("address").notNull(),
+    requestId: text("request_id").notNull(),
+    feeUsd: numeric("fee_usd").notNull(),
+    minUsd: integer("min_usd").notNull(),
+    createdAt: createdAt(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("deposit_addresses_address_key").on(t.address),
+    uniqueIndex("deposit_addresses_user_route_key").on(t.userId, t.chain, t.originChainId, t.originCurrency),
+    chainCheck("deposit_addresses_chain_check", t.chain),
+    check("deposit_addresses_origin_vm_check", sql`${t.originVm} in ('evm', 'svm', 'tvm', 'bvm')`),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type SmartAccount = typeof smartAccounts.$inferSelect;
@@ -279,3 +321,5 @@ export type WaitlistRow = typeof waitlist.$inferSelect;
 export type NewWaitlistRow = typeof waitlist.$inferInsert;
 export type WaitlistEvent = typeof waitlistEvents.$inferSelect;
 export type NewWaitlistEvent = typeof waitlistEvents.$inferInsert;
+export type DepositAddressRow = typeof depositAddresses.$inferSelect;
+export type NewDepositAddressRow = typeof depositAddresses.$inferInsert;
