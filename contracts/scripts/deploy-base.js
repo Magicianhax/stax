@@ -36,33 +36,92 @@ async function main() {
     return r;
   };
 
-  // 1) InferenceVerifier — the EIP-712 risk-inference gate.
-  const verifier = await hre.viem.deployContract("InferenceVerifier", [agentSigner]);
-  console.log(`InferenceVerifier: ${verifier.address}`);
+  // Public RPCs are load-balanced; a gas estimate taken on a node that has not seen a
+  // fresh contract yet returns ~25k and the tx runs out of gas. Wait until the RPC we
+  // talk to serves the code before sending anything to a new contract.
+  const ensureCode = async (address, label) => {
+    for (let i = 0; i < 30; i++) {
+      const code = await publicClient.getBytecode({ address }).catch(() => undefined);
+      if (code && code !== "0x") return;
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+    throw new Error(`${label} has no code at ${address} after 60s`);
+  };
+  // A write that re-estimates and retries once if the receipt reverted (the same race).
+  const writeSafe = async (fn, label) => {
+    try {
+      return await wait(await fn(), label);
+    } catch (e) {
+      if (!String(e.message).includes("reverted")) throw e;
+      console.log(`  ${label} reverted once, retrying after a fresh estimate…`);
+      await new Promise((r) => setTimeout(r, 4000));
+      return wait(await fn(), label);
+    }
+  };
 
-  // 2) IdentityRegistry — ERC-8004-style agent identity; register Vera.
-  const registry = await hre.viem.deployContract("IdentityRegistry", []);
-  console.log(`IdentityRegistry:  ${registry.address}`);
-  await wait(await registry.write.register([me, AGENT_CARD]), "register(Vera)");
-  const agentId = (await registry.read.nextAgentId()) - 1n;
-  console.log(`  Vera registered -> agentId ${agentId}`);
+  // Resume support: set INFERENCE_VERIFIER_BASE / IDENTITY_REGISTRY_BASE / STAX_EXECUTOR_BASE in
+  // .env to reuse contracts a previous run already deployed (their creation txs are not repeated).
+  const reuse = (k) => (process.env[k] && /^0x[0-9a-fA-F]{40}$/.test(process.env[k]) ? process.env[k] : null);
+
+  // 1) InferenceVerifier — the EIP-712 risk-inference gate.
+  let verifier;
+  if (reuse("INFERENCE_VERIFIER_BASE")) {
+    verifier = await hre.viem.getContractAt("InferenceVerifier", reuse("INFERENCE_VERIFIER_BASE"));
+    console.log(`InferenceVerifier: ${verifier.address}  (reused)`);
+  } else {
+    verifier = await hre.viem.deployContract("InferenceVerifier", [agentSigner]);
+    console.log(`InferenceVerifier: ${verifier.address}`);
+  }
+  await ensureCode(verifier.address, "InferenceVerifier");
+
+  // 2) IdentityRegistry — ERC-8004-style agent identity; register Vera (once).
+  let registry;
+  if (reuse("IDENTITY_REGISTRY_BASE")) {
+    registry = await hre.viem.getContractAt("IdentityRegistry", reuse("IDENTITY_REGISTRY_BASE"));
+    console.log(`IdentityRegistry:  ${registry.address}  (reused)`);
+  } else {
+    registry = await hre.viem.deployContract("IdentityRegistry", []);
+    console.log(`IdentityRegistry:  ${registry.address}`);
+  }
+  await ensureCode(registry.address, "IdentityRegistry");
+  let agentId;
+  if ((await registry.read.nextAgentId()) > 1n) {
+    agentId = (await registry.read.nextAgentId()) - 1n;
+    console.log(`  Vera already registered -> agentId ${agentId}`);
+  } else {
+    await writeSafe(() => registry.write.register([me, AGENT_CARD]), "register(Vera)");
+    agentId = (await registry.read.nextAgentId()) - 1n;
+    console.log(`  Vera registered -> agentId ${agentId}`);
+  }
 
   // 3) StaxExecutor — commit + verify + non-custodial execution. Send the creation tx ourselves
   //    (instead of hre.viem.deployContract) so we hold the receipt and can report the deploy block.
-  const { abi, bytecode } = await hre.artifacts.readArtifact("StaxExecutor");
-  const executorTx = await deployer.deployContract({ abi, bytecode, args: [USDC, verifier.address] });
-  const executorReceipt = await wait(executorTx, "deploy(StaxExecutor)");
-  const executorAddress = executorReceipt.contractAddress;
-  const executorBlock = executorReceipt.blockNumber;
+  let executorAddress, executorBlock;
+  if (reuse("STAX_EXECUTOR_BASE")) {
+    executorAddress = reuse("STAX_EXECUTOR_BASE");
+    executorBlock = BigInt(process.env.STAX_EXECUTOR_BLOCK_BASE || "0");
+    console.log(`StaxExecutor:      ${executorAddress}  (reused, block ${executorBlock})`);
+  } else {
+    const { abi, bytecode } = await hre.artifacts.readArtifact("StaxExecutor");
+    const executorTx = await deployer.deployContract({ abi, bytecode, args: [USDC, verifier.address] });
+    const executorReceipt = await wait(executorTx, "deploy(StaxExecutor)");
+    executorAddress = executorReceipt.contractAddress;
+    executorBlock = executorReceipt.blockNumber;
+    console.log(`StaxExecutor:      ${executorAddress}  (block ${executorBlock})`);
+  }
+  await ensureCode(executorAddress, "StaxExecutor");
   const executor = await hre.viem.getContractAt("StaxExecutor", executorAddress);
-  console.log(`StaxExecutor:      ${executorAddress}  (block ${executorBlock})`);
 
-  // 4) Whitelist venues + assets.
+  // 4) Whitelist venues + assets (skips what is already set, so re-runs are cheap).
   for (const r of ROUTERS) {
-    await wait(await executor.write.setRouter([r.address, true]), `setRouter(${r.name})`);
+    if (await executor.read.routerAllowed([r.address])) { console.log(`  setRouter(${r.name}) already set`); continue; }
+    await writeSafe(() => executor.write.setRouter([r.address, true]), `setRouter(${r.name})`);
   }
   const assetAddrs = WHITELIST_ASSETS.map((a) => a.address);
-  await wait(await executor.write.setAssets([assetAddrs, true]), `setAssets(${assetAddrs.length} tokens)`);
+  const missing = [];
+  for (const a of assetAddrs) if (!(await executor.read.assetAllowed([a]))) missing.push(a);
+  if (missing.length) await writeSafe(() => executor.write.setAssets([missing, true]), `setAssets(${missing.length} tokens)`);
+  else console.log(`  setAssets already set`);
 
   // 5) Read-back confirmation.
   for (const r of ROUTERS) {
