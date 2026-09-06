@@ -13,13 +13,14 @@ import { BuiltOn } from "./BuiltOn";
 import { isBetaOn } from "@/lib/beta";
 import l from "../layout.module.css";
 import s from "./Closing.module.css";
+import { appUrl, betaUrl, siteUrl } from "@/lib/urls";
 
 const LINKS: { label: string; href: string; external?: boolean }[] = [
   { label: "How it works", href: "#how" },
   { label: "Baskets", href: "#baskets" },
   { label: "FAQ", href: "#faq" },
-  { label: "Demo", href: "/demo" },
-  ...(isBetaOn() ? [{ label: "Beta", href: "/beta" }] : []),
+  { label: "Demo", href: siteUrl("/demo") },
+  ...(isBetaOn() ? [{ label: "Beta", href: betaUrl() }] : []),
   { label: "@stax_market", href: "https://x.com/stax_market", external: true },
   { label: "GitHub", href: "https://github.com/Magicianhax/stax", external: true },
 ];
@@ -34,7 +35,7 @@ export function Closing() {
               Own a piece of what you already believe in.
             </h2>
             <div className={s.cta}>
-              <ShineButton href="/app" variant="primary">
+              <ShineButton href={appUrl()} variant="primary">
                 Open Stax
               </ShineButton>
             </div>

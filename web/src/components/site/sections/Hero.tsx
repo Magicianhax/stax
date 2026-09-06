@@ -21,6 +21,7 @@ import L from "@/components/site/layout.module.css";
 import { ProofWall } from "./ProofWall";
 import { AwardMark, AWARD_EVENT } from "./Awards";
 import s from "./Hero.module.css";
+import { appUrl, betaUrl, siteUrl } from "@/lib/urls";
 
 const HeroSeal = dynamic(() => import("@/components/site/three/HeroSeal"), {
   ssr: false,
@@ -65,21 +66,21 @@ export function Hero() {
           <div className={s.ctas}>
             {beta ? (
               <>
-                <ShineButton href="/beta">
+                <ShineButton href={betaUrl()}>
                   Join the private beta
                   <ArrowRight size={18} strokeWidth={2.2} aria-hidden="true" />
                 </ShineButton>
-                <ShineButton href="/app" variant="glass">
+                <ShineButton href={appUrl()} variant="glass">
                   Open Stax
                 </ShineButton>
               </>
             ) : (
               <>
-                <ShineButton href="/app">
+                <ShineButton href={appUrl()}>
                   Open Stax
                   <ArrowRight size={18} strokeWidth={2.2} aria-hidden="true" />
                 </ShineButton>
-                <ShineButton href="/demo" variant="glass">
+                <ShineButton href={siteUrl("/demo")} variant="glass">
                   Try the demo
                 </ShineButton>
               </>
@@ -92,7 +93,7 @@ export function Hero() {
               Watch the film
             </button>
             {beta && (
-              <Link href="/demo" className={s.film}>
+              <Link href={siteUrl("/demo")} className={s.film}>
                 Try the demo
               </Link>
             )}

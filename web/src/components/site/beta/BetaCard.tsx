@@ -12,6 +12,7 @@ import { NumberTicker } from "@/components/site/ui/NumberTicker";
 import { ShineButton } from "@/components/site/ui/ShineButton";
 import { ShareRow } from "./ShareRow";
 import s from "./Beta.module.css";
+import { appUrl } from "@/lib/urls";
 
 const rank = (n: number) => `#${Math.round(n).toLocaleString("en-US")}`;
 
@@ -53,7 +54,7 @@ export function BetaCard({
       <div className={s.card}>
         <h2 className={s.title}>You&apos;re in.</h2>
         <div className={s.ctaRow}>
-          <ShineButton href="/app">
+          <ShineButton href={appUrl()}>
             Open Stax
             <ArrowRight size={18} strokeWidth={2.2} aria-hidden="true" />
           </ShineButton>

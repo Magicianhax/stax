@@ -145,7 +145,8 @@ function siteUrl(): string {
 }
 
 export function referralUrlFor(refCode: string): string {
-  return `${siteUrl()}/beta?ref=${refCode}`;
+  const beta = (process.env.NEXT_PUBLIC_BETA_URL || "").replace(/\/+$/, "");
+  return beta ? `${beta}/?ref=${refCode}` : `${siteUrl()}/beta?ref=${refCode}`;
 }
 
 async function countWaiting(ex: Executor): Promise<number> {

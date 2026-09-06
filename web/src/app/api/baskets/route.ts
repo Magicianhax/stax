@@ -13,6 +13,7 @@ import { verifyRequest } from "@/lib/server/privyAuth";
 import { rateLimit } from "@/lib/server/rateLimit";
 import { badRequest, serverError, tooManyRequests, unauthorized } from "@/lib/server/respond";
 import { touchUser } from "@/lib/server/users";
+import { appUrl } from "@/lib/urls";
 
 export const dynamic = "force-dynamic";
 
@@ -48,7 +49,7 @@ export async function POST(req: NextRequest) {
   try {
     await touchUser(user.userId);
     const id = await saveBasket(res.basket, user.userId);
-    return Response.json({ id, url: `/app?b=${id}` }, { status: 201 });
+    return Response.json({ id, url: appUrl(`?b=${id}`) }, { status: 201 });
   } catch (err) {
     return serverError("baskets", err);
   }

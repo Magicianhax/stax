@@ -16,6 +16,7 @@ import { getChain, isChainKey, isRoutable, type ChainKey, type StaxChain } from 
 import { displayFor } from "@/lib/displayAssets";
 import type { Allocation } from "@/lib/allocation-schema";
 import type { AllocateResult } from "@/lib/invest-types";
+import { absoluteAppUrl } from "@/lib/urls";
 
 export interface BasketItem {
   symbol: string;
@@ -533,16 +534,12 @@ export function isBasketShortId(v: unknown): v is string {
   return typeof v === "string" && SHORT_ID_RE.test(v);
 }
 
-function siteOrigin(origin?: string): string {
-  return origin ?? (typeof window !== "undefined" ? window.location.origin : "https://www.stax.best");
-}
-
-/** Absolute short share URL (`/app?b=<id>`) for a server-stored basket. */
+/** Absolute short share URL (the app's `?b=<id>`) for a server-stored basket. */
 export function basketShortUrl(id: string, origin?: string): string {
-  return `${siteOrigin(origin)}/app?b=${id}`;
+  return origin ? `${origin}/app?b=${id}` : absoluteAppUrl(`?b=${id}`);
 }
 
-/** Absolute share URL for a basket (`/app?basket=…`). */
+/** Absolute share URL for a basket (the app's `?basket=…`). */
 export function basketShareUrl(basket: Basket, origin?: string): string {
-  return `${siteOrigin(origin)}/app?basket=${encodeBasketLink(basket)}`;
+  return origin ? `${origin}/app?basket=${encodeBasketLink(basket)}` : absoluteAppUrl(`?basket=${encodeBasketLink(basket)}`);
 }

@@ -15,6 +15,30 @@ const securityHeaders = [
   { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
 ];
 
+// ── Subdomains ────────────────────────────────────────────────────────────────
+// One deployment serves four hosts. Each product host rewrites its root to the
+// matching route (so app.stax.best/ IS /app), and the marketing host redirects
+// the old paths to the subdomains. Hosts default to the production names so the
+// rewrites can be exercised locally with a `Host:` header; the redirects only
+// switch on once the absolute origins are configured (i.e. DNS is live).
+const hostOf = (url: string | undefined, fallback: string) => {
+  try {
+    return url ? new URL(url).host : fallback;
+  } catch {
+    return fallback;
+  }
+};
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL;
+const BETA_URL = process.env.NEXT_PUBLIC_BETA_URL;
+const ADMIN_URL = process.env.NEXT_PUBLIC_ADMIN_URL;
+const APP_HOST = hostOf(APP_URL, "app.stax.best");
+const BETA_HOST = hostOf(BETA_URL, "beta.stax.best");
+const ADMIN_HOST = hostOf(ADMIN_URL, "admin.stax.best");
+const SITE_HOSTS = ["www.stax.best", "stax.best"];
+
+// Paths a product host must still serve as-is (assets, API, PWA files, real routes).
+const PASSTHROUGH = "api|_next|sw\\.js|manifest\\.webmanifest|offline|brand|icons|favicon\\.ico|icon|apple-icon|opengraph-image|twitter-image|robots\\.txt|sitemap\\.xml|llms\\.txt|app|beta|admin|demo";
+
 const nextConfig: NextConfig = {
   async headers() {
     return [
@@ -28,6 +52,34 @@ const nextConfig: NextConfig = {
         ],
       },
     ];
+  },
+
+  async rewrites() {
+    const host = (value: string) => [{ type: "host" as const, value }];
+    return {
+      beforeFiles: [
+        // app.stax.best → the app (any unknown path on this host opens the app too)
+        { source: "/", has: host(APP_HOST), destination: "/app" },
+        { source: `/:path((?!${PASSTHROUGH})[^/]*)`, has: host(APP_HOST), destination: "/app" },
+        // beta.stax.best → the waitlist page
+        { source: "/", has: host(BETA_HOST), destination: "/beta" },
+        // admin.stax.best → the console
+        { source: "/", has: host(ADMIN_HOST), destination: "/admin/beta" },
+        { source: "/beta", has: host(ADMIN_HOST), destination: "/admin/beta" },
+      ],
+    };
+  },
+
+  async redirects() {
+    if (!APP_URL && !BETA_URL && !ADMIN_URL) return [];
+    const out = [];
+    for (const site of SITE_HOSTS) {
+      const has = [{ type: "host" as const, value: site }];
+      if (APP_URL) out.push({ source: "/app", has, destination: `${APP_URL}/`, permanent: true });
+      if (BETA_URL) out.push({ source: "/beta", has, destination: `${BETA_URL}/`, permanent: true });
+      if (ADMIN_URL) out.push({ source: "/admin/:path*", has, destination: `${ADMIN_URL}/`, permanent: false });
+    }
+    return out;
   },
 };
 

@@ -12,6 +12,7 @@ import { useBetaJoin, type Access } from "@/hooks/useBetaAccess";
 import { betaShareText, copyText, shareLinks, useNativeShare } from "@/lib/referral";
 import { haptic } from "@/lib/haptics";
 import { TelegramMark, WhatsAppMark, XMark } from "@/components/site/beta/marks";
+import { siteUrl } from "@/lib/urls";
 
 function Spinner() {
   return (
@@ -212,7 +213,7 @@ export function BetaGateScreen({
       </div>
 
       <div className="anim-rise" style={{ animationDelay: ".18s", padding: "20px 22px calc(26px + env(safe-area-inset-bottom))" }}>
-        <a className="btn btn-glass btn-block tap" href="/demo">
+        <a className="btn btn-glass btn-block tap" href={siteUrl("/demo")}>
           While you wait, try the demo
           <Icon name="chevR" size={18} style={{ color: "var(--ink-3)" }} />
         </a>

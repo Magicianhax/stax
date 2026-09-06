@@ -33,6 +33,7 @@ import { Assets } from "@/components/site/sections/Assets";
 import { Faq } from "@/components/site/sections/Faq";
 import { Closing } from "@/components/site/sections/Closing";
 import { captureRef } from "@/lib/referral";
+import { appUrl } from "@/lib/urls";
 
 // Runs before hydration so a dark-system visitor never sees a light flash.
 // Mirrors the matchMedia read in useMediaQuery below.
@@ -51,7 +52,7 @@ export function SiteLanding() {
     captureRef();
     const url = new URL(window.location.href);
     const basket = url.searchParams.get("basket");
-    if (basket) window.location.replace(`/app?basket=${encodeURIComponent(basket)}`);
+    if (basket) window.location.replace(appUrl(`?basket=${encodeURIComponent(basket)}`));
   }, []);
 
   return (

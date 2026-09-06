@@ -1,5 +1,6 @@
 import type { MetadataRoute } from "next";
 import { SITE_URL } from "@/lib/seo";
+import { appUrl } from "@/lib/urls";
 
 // Served at /sitemap.xml. Only public, indexable routes belong here — the API
 // routes and /offline fallback are excluded (see robots.ts).
@@ -19,7 +20,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.8,
     },
     {
-      url: `${SITE_URL}/app`,
+      url: appUrl().startsWith("http") ? appUrl() : `${SITE_URL}/app`,
       lastModified,
       changeFrequency: "monthly",
       priority: 0.6,

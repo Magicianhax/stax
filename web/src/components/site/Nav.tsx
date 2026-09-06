@@ -14,6 +14,7 @@ import { ArrowRight, Menu, X } from "lucide-react";
 import { ShineButton } from "@/components/site/ui/ShineButton";
 import L from "./layout.module.css";
 import s from "./Nav.module.css";
+import { appUrl, betaUrl, siteUrl } from "@/lib/urls";
 
 const LINKS = [
   { id: "how", label: "How it works" },
@@ -119,17 +120,17 @@ export function Nav() {
               </a>
             ))}
             {beta && (
-              <Link href="/beta" className={s.link}>
+              <Link href={betaUrl()} className={s.link}>
                 Beta
               </Link>
             )}
           </div>
 
           <div className={s.right}>
-            <Link href="/demo" className={s.demo}>
+            <Link href={siteUrl("/demo")} className={s.demo}>
               Try the demo
             </Link>
-            <ShineButton href="/app" className={s.cta}>
+            <ShineButton href={appUrl()} className={s.cta}>
               Open Stax
               <ArrowRight size={16} strokeWidth={2.4} aria-hidden="true" />
             </ShineButton>
@@ -160,7 +161,7 @@ export function Nav() {
                 </li>
               ))}
               <li>
-                <Link href="/demo" className={s.sheetLink} onClick={close}>
+                <Link href={siteUrl("/demo")} className={s.sheetLink} onClick={close}>
                   Try the demo
                 </Link>
               </li>
