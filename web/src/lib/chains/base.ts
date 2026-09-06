@@ -26,6 +26,9 @@ export const USDC_ADDR = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as const;
 // if a deadline is ever needed). factory() and WETH9() read-verified 2026-09-05.
 export const UNISWAP_V3_FACTORY = "0x33128a8fC17869897dcE68Ed026d694621f6FDfD" as const;
 export const UNISWAP_ROUTER02 = "0x2626664c2603336E57B271c5C0b26F421741e481" as const;
+// KyberSwap MetaAggregationRouterV2 — the aggregator venue on Base (Aerodrome + Aerodrome CL + Uniswap V3 …).
+// Whitelisted on the executor alongside Router02 (kept as a fallback). Code verified on Base 2026-09-06.
+export const KYBER_ROUTER = "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5" as const;
 export const UNISWAP_QUOTER_V2 = "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a" as const;
 // Aave v3 Pool on Base — the "safe dollars" venue: supply(USDC) → aBasUSDC (~3.8% APY on 2026-09-05).
 export const AAVE_V3_POOL = "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5" as const;
@@ -94,7 +97,7 @@ export const BASE: StaxChain = {
     v3Kind: "uniswap_v3",
     quoterV2: UNISWAP_QUOTER_V2,
     aavePool: AAVE_V3_POOL,
-    all: [UNISWAP_ROUTER02, AAVE_V3_POOL],
+    all: [KYBER_ROUTER, UNISWAP_ROUTER02, AAVE_V3_POOL],
   },
   assets: { stocks: STOCKS, safe: SAFE, crypto: CRYPTO, all: ALL },
   routes: {},

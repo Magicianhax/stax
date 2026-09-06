@@ -8,6 +8,8 @@ const USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const UNISWAP_V3_FACTORY = "0x33128a8fC17869897dcE68Ed026d694621f6FDfD";
 const UNISWAP_ROUTER02 = "0x2626664c2603336E57B271c5C0b26F421741e481"; // SwapRouter02 (no deadline field)
 const AAVE_V3_POOL = "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5";
+// KyberSwap MetaAggregationRouterV2 (aggregates Aerodrome, Aerodrome CL, Uniswap V3, ...). Code verified on Base 2026-09-06.
+const KYBER_ROUTER = "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5";
 
 // Output tokens.
 const A_BAS_USDC = "0x4e65fE4DbA92790696d040ac24Aa414708F5c0AB"; // Aave v3 aToken for USDC (6 dec)
@@ -45,6 +47,7 @@ const WHITELIST_ASSETS = [
 ];
 
 const ROUTERS = [
+  { name: "KyberSwap MetaAggregationRouterV2", address: KYBER_ROUTER },
   { name: "Uniswap V3 SwapRouter02", address: UNISWAP_ROUTER02 },
   { name: "Aave v3 Pool", address: AAVE_V3_POOL },
 ];
@@ -54,6 +57,7 @@ module.exports = {
   UNISWAP_V3_FACTORY,
   UNISWAP_ROUTER02,
   AAVE_V3_POOL,
+  KYBER_ROUTER,
   A_BAS_USDC,
   WETH,
   CBBTC,
