@@ -353,13 +353,15 @@ export function PriceChart({
   useEffect(() => {
     scrubRef.current = onScrub;
   }, [onScrub]);
+  // Current index lives in a ref too so onScrub fires from the event handler,
+  // never from inside a state updater (parents typically pass a setState).
+  const idxRef = useRef<number | null>(null);
   const setIndex = useCallback(
     (i: number | null) => {
-      setScrub((cur) => {
-        if (cur === i) return cur;
-        scrubRef.current?.(i === null ? null : { ...src[i], index: i });
-        return i;
-      });
+      if (idxRef.current === i) return;
+      idxRef.current = i;
+      setScrub(i);
+      scrubRef.current?.(i === null ? null : { ...src[i], index: i });
     },
     [src],
   );
