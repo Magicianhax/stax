@@ -91,7 +91,7 @@ export function BetaGateScreen({
   let body: React.ReactNode;
   if (failure) {
     body = (
-      <div className="card" style={{ padding: 22 }} role="alert">
+      <div className="card" style={{ padding: 22, textAlign: "center" }} role="alert">
         <p className="body" style={{ margin: 0 }}>Couldn&apos;t load your place. {failure}</p>
         <button className="btn btn-outline tap" style={{ height: 48, marginTop: 14 }} onClick={retry}>
           Try again
@@ -100,20 +100,20 @@ export function BetaGateScreen({
     );
   } else if (pending) {
     body = (
-      <div className="card" style={{ padding: 22, display: "flex", alignItems: "center", gap: 12 }} aria-busy="true">
+      <div className="card" style={{ padding: 22, display: "flex", alignItems: "center", justifyContent: "center", gap: 12 }} aria-busy="true">
         <Spinner />
         <span className="body" style={{ color: "var(--ink)" }}>{access ? "Saving your place…" : "Checking your place…"}</span>
       </div>
     );
   } else if (access && access.status === "blocked") {
     body = (
-      <div className="card" style={{ padding: 22 }}>
+      <div className="card" style={{ padding: 22, textAlign: "center" }}>
         <p className="body" style={{ margin: 0 }}>This account can&apos;t join right now.</p>
       </div>
     );
   } else if (access) {
     body = (
-      <div className="card" style={{ padding: "22px 20px", display: "flex", flexDirection: "column", gap: 18 }}>
+      <div className="card" style={{ padding: "22px 20px", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 18 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
           <span
             className="serif tnum"
