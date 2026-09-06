@@ -1,8 +1,9 @@
 "use client";
 
-// "From any network" wizard: network → token → (refund address on non-EVM
-// networks) → address card. The address is requested only once both picks are
-// made, so there is never an address on screen without its network + token.
+// "From any network" wizard: pick (network + token dropdowns) → (refund
+// address on non-EVM networks) → address card. The address is requested only
+// once both picks are made, so there is never an address on screen without its
+// network + token.
 import { useEffect, useRef, useState } from "react";
 import {
   useDepositAddress,
@@ -12,14 +13,13 @@ import {
   type ReceiveToken,
 } from "@/hooks/useReceive";
 import { Spinner } from "../screens/primitives";
-import { NetworkPicker } from "./NetworkPicker";
-import { TokenPicker } from "./TokenPicker";
+import { PickStep } from "./PickStep";
 import { RefundAddressStep } from "./RefundAddressStep";
 import { AddressCard } from "./AddressCard";
 import { SheetHeader } from "./SheetHeader";
 import s from "./receive.module.css";
 
-type Step = "network" | "token" | "refund" | "address";
+type Step = "pick" | "refund" | "address";
 
 export function AnyNetwork({
   open,
@@ -33,7 +33,7 @@ export function AnyNetwork({
 }) {
   const networks = useReceiveNetworks();
   const deposit = useDepositAddress();
-  const [step, setStep] = useState<Step>("network");
+  const [step, setStep] = useState<Step>("pick");
   const [dir, setDir] = useState<"fwd" | "back">("fwd");
   const [network, setNetwork] = useState<ReceiveNetwork | null>(null);
   const [token, setToken] = useState<ReceiveToken | null>(null);
@@ -66,14 +66,14 @@ export function AnyNetwork({
   const status = useDepositStatus(address, open && step === "address");
 
   const pickNetwork = (n: ReceiveNetwork) => {
+    if (n.key === network?.key) return;
     setNetwork(n);
     setToken(null);
     setRefundTo(undefined);
-    go("token");
   };
-  const pickToken = (t: ReceiveToken) => {
-    if (!network) return;
-    setToken(t);
+  const pickToken = (t: ReceiveToken) => setToken(t);
+  const continueFromPick = () => {
+    if (!network || !token) return;
     if (network.vm === "evm") {
       setRefundTo(undefined);
       go("address");
@@ -87,18 +87,16 @@ export function AnyNetwork({
   };
 
   const back = () => {
-    if (step === "network") return onBackToChooser();
-    if (step === "token") return go("network", "back");
-    if (step === "refund") return go("token", "back");
-    // From the address card go back to the token list; a new pick asks for a new address.
+    if (step === "pick") return onBackToChooser();
+    if (step === "refund") return go("pick", "back");
+    // From the address card go back to the picks (kept); a new pick asks for a new address.
     requested.current = null;
     deposit.reset();
-    return go(network?.vm === "evm" ? "token" : "refund", "back");
+    return go(network?.vm === "evm" ? "pick" : "refund", "back");
   };
 
   const title =
-    step === "network" ? "From any network"
-    : step === "token" ? network?.name ?? "Pick a token"
+    step === "pick" ? "From any network"
     : step === "refund" ? "Refund address"
     : token && network ? `${token.symbol} on ${network.name}` : "Your address";
 
@@ -106,16 +104,19 @@ export function AnyNetwork({
     <>
       <SheetHeader title={title} onBack={back} onClose={onClose} />
       <div key={step} className={`${s.step} ${dir === "back" ? s.stepBack : ""}`}>
-        {step === "network" && (
-          <NetworkPicker
+        {step === "pick" && (
+          <PickStep
             networks={networks.data}
             loading={networks.isPending}
             error={networks.error ? networks.error.message : null}
             onRetry={() => networks.refetch()}
-            onPick={pickNetwork}
+            network={network}
+            token={token}
+            onNetwork={pickNetwork}
+            onToken={pickToken}
+            onContinue={continueFromPick}
           />
         )}
-        {step === "token" && network && <TokenPicker network={network} onPick={pickToken} />}
         {step === "refund" && network && token && (
           <RefundAddressStep network={network} token={token} initial={refundTo} onContinue={continueWithRefund} />
         )}

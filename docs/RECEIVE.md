@@ -65,8 +65,9 @@ address + QR sheet it has today.
   Base; `transfer(recipient, amount)` on Base USDC signed by the external wallet (viem walletClient
   over `wallet.getEthereumProvider()`); success toast + balance refresh. Note under the button:
   "Your other wallet pays the network fee for this one."
-- **From any network**: step 1 network grid (chain marks, name), step 2 token list for that network,
-  (step 2b refund address for non-EVM), step 3 address card: QR, mono address with Copy, the warning
+- **From any network**: step 1 two dropdowns on one screen — Network (real logo + name) then Token
+  (logo, symbol, name; enabled once a network is picked) — and Continue, (step 2 refund address for
+  non-EVM), step 3 address card: QR, mono address with Copy, the warning
   line in the accent colour "Send only USDT on Tron to this address", the ETA line, the minimum, and
   the live deposit list. The address card is only shown after both picks so nobody deposits to the
   wrong network.
@@ -77,4 +78,4 @@ address + QR sheet it has today.
 | agent | owns |
 |---|---|
 | `receive-server` | schema + migration, `lib/server/relay.ts`, `lib/server/depositAddresses.ts`, the three routes, `.env.example` (`RELAY_API_URL` optional), `docs/INFRA.md` note, smoke case |
-| `receive-ui` | `hooks/useReceive.ts`, `components/lite/receive/*` (Chooser, FromWallet, AnyNetwork, NetworkPicker, TokenPicker, AddressCard, DepositHistory), the Receive wiring in `WalletScreen.tsx`, `lib/chainMarks.ts` (network marks: reuse `/brand/partners/base.svg`, `mantle.png`, draw simple monochrome marks for the rest) |
+| `receive-ui` | `hooks/useReceive.ts`, `components/lite/receive/*` (Chooser, FromWallet, AnyNetwork, PickStep, Dropdown, RefundAddressStep, AddressCard, DepositHistory), the Receive wiring in `WalletScreen.tsx`, `lib/chainMarks.tsx` + `lib/tokenLogos.ts` (real network PNGs under `/icons/networks`, token SVGs under `/icons/tokens`) |

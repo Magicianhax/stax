@@ -29,7 +29,7 @@
   }
 }
 
-/* Chooser rows + token rows + network tiles share one press surface. */
+/* Chooser rows + dropdown triggers + the address chip share one press surface. */
 .option {
   display: flex;
   align-items: center;
@@ -62,7 +62,6 @@
   }
 }
 .option:focus-visible,
-.tile:focus-visible,
 .iconBtn:focus-visible,
 .disclosure:focus-visible {
   outline: none;
@@ -71,45 +70,119 @@
     0 0 0 3px color-mix(in srgb, var(--primary) 45%, transparent);
 }
 
-.grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-.tile {
+/* ── Dropdown (network / token). The list opens in flow, not floating: the
+   sheet is a scroll container with a transform, so a floating menu would be
+   clipped at its edge. It caps its own height and scrolls inside. ── */
+.dd {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 9px;
-  min-height: 92px;
-  padding: 14px 6px 12px;
+  gap: 7px;
+}
+.ddLabel {
+  padding: 0 2px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--ink-2);
+}
+.ddTrigger {
+  min-height: 62px;
+}
+.ddTrigger[aria-expanded="true"] {
+  box-shadow: inset 0 0 0 1.5px var(--primary), var(--glass-hi);
+}
+.ddText {
+  flex: 1;
+  min-width: 0;
+}
+.ddPrimary {
+  display: block;
+  font-size: 15.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ddPlaceholder {
+  font-weight: 500;
+  color: var(--ink-2);
+}
+.ddSecondary {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.ddBlank {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.ddChev {
+  flex: none;
+  color: var(--ink-3);
+  transition: transform 0.2s var(--ease-out);
+}
+.ddTrigger[aria-expanded="true"] .ddChev {
+  transform: rotate(180deg);
+}
+.ddList {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  max-height: 300px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
   border-radius: 18px;
-  background: var(--glass-2);
-  box-shadow: inset 0 0 0 1px var(--glass-stroke), var(--glass-hi);
-  color: var(--ink);
-  transition:
-    background 0.18s var(--ease-out),
-    transform 0.16s var(--ease-out),
-    box-shadow 0.2s var(--ease-out);
+  background: var(--surface);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    0 12px 32px rgba(0, 0, 0, 0.14);
+  transform-origin: top center;
+  animation: receiveMenuIn 0.18s var(--ease-out) both;
 }
-.tile:active {
-  transform: scale(0.96);
-}
-@media (hover: hover) {
-  .tile:hover {
-    background: var(--surface-2);
+@keyframes receiveMenuIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }
-.markDisc {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  background: var(--surface);
+.ddOption {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 8px 10px;
+  border-radius: 12px;
   color: var(--ink);
-  box-shadow: inset 0 0 0 1px var(--line);
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.12s var(--ease-out);
+}
+.ddActive {
+  background: var(--surface-2);
+}
+.ddOption:active {
+  background: var(--line-2);
+}
+.ddCheck {
+  flex: none;
+  color: var(--primary);
+}
+.ddHint {
+  padding: 0 2px;
+  font-size: 12.5px;
+  color: var(--ink-3);
 }
 
 /* Pending-deposit dot: a slow breathe, not a spinner. */
@@ -172,7 +245,11 @@
     animation: none;
     opacity: 1;
   }
-  .disclosure svg {
+  .disclosure svg,
+  .ddChev {
     transition: none;
+  }
+  .ddList {
+    animation: none;
   }
 }

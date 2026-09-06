@@ -10,20 +10,24 @@ export function TokenLogo({
   symbol,
   name,
   size = 38,
+  logo,
 }: {
   symbol: string;
   name?: string;
   size?: number;
+  /** Override the displayAssets logo (e.g. lib/tokenLogos for receivable tokens). */
+  logo?: string;
 }) {
   const d = displayFor(symbol, name);
   const [failed, setFailed] = useState(false);
-  const showImg = d.logo && !failed;
+  const src = logo ?? d.logo;
+  const showImg = src && !failed;
 
   if (showImg) {
     return (
       // eslint-disable-next-line @next/next/no-img-element -- remote/SVG token logos, no Image loader
       <img
-        src={d.logo}
+        src={src}
         alt=""
         width={size}
         height={size}
