@@ -279,7 +279,7 @@ function Scene({ theme, reduced, fontReady }: SceneProps) {
   return (
     <>
       <Lights theme={theme} />
-      <group ref={root} scale={0.92}>
+      <group ref={root} scale={1.05}>
         <group ref={slab} rotation={[LEAN, 0, 0]}>
           <RoundedBox args={[SLAB_W, SLAB_H, SLAB_T]} radius={0.04} smoothness={4}>
             <meshPhysicalMaterial
