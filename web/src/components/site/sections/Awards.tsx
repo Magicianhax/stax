@@ -74,7 +74,7 @@ export function Awards() {
       <div className={L.wrap}>
         <Reveal className={L.head}>
           <h2 id="awards-title" className={L.h2}>
-            Two separate wins.
+            Recognition.
           </h2>
         </Reveal>
         <Reveal as="ul" className={`${L.grid} ${L.eq} ${s.list}`}>
