@@ -3,6 +3,8 @@
 // "Add addresses": paste one address or email per line, optional note.
 // Parsed client-side so the count and any skipped lines show before sending.
 import { useMemo, useState } from "react";
+import type { AdminActionResponse } from "@/hooks/useAdminBeta";
+import { shortAddress } from "./util";
 import s from "./admin.module.css";
 import { AdminSheet } from "./AdminSheet";
 
@@ -11,7 +13,7 @@ export interface AddAddressesSheetProps {
   onClose: () => void;
   onConfirm: (
     entries: { address?: string; email?: string; note?: string }[],
-  ) => Promise<unknown>;
+  ) => Promise<AdminActionResponse>;
 }
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
@@ -89,6 +91,7 @@ function AddAddressesForm({
   const [text, setText] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<AdminActionResponse | null>(null);
   const parsed = useMemo(() => parseEntries(text), [text]);
 
   const confirm = async () => {
@@ -96,12 +99,51 @@ function AddAddressesForm({
     setBusy(true);
     try {
       const n = note.trim();
-      await onConfirm(parsed.entries.map((e) => (n ? { ...e, note: n } : e)));
-      onClose();
+      const res = await onConfirm(
+        parsed.entries.map((e) => (n ? { ...e, note: n } : e)),
+      );
+      // Anything the server skipped stays on screen so the admin sees why.
+      if (res.skipped && res.skipped.length > 0) setResult(res);
+      else onClose();
     } finally {
       setBusy(false);
     }
   };
+
+  if (result) {
+    const skipped = result.skipped ?? [];
+    return (
+      <div className={s.sheetBody}>
+        <p>
+          Added {result.changed === 1 ? "1 person" : `${result.changed} people`}.{" "}
+          {skipped.length === 1 ? "1 entry" : `${skipped.length} entries`} didn&apos;t
+          apply:
+        </p>
+        <div className={s.preview} role="list">
+          {skipped.map((k, i) => (
+            <div key={i} className={s.previewRow} role="listitem">
+              <span
+                className={k.email ? "" : s.mono}
+                title={k.address ?? undefined}
+              >
+                {k.email ?? shortAddress(k.address) ?? "—"}
+              </span>
+              <span className={s.code}>{k.reason}</span>
+            </div>
+          ))}
+        </div>
+        <div className={s.sheetFoot}>
+          <button
+            type="button"
+            className={`btn btn-primary ${s.btnSm} tap`}
+            onClick={onClose}
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <form

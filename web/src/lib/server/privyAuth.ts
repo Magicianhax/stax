@@ -92,3 +92,30 @@ export async function fetchPrivyEmail(userId: string): Promise<string | null> {
     return null;
   }
 }
+
+export interface PrivyWallet {
+  address: string;
+  /** embedded = Privy-managed EOA; external = user's own wallet; smart_wallet = Privy smart wallet. */
+  kind: "embedded" | "external" | "smart_wallet";
+}
+
+/**
+ * Every Ethereum wallet linked to the user (embedded, external, Privy smart wallet),
+ * lowercased, in Privy's order. Throws when Privy cannot be reached — callers that
+ * gate on ownership must not treat "unknown" as "owns nothing".
+ */
+export async function fetchPrivyWallets(userId: string): Promise<PrivyWallet[]> {
+  const user = await privy().users()._get(userId);
+  const out: PrivyWallet[] = [];
+  for (const acct of user.linked_accounts) {
+    if (acct.type === "wallet" && acct.chain_type === "ethereum" && acct.address) {
+      out.push({
+        address: acct.address.toLowerCase(),
+        kind: acct.connector_type === "embedded" ? "embedded" : "external",
+      });
+    } else if (acct.type === "smart_wallet" && acct.address) {
+      out.push({ address: acct.address.toLowerCase(), kind: "smart_wallet" });
+    }
+  }
+  return out;
+}

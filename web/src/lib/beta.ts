@@ -77,6 +77,8 @@ export type AdminAction =
 export interface AdminActionResponse {
   ok: true;
   changed: number;
+  /** `add` only: entries not applied and why (e.g. an address held by another account). */
+  skipped?: { address: string | null; email: string | null; reason: string }[];
 }
 
 /** The 403 body the money routes return while the flag is on and the caller isn't approved. */

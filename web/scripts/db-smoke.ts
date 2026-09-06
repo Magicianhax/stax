@@ -15,13 +15,27 @@ import {
   upsertAutopilot,
 } from "../src/lib/server/autopilotStore";
 import { getSmartAccount, touchUser, upsertSmartAccount } from "../src/lib/server/users";
-import { approve, getAccess, getStats, joinWaitlist, listAdmin } from "../src/lib/server/waitlist";
+import type { OwnedAddresses } from "../src/lib/server/ownedAddresses";
+import { addEntries, approve, getAccess, getStats, joinWaitlist, listAdmin } from "../src/lib/server/waitlist";
 
 const USER = "smoke-user";
 const USER_B = "smoke-user-b";
 const ADMIN = "smoke-admin";
-const ADDR_A = "0x000000000000000000000000000000000000A11A" as const;
-const ADDR_B = "0x000000000000000000000000000000000000B22B" as const;
+const ADDR_A = "0x000000000000000000000000000000000000a11a" as const;
+const ADDR_B = "0x000000000000000000000000000000000000b22b" as const;
+const USER_C = "smoke-user-c";
+const ADDR_C = "0x000000000000000000000000000000000000c33c" as const;
+/** A pre-approved admin row's address that NO smoke user owns. */
+const ADDR_X = "0x000000000000000000000000000000000000eeee" as const; // lowercase: viem isAddress is checksum-strict
+const SMOKE_ADDRS = [ADDR_A, ADDR_B, ADDR_C, ADDR_X].map((a) => a.toLowerCase());
+
+/** Stand-in for Privy + on-chain derivation: each user owns exactly one address. */
+const OWNED: Record<string, string> = { [USER]: ADDR_A, [USER_B]: ADDR_B, [USER_C]: ADDR_C };
+async function mockOwned(userId: string): Promise<OwnedAddresses> {
+  const a = OWNED[userId]?.toLowerCase();
+  return { all: new Set(a ? [a] : []), primary: a ?? null };
+}
+const deps = { owned: mockOwned };
 const OWNER = "0x000000000000000000000000000000000000dEaD" as const;
 const ACCOUNT = "0x000000000000000000000000000000000000bEEF" as const;
 
@@ -33,21 +47,21 @@ async function cleanup() {
   await db.delete(autopilotRuns).where(eq(autopilotRuns.userId, USER));
   await deleteAutopilot(USER);
   await db.delete(users).where(eq(users.id, USER));
-  await db.delete(waitlist).where(inArray(waitlist.userId, [USER, USER_B]));
-  await db.delete(waitlist).where(inArray(waitlist.address, [ADDR_A.toLowerCase(), ADDR_B.toLowerCase()]));
-  await db.delete(users).where(inArray(users.id, [USER_B, ADMIN]));
+  await db.delete(waitlist).where(inArray(waitlist.userId, [USER, USER_B, USER_C]));
+  await db.delete(waitlist).where(inArray(waitlist.address, SMOKE_ADDRS));
+  await db.delete(users).where(inArray(users.id, [USER_B, USER_C, ADMIN]));
 }
 
 /** Waitlist: two joins with a referral, positions, approve, access. */
 async function waitlistRoundTrip() {
   // A joins (email passed explicitly: no Privy lookup for a fake user id).
-  const a = await joinWaitlist({ userId: USER, address: ADDR_A, email: "smoke@example.com" });
+  const a = await joinWaitlist({ userId: USER, address: ADDR_A, email: "smoke@example.com" }, deps);
   expect(a.status === "waiting" && a.refCode && a.referralUrl?.endsWith(`/beta?ref=${a.refCode}`), "A joined");
   // Idempotent: a second join keeps the same row / code.
-  const aAgain = await joinWaitlist({ userId: USER, address: ADDR_A, email: "smoke@example.com" });
+  const aAgain = await joinWaitlist({ userId: USER, address: ADDR_A, email: "smoke@example.com" }, deps);
   expect(aAgain.refCode === a.refCode, "join is idempotent");
   // B joins through A's link (uppercase to prove normalisation).
-  const b = await joinWaitlist({ userId: USER_B, address: ADDR_B, ref: a.refCode!.toUpperCase(), email: null });
+  const b = await joinWaitlist({ userId: USER_B, address: ADDR_B, ref: a.refCode!.toUpperCase(), email: null }, deps);
   expect(b.status === "waiting" && b.referrals === 0, "B joined");
   const [bRow] = await db.select().from(waitlist).where(eq(waitlist.userId, USER_B));
   expect(bRow.referredBy === a.refCode && bRow.address === ADDR_B.toLowerCase(), "B referred by A, address lowercased");
@@ -76,6 +90,25 @@ async function waitlistRoundTrip() {
   expect(after.waiting === before.waiting - 1 && after.approved === before.approved + 1, "stats moved");
   const none = await getAccess("smoke-nobody");
   expect(none.status === "none" && none.position === null && none.refCode === null, "unknown user → none");
+
+  // Ownership: a pre-approved admin row for ADDR_X must not be claimable by posting ADDR_X.
+  const added = await addEntries([{ address: ADDR_X, note: "vip" }], ADMIN, deps);
+  expect(added.changed === 1 && added.skipped.length === 0, `admin add created the orphan row (got ${JSON.stringify(added)})`);
+  const c = await joinWaitlist({ userId: USER_C, address: ADDR_X, email: null }, deps);
+  expect(c.status === "waiting", `C must not inherit the orphan's approval (got ${c.status})`);
+  const [cRow] = await db.select().from(waitlist).where(eq(waitlist.userId, USER_C));
+  expect(cRow.address === ADDR_C.toLowerCase(), "C's row carries C's OWNED address, not the submitted one");
+  const [orphan] = await db.select().from(waitlist).where(eq(waitlist.address, ADDR_X.toLowerCase()));
+  expect(orphan.userId === null && orphan.status === "approved", "orphan row untouched");
+  // Admin add for an address held by another account (B's row now carries ADDR_X, which B does not own) is skipped.
+  await db.delete(waitlist).where(eq(waitlist.id, orphan.id));
+  await db.update(waitlist).set({ address: ADDR_X.toLowerCase() }).where(eq(waitlist.userId, USER_B));
+  const held = await addEntries([{ address: ADDR_X }], ADMIN, deps);
+  expect(held.changed === 0 && held.skipped[0]?.reason === "held by another account", "add skips a held address");
+  expect((await getAccess(USER_B)).status === "waiting", "B not approved through a squatted address");
+  // …but an address the row's user really owns is approved through add.
+  const ok = await addEntries([{ address: ADDR_C }], ADMIN, deps);
+  expect(ok.changed === 1 && (await getAccess(USER_C)).status === "approved", "add approves an owned address");
 }
 
 async function main() {

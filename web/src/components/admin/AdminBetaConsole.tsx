@@ -200,7 +200,12 @@ export function AdminBetaBody({ enabled }: { enabled: boolean }) {
     async (entries: { address?: string; email?: string; note?: string }[]) => {
       try {
         const res = await add.mutateAsync(entries);
-        notify(`Added ${res.changed === 1 ? "1 person" : `${res.changed} people`}`, "plus");
+        const skipped = res.skipped?.length ?? 0;
+        notify(
+          `Added ${res.changed === 1 ? "1 person" : `${res.changed} people`}${skipped ? `, ${skipped} skipped` : ""}`,
+          skipped ? "info" : "plus",
+        );
+        return res;
       } catch (err) {
         notify(errMessage(err), "info");
         throw err;

@@ -104,6 +104,7 @@ export async function POST(req: NextRequest) {
 
   try {
     let changed: number;
+    let skipped: AdminActionResponse["skipped"];
     switch (body.action) {
       case "approve":
         changed = await approve(body.ids, admin);
@@ -117,14 +118,17 @@ export async function POST(req: NextRequest) {
       case "approveTop":
         changed = await approveTop(body.n, admin);
         break;
-      case "add":
-        changed = await addEntries(body.entries, admin);
+      case "add": {
+        const r = await addEntries(body.entries, admin);
+        changed = r.changed;
+        skipped = r.skipped;
         break;
+      }
       case "note":
         changed = await setNote(body.id, body.note, admin);
         break;
     }
-    const res: AdminActionResponse = { ok: true, changed };
+    const res: AdminActionResponse = skipped ? { ok: true, changed, skipped } : { ok: true, changed };
     return Response.json(res, { headers: NO_STORE });
   } catch (err) {
     return serverError("admin-beta", err);

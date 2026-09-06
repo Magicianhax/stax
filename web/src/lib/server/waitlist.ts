@@ -1,8 +1,12 @@
 import "server-only";
 
 // Private-beta waitlist store (Postgres). Contract: docs/BETA.md.
-//   joinWaitlist()     idempotent join for a signed-in user (links an admin-added row by
-//                      address/email, honours a referral code once, logs `joined`).
+//   joinWaitlist()     idempotent join for a signed-in user (links an admin-added row by an
+//                      OWNED address / verified email, honours a referral code once, logs `joined`).
+//
+// Ownership: a client-submitted address is never trusted. The addresses a user controls come
+// from lib/server/ownedAddresses.ts (Privy-linked wallets + their derived SimpleAccounts);
+// only those may be stored on, or used to link, a row.
 //   getAccess()        the caller's Access — position + referrals computed in SQL.
 //   getStats()         public counts.
 //   listAdmin()        search + status filter + keyset pagination, sorted by position.
@@ -18,6 +22,7 @@ import { isAddress } from "viem";
 import type { Access, AdminRow, AdminStats, BetaStats, WaitlistStatus } from "@/lib/beta";
 import { isBetaOn } from "@/lib/beta";
 import { db, users, waitlist, waitlistEvents, type WaitlistRow } from "@/lib/db";
+import { ownedAddresses, type OwnedAddresses, type OwnedResolver } from "@/lib/server/ownedAddresses";
 import { fetchPrivyEmail } from "@/lib/server/privyAuth";
 import { touchUser } from "@/lib/server/users";
 
@@ -212,23 +217,42 @@ async function addressOwner(ex: Executor, address: string): Promise<string | nul
 
 export interface JoinInput {
   userId: string;
-  /** Already validated by the route; lowercased here. */
+  /** What the client saw; only honoured when it is one of the user's owned addresses. */
   address?: string | null;
   ref?: string | null;
   /** Pass to skip the Privy lookup (tests); undefined → resolveUserEmail(). */
   email?: string | null;
 }
 
+/** Injection points for tests; production uses Privy + on-chain derivation. */
+export interface WaitlistDeps {
+  owned?: OwnedResolver;
+}
+
 /**
  * Join (or re-read) the list for a signed-in user. Idempotent: a second call returns the
- * same row. Order of resolution: the user's own row → an admin-added row matching the
- * address or email (linked to the user) → a new row. `ref` is honoured only for a new
- * row and only when it names an existing, non-blocked row.
+ * same row.
+ *
+ * Linking rules (docs/BETA.md, hardened):
+ *   1. A row with this user_id → it's theirs; backfill address/email when missing.
+ *   2. Else an admin-added row (user_id null) whose address ∈ owned(user) OR whose
+ *      lower(email) = the user's Privy email → linked to the user (status kept, so a
+ *      pre-approved row lets them straight in; a blocked one keeps them out).
+ *   3. Else a new waiting row. `ref` counts only when it names an existing, non-blocked
+ *      row that is not one of the joiner's own addresses.
+ * The stored address is owned.primary (the embedded wallet's SimpleAccount), else the
+ * submitted address if owned, else the first owned address, else null — and only when
+ * no other row already holds it.
  */
-export async function joinWaitlist(input: JoinInput): Promise<Access> {
-  const address = normalizeAddress(input.address);
+export async function joinWaitlist(input: JoinInput, deps: WaitlistDeps = {}): Promise<Access> {
+  const submitted = normalizeAddress(input.address);
   const ref = normalizeRefCode(input.ref);
   const email = input.email === undefined ? await resolveUserEmail(input.userId) : normalizeEmail(input.email);
+  const owned = await (deps.owned ?? ownedAddresses)(input.userId);
+  if (submitted && !owned.all.has(submitted)) {
+    console.warn(`[waitlist] user ${input.userId} submitted an address they don't own; ignored`);
+  }
+  const address = owned.primary ?? (submitted && owned.all.has(submitted) ? submitted : null) ?? firstOf(owned.all);
   await touchUser(input.userId, email);
 
   await db.transaction(async (tx) => {
@@ -239,9 +263,9 @@ export async function joinWaitlist(input: JoinInput): Promise<Access> {
       return;
     }
 
-    // 2. An admin-added row for this address / email → link it.
+    // 2. An admin-added row for one of the user's own addresses / their verified email → link it.
     const matches: SQL[] = [];
-    if (address) matches.push(eq(waitlist.address, address));
+    if (owned.all.size) matches.push(inArray(waitlist.address, [...owned.all]));
     if (email) matches.push(sql`lower(${waitlist.email}) = ${email}`);
     if (matches.length) {
       const [orphan] = await tx
@@ -253,13 +277,17 @@ export async function joinWaitlist(input: JoinInput): Promise<Access> {
       if (orphan) {
         await tx.update(waitlist).set({ userId: input.userId }).where(eq(waitlist.id, orphan.id));
         await fillIn(tx, { ...orphan, userId: input.userId }, address, email);
-        await logEvent(tx, orphan.id, "system", "joined", { linked: true, address, email });
+        await logEvent(tx, orphan.id, "system", "joined", {
+          linked: true,
+          by: orphan.address && owned.all.has(orphan.address) ? "address" : "email",
+          address,
+          email,
+        });
         return;
       }
     }
 
-    // 3. New row. The referrer must exist and not be blocked; "not self" is implied
-    //    (the caller has no row yet) — but never let a code point at the address we're inserting.
+    // 3. New row. The referrer must exist, not be blocked, and not be the joiner themselves.
     let referredBy: string | null = null;
     if (ref) {
       const [referrer] = await tx
@@ -267,7 +295,7 @@ export async function joinWaitlist(input: JoinInput): Promise<Access> {
         .from(waitlist)
         .where(and(eq(waitlist.refCode, ref), sql`${waitlist.status} <> 'blocked'`))
         .limit(1);
-      if (referrer && !(address && referrer.address === address)) referredBy = referrer.refCode;
+      if (referrer && !(referrer.address && owned.all.has(referrer.address))) referredBy = referrer.refCode;
     }
     // An address already on someone else's row is not ours to claim.
     const freeAddress = address && !(await addressOwner(tx, address)) ? address : null;
@@ -299,6 +327,8 @@ export async function joinWaitlist(input: JoinInput): Promise<Access> {
 
   return getAccess(input.userId);
 }
+
+const firstOf = (set: Set<string>): string | null => set.values().next().value ?? null;
 
 /** Backfill address / email on an existing row when we now know them and they're free. */
 async function fillIn(tx: Tx, row: WaitlistRow, address: string | null, email: string | null): Promise<void> {
@@ -498,20 +528,53 @@ export interface AddEntry {
   note?: string | null;
 }
 
+export interface AddSkipped {
+  address: string | null;
+  email: string | null;
+  reason: string;
+}
+
+export interface AddResult {
+  /** Rows created or newly approved. */
+  changed: number;
+  /** Entries that were not applied, with why (shown to the admin). */
+  skipped: AddSkipped[];
+}
+
 /**
  * Admin "add": each entry becomes an approved row (`source: 'admin'`), or approves the row
- * that already holds that address / email. Entries with neither a valid address nor an
- * email are skipped. Returns how many rows were created or newly approved.
+ * that already holds that address / email.
+ *
+ * Rules: an existing row with no user is fair game (approved, address/email/note filled in).
+ * An existing row that already belongs to a user is approved only when the match is
+ * legitimate — the address ∈ that user's owned addresses, or the email equals the row's own
+ * (verified-at-join) email; a user-owned row never gets its address/email rewritten. Anything
+ * else is skipped and reported, never created (so nobody can be approved through an address
+ * they merely typed in). Entries with neither a valid address nor an email are skipped too.
  */
-export async function addEntries(entries: AddEntry[], adminUserId: string): Promise<number> {
+export async function addEntries(entries: AddEntry[], adminUserId: string, deps: WaitlistDeps = {}): Promise<AddResult> {
   const actor = adminActor(adminUserId);
+  const owned = deps.owned ?? ownedAddresses;
+  const ownedCache = new Map<string, Promise<OwnedAddresses>>();
+  const ownedFor = (userId: string) => {
+    let p = ownedCache.get(userId);
+    if (!p) {
+      p = owned(userId);
+      ownedCache.set(userId, p);
+    }
+    return p;
+  };
   let changed = 0;
+  const skipped: AddSkipped[] = [];
   await db.transaction(async (tx) => {
     for (const entry of entries) {
       const address = normalizeAddress(entry.address);
       const email = normalizeEmail(entry.email);
       const note = entry.note?.trim().slice(0, 500) || null;
-      if (!address && !email) continue;
+      if (!address && !email) {
+        skipped.push({ address: null, email: null, reason: "no address or email" });
+        continue;
+      }
 
       const matches: SQL[] = [];
       if (address) matches.push(eq(waitlist.address, address));
@@ -524,14 +587,27 @@ export async function addEntries(entries: AddEntry[], adminUserId: string): Prom
         .limit(1);
 
       if (existing) {
+        const byAddress = Boolean(address && existing.address === address);
+        const byEmail = Boolean(email && existing.email?.toLowerCase() === email);
+        if (existing.userId) {
+          // Someone's row: the match must be genuinely theirs.
+          let legit = byEmail; // a user-owned row's email was verified with Privy at join
+          if (!legit && byAddress && address) legit = (await ownedFor(existing.userId)).all.has(address);
+          if (!legit) {
+            skipped.push({ address, email, reason: "held by another account" });
+            continue;
+          }
+        }
         const set: PgUpdateSetSource<typeof waitlist> = {};
         if (existing.status !== "approved") {
           set.status = "approved";
           set.approvedAt = sql`now()`;
           set.blockedAt = null;
         }
-        if (address && !existing.address && !(await addressOwner(tx, address))) set.address = address;
-        if (email && !existing.email) set.email = email;
+        if (!existing.userId) {
+          if (address && !existing.address && !(await addressOwner(tx, address))) set.address = address;
+          if (email && !existing.email) set.email = email;
+        }
         if (note) set.note = note;
         if (Object.keys(set).length) await tx.update(waitlist).set(set).where(eq(waitlist.id, existing.id));
         if (set.status) {
@@ -567,7 +643,7 @@ export async function addEntries(entries: AddEntry[], adminUserId: string): Prom
       }
     }
   });
-  return changed;
+  return { changed, skipped };
 }
 
 export async function setNote(id: string, note: string, adminUserId: string): Promise<number> {
