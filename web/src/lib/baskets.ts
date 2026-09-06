@@ -185,7 +185,7 @@ const BASE_SEEDS: Seed[] = [
     name: "Frontier",
     tagline: "Rockets, chips, and Bitcoin. Expect big swings.",
     icon: "rocket",
-    color: "#1c1f24",
+    color: "#7c6fcf",
     items: [
       { symbol: "SPCX", weightPct: 40, reason: "A rare piece of a private space company." },
       { symbol: "NVDA", weightPct: 35, reason: "The chips behind the AI boom." },
