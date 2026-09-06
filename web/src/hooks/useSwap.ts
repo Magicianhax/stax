@@ -128,7 +128,12 @@ async function aggregatorCalls(
     throw new Error("The swap route didn't match this network. Please try again.");
   }
   if (q.amountIn !== p.amountIn) throw new Error("The swap amount changed. Please try again.");
-  return { calls: [approve(p.tokenIn, router, p.amountIn), { to: router, data: q.data }], minOut: q.minOut };
+  // Reset the allowance after the swap (mirrors the executor) so a partially consumed
+  // approval never lingers on the public router.
+  return {
+    calls: [approve(p.tokenIn, router, p.amountIn), { to: router, data: q.data }, approve(p.tokenIn, router, BigInt(0))],
+    minOut: q.minOut,
+  };
 }
 
 export interface SwapResult {

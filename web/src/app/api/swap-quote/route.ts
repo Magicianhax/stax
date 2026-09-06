@@ -38,7 +38,7 @@ const SwapQuoteRequestSchema = z.object({
   side: z.enum(["buy", "sell"]),
   amountIn: z.string().regex(/^\d{1,40}$/, "amountIn must be a raw integer string."),
   sender: z.string().refine((a) => isAddress(a), "Invalid sender."),
-  recipient: z.string().refine((a) => isAddress(a), "Invalid recipient."),
+  recipient: z.string().refine((a) => isAddress(a), "Invalid recipient."), // must equal sender (checked below)
   slippageBps: z.number().int().min(0).max(2000).optional(),
   build: z.boolean().optional(),
 });
@@ -87,6 +87,12 @@ export async function POST(req: NextRequest) {
   const slippageBps = body.slippageBps ?? DEFAULT_SLIPPAGE_BPS;
   const sender = body.sender as `0x${string}`;
   const recipient = body.recipient as `0x${string}`;
+  // Hard rule: output always returns to the account that pays. Calldata built for a
+  // third-party sender with a different recipient is never produced by this API, so a
+  // stray allowance to the public Kyber router can never be redirected through Stax.
+  if (sender.toLowerCase() !== recipient.toLowerCase()) {
+    return badRequest("sender and recipient must be the same account.");
+  }
 
   try {
     const route = await kyberRoute(chain, { tokenIn, tokenOut, amountIn });
