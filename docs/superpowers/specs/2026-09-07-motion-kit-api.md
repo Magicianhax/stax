@@ -41,12 +41,33 @@ the authoritative prop doc).
 - **`LogoCluster`** `{ assets: { symbol, name? }[], size=24, max=4, ring="var(--surface)" }` —
   overlapping `AssetTile`s with a 2 px ring and a "+N" disc; resolves display via `toTile`.
   `<LogoCluster assets={plan.holdings.map(h => ({ symbol: h.symbol }))} />`
-- **`PriceChart`** `{ data?: number[], points?: { t: number | string; v: number }[], up, height=210, label, onScrub?(point | null), formatValue?, formatTime? }`
+- **`PriceChart`** `{ data?: number[], points?: { t: number | string; v: number }[], up, area=true, height=210, ranges?, range?, onRange?, label, onScrub?(point | null), formatValue?, formatTime? }`
   — scrub (pointer/touch) shows a crosshair, dot and a price (+ date when `points` given) pill
   clamped inside the chart; min/max labels at the extremes; when the data changes the path morphs
-  (GSAP `attr` on `d`, 0.5 s); line colour follows `up`. `t` is a ms timestamp (seconds also
-  accepted) or a ready label. `onScrub` receives `{ t, v, index }` or `null`.
-  `<PriceChart points={series} up={change >= 0} onScrub={setHover} />`
+  (GSAP `attr` on `d`, 0.5 s); line colour follows `up`; `area` draws the gradient fill (line
+  colour 22 % → 0). Pass `ranges` + `range` + `onRange` together to render `RangeChips` under the
+  chart. `t` is a ms timestamp (seconds also accepted) or a ready label. `onScrub` receives
+  `{ t, v, index }` or `null`.
+  `<PriceChart points={portfolioSeries(r)} up ranges={RANGES} range={r} onRange={setR} onScrub={setHover} />`
+
+## Charts (import from `@/components/design`; demo inputs from `@/lib/demoSeries`)
+
+| Export | Props | Usage |
+|---|---|---|
+| `RangeChips` | `values: readonly string[]`, `value`, `onChange(value)`, `size=32`, `className`, `style` | `<RangeChips values={["1D","1W","1M","1Y","All"]} value={r} onChange={setR} />` — the one segmented range picker (`.seg` pill track, sliding thumb, radiogroup with arrow/Home/End keys). PriceChart renders it for you via `ranges/range/onRange`. |
+| `Bars` | `data: { label; value; tone?: "pos"\|"neg"\|"neutral" }[]`, `height=120`, `showValues`, `formatValue` (default signed `+$120`), `label` | `<Bars data={weeks} height={110} />` — bars grow from the baseline on mount (30 ms stagger); tone follows the sign unless set; tap a bar to read `label · value` above the chart (aria-live). Mixed signs put the baseline mid-chart. |
+| `ProjectionChart` | `contributed: {t,v}[]`, `projected: {t,v}[]`, `height=150`, `formatValue` (default `$1,340`), `label` | `<ProjectionChart {...projection({ amount, cadence, riskBps, months: 12 })} />` — projected value as a primary area + line, contributions as a dashed line, legend with both end values, a scale cue at the top; paths morph 0.5 s when inputs change. |
+| `Sparkline` | existing `data, w, h, color, strong` + `fill` | `<Sparkline data={vals} w={120} h={60} fill />` — `fill` adds the soft area; the line now draws on mount (0.7 s) with the area fading in. |
+
+### `lib/demoSeries.ts` — deterministic demo inputs (stable screenshots)
+
+| Export | Returns | Notes |
+|---|---|---|
+| `DEMO_NOW` | ms | Fixed anchor: Mon 7 Sep 2026 14:00 UTC. All timestamps count back from it. |
+| `priceSeries(symbol, range)` | `{ t, v }[]` | Seeded walk per symbol+range, ends at the display price; change scales with the asset's `day` like `demoHistory`. 1D 48 pts / 1W 56 / 1M 30 / 1Y 52 / All 60. |
+| `portfolioSeries(range, end = 2752.55)` | `{ t, v }[]` | Portfolio value ending at the demo total (pass the real total when known). |
+| `cashFlowWeeks(n = 8)` | `{ t, v }[]` | Net cash per week, deposits `+`, cash-outs `−`, oldest first. Map to `Bars` with `label: short date`. |
+| `projection({ amount, cadence, riskBps, months })` | `{ contributed, projected }` | Monthly points from today; assumed annual return 2 % + risk/10000 × 10 %. Reading line: `≈ ${projected.at(-1).v} in ${months} months at $${amount}/${cadence}`. |
 
 ## Globals
 

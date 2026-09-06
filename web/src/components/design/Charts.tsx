@@ -1,10 +1,77 @@
 "use client";
 
 // Stax data-viz primitives — ported from the design handoff (components.jsx).
-// Sparkline, PriceChart, RiskMeter, Donut, CountUp. Presentational + reusable.
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+// Sparkline, PriceChart, RangeChips, Bars, ProjectionChart, RiskMeter, Donut,
+// CountUp. Presentational + reusable. Deterministic demo inputs live in
+// lib/demoSeries.ts. API reference: docs/superpowers/specs/2026-09-07-motion-kit-api.md
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import gsap from "gsap";
 import { reducedMotion } from "../motion/reduced";
+
+// ── shared helpers ───────────────────────────────────────────────────────────
+
+/** false on first paint, true on the next frame — drives mount-draw transitions. */
+function useDrawn(): boolean {
+  const [drawn, setDrawn] = useState(false);
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setDrawn(true));
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return drawn;
+}
+
+/**
+ * Morph an SVG path: whenever `d` changes, tween the element's `d` attribute
+ * from what is currently on screen to the new value (GSAP attr, 0.5 s). Both
+ * values must share the same command structure (see `resample`). Keyed on the
+ * string so unrelated re-renders never restart or kill a tween.
+ */
+function useMorphD(ref: React.RefObject<SVGPathElement | null>, d: string, duration = 0.5) {
+  const shown = useRef<string | null>(null);
+  const tween = useRef<gsap.core.Tween | null>(null);
+  useLayoutEffect(() => {
+    if (!d) return;
+    const from = shown.current;
+    if (from === null) {
+      shown.current = d;
+      return;
+    }
+    const el = ref.current;
+    if (from === d || !el) return;
+    tween.current?.kill();
+    tween.current = gsap.fromTo(
+      el,
+      { attr: { d: from } },
+      {
+        attr: { d },
+        duration: reducedMotion() ? 0 : duration,
+        ease: "power2.inOut",
+        onUpdate() {
+          shown.current = el.getAttribute("d") ?? d;
+        },
+        onComplete() {
+          shown.current = d;
+        },
+      },
+    );
+  }, [d, duration, ref]);
+  useEffect(
+    () => () => {
+      tween.current?.kill();
+    },
+    [],
+  );
+}
 
 export interface SparklineProps {
   data: number[];
@@ -13,16 +80,21 @@ export interface SparklineProps {
   color?: string;
   /** Thicker stroke + filled area gradient. */
   strong?: boolean;
+  /** Soft area under the line (lighter than `strong`). */
+  fill?: boolean;
 }
 
+// Draws its line on mount (stroke-dash, 0.7 s); the area fades in behind it.
 export function Sparkline({
   data,
   w = 64,
   h = 24,
   color = "var(--pos)",
   strong = false,
+  fill = false,
 }: SparklineProps) {
   const id = useId().replace(/:/g, "");
+  const drawn = useDrawn();
   if (!data.length) return <svg width={w} height={h} />;
   const max = Math.max(...data);
   const min = Math.min(...data);
@@ -36,6 +108,7 @@ export function Sparkline({
     .map((point, i) => (i ? "L" : "M") + point[0].toFixed(1) + " " + point[1].toFixed(1))
     .join(" ");
   const area = d + ` L${w} ${h} L0 ${h} Z`;
+  const showArea = strong || fill;
   return (
     <svg
       width={w}
@@ -49,7 +122,13 @@ export function Sparkline({
           <stop offset="100%" stopColor={color} stopOpacity="0" />
         </linearGradient>
       </defs>
-      {strong && <path d={area} fill={`url(#sp${id})`} />}
+      {showArea && (
+        <path
+          d={area}
+          fill={`url(#sp${id})`}
+          style={{ opacity: drawn ? 1 : 0, transition: "opacity .6s var(--ease-out) .2s" }}
+        />
+      )}
       <path
         d={d}
         fill="none"
@@ -57,6 +136,12 @@ export function Sparkline({
         strokeWidth={strong ? 2 : 1.6}
         strokeLinecap="round"
         strokeLinejoin="round"
+        pathLength={1}
+        style={{
+          strokeDasharray: 1,
+          strokeDashoffset: drawn ? 0 : 1,
+          transition: "stroke-dashoffset .7s var(--ease-out)",
+        }}
       />
     </svg>
   );
@@ -143,8 +228,14 @@ export interface PriceChartProps {
   points?: PricePoint[];
   /** Up = positive (green) / down = negative (red) coloring. */
   up?: boolean;
+  /** Gradient fill under the line (line colour at 22% → 0). Default true. */
+  area?: boolean;
   /** Pixel height. */
   height?: number;
+  /** Range chips rendered under the chart (RangeChips); all three go together. */
+  ranges?: readonly string[];
+  range?: string;
+  onRange?: (range: string) => void;
   /** Screen-reader description of the trend (charts are otherwise invisible to SR). */
   label?: string;
   /** Fires with the scrubbed point (source index) or null when the scrub ends. */
@@ -168,7 +259,11 @@ export function PriceChart({
   data,
   points,
   up = true,
+  area = true,
   height = 210,
+  ranges,
+  range,
+  onRange,
   label,
   onScrub,
   formatValue = fmtUsd,
@@ -214,77 +309,29 @@ export function PriceChart({
     return { pts, line, area, at, iMin, iMax, last: pts[pts.length - 1] };
   }, [series, values]);
 
-  // ── morph: tween the on-screen path into the new one ──
-  // Keyed on the path string (not the geom object) so unrelated re-renders never
-  // restart or kill the tween; an interrupted morph continues from wherever the
-  // line currently is.
+  // ── morph: tween the on-screen path into the new one; the end dot follows ──
   const lineRef = useRef<SVGPathElement | null>(null);
   const areaRef = useRef<SVGPathElement | null>(null);
   const dotRef = useRef<HTMLSpanElement | null>(null);
-  const shown = useRef<{ line: string; area: string; last: readonly [number, number] } | null>(null);
-  const tweens = useRef<gsap.core.Tween[]>([]);
-  const line = geom?.line ?? "";
-  const area = geom?.area ?? "";
+  const lineD = geom?.line ?? "";
+  const areaD = geom?.area ?? "";
   const lastX = geom?.last[0] ?? 0;
   const lastY = geom?.last[1] ?? 0;
+  useMorphD(lineRef, lineD);
+  useMorphD(areaRef, areaD);
+  const dotShown = useRef<readonly [number, number] | null>(null);
   useLayoutEffect(() => {
-    if (!line) return;
-    const from = shown.current;
-    const to = { line, area, last: [lastX, lastY] as const };
-    if (!from) {
-      shown.current = to;
-      return;
-    }
-    if (from.line === line || !lineRef.current || !areaRef.current) return;
-    tweens.current.forEach((t) => t.kill());
-    const dur = reducedMotion() ? 0 : 0.5;
-    const ease = "power2.inOut";
-    const cur = { ...from };
-    shown.current = cur;
-    tweens.current = [
-      gsap.fromTo(lineRef.current, { attr: { d: from.line } }, {
-        attr: { d: line },
-        duration: dur,
-        ease,
-        onUpdate() {
-          cur.line = lineRef.current?.getAttribute("d") ?? line;
-        },
-        onComplete() {
-          cur.line = line;
-        },
-      }),
-      gsap.fromTo(areaRef.current, { attr: { d: from.area } }, {
-        attr: { d: area },
-        duration: dur,
-        ease,
-        onUpdate() {
-          cur.area = areaRef.current?.getAttribute("d") ?? area;
-        },
-        onComplete() {
-          cur.area = area;
-        },
-      }),
-    ];
-    if (dotRef.current) {
-      tweens.current.push(
-        gsap.fromTo(
-          dotRef.current,
-          { left: `${from.last[0]}%`, top: `${from.last[1]}%` },
-          {
-            left: `${lastX}%`,
-            top: `${lastY}%`,
-            duration: dur,
-            ease,
-            onUpdate() {
-              const el = dotRef.current;
-              if (el) cur.last = [parseFloat(el.style.left), parseFloat(el.style.top)];
-            },
-          },
-        ),
-      );
-    }
-  }, [line, area, lastX, lastY]);
-  useEffect(() => () => tweens.current.forEach((t) => t.kill()), []);
+    if (!lineD) return;
+    const from = dotShown.current;
+    dotShown.current = [lastX, lastY];
+    const el = dotRef.current;
+    if (!from || !el) return;
+    gsap.fromTo(
+      el,
+      { left: `${from[0]}%`, top: `${from[1]}%` },
+      { left: `${lastX}%`, top: `${lastY}%`, duration: reducedMotion() ? 0 : 0.5, ease: "power2.inOut", overwrite: true },
+    );
+  }, [lineD, lastX, lastY]);
 
   // ── scrub ──
   const box = useRef<HTMLDivElement | null>(null);
@@ -325,7 +372,18 @@ export function PriceChart({
   };
   const end = () => setIndex(null);
 
-  if (!geom) return <div style={{ height }} />;
+  const chips = ranges && range !== undefined && onRange ? (
+    <RangeChips values={ranges} value={range} onChange={onRange} style={{ marginTop: 14 }} />
+  ) : null;
+
+  if (!geom) {
+    return (
+      <div>
+        <div style={{ height }} />
+        {chips}
+      </div>
+    );
+  }
 
   const spanMs =
     typeof src[0]?.t === "number" && typeof src[src.length - 1]?.t === "number"
@@ -366,6 +424,7 @@ export function PriceChart({
   );
 
   return (
+    <div>
     <div
       ref={box}
       style={{ position: "relative", height, touchAction: "pan-y", userSelect: "none" }}
@@ -389,7 +448,7 @@ export function PriceChart({
       >
         <defs>
           <linearGradient id={`pc${id}`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity="0.3" style={{ transition: "stop-color .5s var(--ease-out)" }} />
+            <stop offset="0%" stopColor={color} stopOpacity="0.22" style={{ transition: "stop-color .5s var(--ease-out)" }} />
             <stop offset="100%" stopColor={color} stopOpacity="0" />
           </linearGradient>
         </defs>
@@ -406,7 +465,7 @@ export function PriceChart({
             opacity="0.45"
           />
         ))}
-        <path ref={areaRef} d={geom.area} fill={`url(#pc${id})`} />
+        <path ref={areaRef} d={geom.area} fill={area ? `url(#pc${id})` : "none"} />
         <path
           ref={lineRef}
           d={geom.line}
@@ -510,6 +569,342 @@ export function PriceChart({
           </div>
         </>
       )}
+    </div>
+    {chips}
+    </div>
+  );
+}
+
+// ── Range chips ──────────────────────────────────────────────────────────────
+// The one segmented range picker every chart uses: pill track, sliding thumb,
+// arrow-key navigation (radiogroup semantics).
+//
+//   <RangeChips values={["1D", "1W", "1M", "1Y", "All"]} value={r} onChange={setR} />
+export interface RangeChipsProps {
+  values: readonly string[];
+  value: string;
+  onChange: (value: string) => void;
+  /** Chip height in px (default 32). */
+  size?: number;
+  className?: string;
+  style?: CSSProperties;
+}
+
+export function RangeChips({ values, value, onChange, size = 32, className, style }: RangeChipsProps) {
+  const idx = Math.max(values.indexOf(value), 0);
+  const onKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    let next = idx;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") next = (idx + 1) % values.length;
+    else if (e.key === "ArrowLeft" || e.key === "ArrowUp") next = (idx - 1 + values.length) % values.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = values.length - 1;
+    else return;
+    e.preventDefault();
+    onChange(values[next]);
+    const btn = e.currentTarget.querySelectorAll<HTMLButtonElement>("button")[next];
+    btn?.focus();
+  };
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Range"
+      className={`seg${className ? ` ${className}` : ""}`}
+      onKeyDown={onKey}
+      style={{ background: "var(--surface-2)", ...style }}
+    >
+      <span
+        aria-hidden
+        className="seg-thumb"
+        style={{
+          width: `calc((100% - 8px) / ${values.length})`,
+          left: 4,
+          transform: `translateX(calc(${idx} * 100%))`,
+        }}
+      />
+      {values.map((v, i) => (
+        <button
+          key={v}
+          type="button"
+          role="radio"
+          aria-checked={i === idx}
+          tabIndex={i === idx ? 0 : -1}
+          onClick={() => onChange(v)}
+          className={`seg-item${i === idx ? " is-on" : ""}`}
+          style={{ height: size, fontSize: 13 }}
+        >
+          {v}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── Bars ─────────────────────────────────────────────────────────────────────
+// Small bar chart (cash in/out by week, etc). Bars grow from the baseline on
+// mount with a 30 ms stagger; positive/negative tones; tap a bar to read it.
+//
+//   <Bars data={weeks.map(w => ({ label: "Sep 1", value: w.v }))} height={120} />
+export interface BarDatum {
+  label: string;
+  value: number;
+  /** Colour override; default follows the sign of `value`. */
+  tone?: "pos" | "neg" | "neutral";
+}
+
+export interface BarsProps {
+  data: BarDatum[];
+  /** Pixel height of the bar area (labels sit below it). */
+  height?: number;
+  /** Always show each bar's value (otherwise only the tapped bar shows it). */
+  showValues?: boolean;
+  formatValue?: (v: number) => string;
+  /** SR description. */
+  label?: string;
+}
+
+const TONE: Record<NonNullable<BarDatum["tone"]>, string> = {
+  pos: "var(--primary)",
+  neg: "var(--neg)",
+  neutral: "var(--ink-3)",
+};
+
+const fmtSignedUsd = (v: number) => `${v < 0 ? "−" : "+"}$${Math.abs(v).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+
+export function Bars({ data, height = 120, showValues = false, formatValue = fmtSignedUsd, label }: BarsProps) {
+  const drawn = useDrawn();
+  const [picked, setPicked] = useState<number | null>(null);
+  const maxPos = Math.max(0, ...data.map((d) => d.value));
+  const maxNeg = Math.max(0, ...data.map((d) => -d.value));
+  const total = maxPos + maxNeg || 1;
+  // Baseline position as a fraction of the height (all-positive data → 1).
+  const base = maxPos / total;
+  const reading = picked !== null ? data[picked] : null;
+  return (
+    <div role="img" aria-label={label ?? "Bar chart"} style={{ position: "relative" }}>
+      <div
+        aria-live="polite"
+        className="tnum"
+        style={{
+          height: 18,
+          marginBottom: 6,
+          fontSize: 12.5,
+          fontWeight: 600,
+          color: "var(--ink-2)",
+          opacity: reading ? 1 : 0,
+          transition: "opacity .2s var(--ease-out)",
+        }}
+      >
+        {reading ? `${reading.label} · ${formatValue(reading.value)}` : "\u00a0"}
+      </div>
+      <div style={{ position: "relative", height }}>
+        <span
+          aria-hidden
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            top: base * height - 0.5,
+            height: 1,
+            background: "var(--line)",
+          }}
+        />
+        <div style={{ display: "flex", gap: 6, height: "100%", alignItems: "stretch" }}>
+          {data.map((d, i) => {
+            const tone = d.tone ?? (d.value > 0 ? "pos" : d.value < 0 ? "neg" : "neutral");
+            const h = (Math.abs(d.value) / total) * height;
+            const positive = d.value >= 0;
+            const on = picked === i;
+            return (
+              <button
+                key={i}
+                type="button"
+                aria-label={`${d.label}: ${formatValue(d.value)}`}
+                aria-pressed={on}
+                onClick={() => setPicked(on ? null : i)}
+                style={{
+                  flex: 1,
+                  position: "relative",
+                  minWidth: 0,
+                  background: "none",
+                  padding: 0,
+                  cursor: "pointer",
+                }}
+              >
+                {(showValues || on) && d.value !== 0 && (
+                  <span
+                    className="tnum"
+                    style={{
+                      position: "absolute",
+                      left: "50%",
+                      transform: "translateX(-50%)",
+                      top: positive ? base * height - h - 16 : base * height + h + 3,
+                      fontSize: 10.5,
+                      fontWeight: 600,
+                      color: on ? "var(--ink)" : "var(--ink-3)",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {formatValue(d.value)}
+                  </span>
+                )}
+                <span
+                  aria-hidden
+                  style={{
+                    position: "absolute",
+                    left: 2,
+                    right: 2,
+                    top: positive ? base * height - Math.max(h, 2) : base * height,
+                    height: Math.max(h, 2),
+                    borderRadius: 4,
+                    background: TONE[tone],
+                    opacity: on ? 1 : picked === null ? 0.85 : 0.45,
+                    transformOrigin: positive ? "50% 100%" : "50% 0%",
+                    transform: drawn ? "scaleY(1)" : "scaleY(0)",
+                    transition: `transform .5s var(--ease-out) ${i * 0.03}s, opacity .2s var(--ease-out)`,
+                  }}
+                />
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+        {data.map((d, i) => (
+          <span
+            key={i}
+            className="tnum"
+            style={{
+              flex: 1,
+              minWidth: 0,
+              textAlign: "center",
+              fontSize: 10.5,
+              fontWeight: 600,
+              color: picked === i ? "var(--ink)" : "var(--ink-3)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {d.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Projection chart ─────────────────────────────────────────────────────────
+// Contributed vs projected value over N months: projected as a gradient area +
+// line, contributions as a dashed line. Paths morph when the inputs change.
+//
+//   const { contributed, projected } = projection({ amount, cadence, riskBps, months });
+//   <ProjectionChart contributed={contributed} projected={projected} height={150} />
+export interface ProjectionChartProps {
+  contributed: PricePoint[];
+  projected: PricePoint[];
+  height?: number;
+  formatValue?: (v: number) => string;
+  label?: string;
+}
+
+const fmtUsd0 = (v: number) => `$${Math.round(v).toLocaleString("en-US")}`;
+
+export function ProjectionChart({
+  contributed,
+  projected,
+  height = 150,
+  formatValue = fmtUsd0,
+  label,
+}: ProjectionChartProps) {
+  const id = useId().replace(/:/g, "");
+  const pad = 10;
+  const geom = useMemo(() => {
+    const c = resample(contributed.map((p) => p.v));
+    const v = resample(projected.map((p) => p.v));
+    if (c.length < 2 || v.length < 2) return null;
+    const max = Math.max(...v, ...c) || 1;
+    const toPts = (arr: number[]) =>
+      arr.map((y, i) => [(i / (arr.length - 1)) * 100, 100 - pad - (y / max) * (100 - pad)] as const);
+    const vp = toPts(v);
+    const cp = toPts(c);
+    const line = smoothPath(vp);
+    return { line, area: `${line} L 100 100 L 0 100 Z`, dashed: smoothPath(cp), max };
+  }, [contributed, projected]);
+  const lineRef = useRef<SVGPathElement | null>(null);
+  const areaRef = useRef<SVGPathElement | null>(null);
+  const dashRef = useRef<SVGPathElement | null>(null);
+  useMorphD(lineRef, geom?.line ?? "");
+  useMorphD(areaRef, geom?.area ?? "");
+  useMorphD(dashRef, geom?.dashed ?? "");
+  if (!geom) return <div style={{ height }} />;
+  const endV = projected[projected.length - 1]?.v ?? 0;
+  const endC = contributed[contributed.length - 1]?.v ?? 0;
+  const months = projected.length - 1;
+  return (
+    <div role="img" aria-label={label ?? `Projected ${formatValue(endV)} after ${months} months, ${formatValue(endC)} contributed`}>
+      <div style={{ display: "flex", gap: 14, alignItems: "baseline", marginBottom: 8 }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 600, color: "var(--ink-2)" }}>
+          <span aria-hidden style={{ width: 10, height: 3, borderRadius: 2, background: "var(--primary)" }} />
+          Projected <span className="tnum" style={{ color: "var(--ink)" }}>{formatValue(endV)}</span>
+        </span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 600, color: "var(--ink-2)" }}>
+          <span aria-hidden style={{ width: 10, height: 0, borderTop: "2px dashed var(--ink-3)" }} />
+          Put in <span className="tnum" style={{ color: "var(--ink)" }}>{formatValue(endC)}</span>
+        </span>
+      </div>
+      <div style={{ position: "relative", height }}>
+        <svg
+          width="100%"
+          height={height}
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          aria-hidden
+          style={{ display: "block", overflow: "visible" }}
+        >
+          <defs>
+            <linearGradient id={`pj${id}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="var(--primary)" stopOpacity="0.22" />
+              <stop offset="100%" stopColor="var(--primary)" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          {[33, 66].map((gy) => (
+            <line key={gy} x1="0" y1={gy} x2="100" y2={gy} stroke="var(--line)" strokeWidth="1" vectorEffect="non-scaling-stroke" opacity="0.45" />
+          ))}
+          <path ref={areaRef} d={geom.area} fill={`url(#pj${id})`} />
+          <path
+            ref={dashRef}
+            d={geom.dashed}
+            fill="none"
+            stroke="var(--ink-3)"
+            strokeWidth="1.6"
+            strokeDasharray="4 4"
+            vectorEffect="non-scaling-stroke"
+            strokeLinecap="round"
+          />
+          <path
+            ref={lineRef}
+            d={geom.line}
+            fill="none"
+            stroke="var(--primary)"
+            strokeWidth="2.4"
+            vectorEffect="non-scaling-stroke"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+        {/* scale cue: the top of the chart */}
+        <span
+          aria-hidden
+          className="tnum"
+          style={{ position: "absolute", left: 0, top: `${pad}%`, transform: "translateY(-100%)", fontSize: 10.5, fontWeight: 600, color: "var(--ink-3)" }}
+        >
+          {formatValue(geom.max)}
+        </span>
+      </div>
+      <div className="tnum" style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 10.5, fontWeight: 600, color: "var(--ink-3)" }}>
+        <span>Today</span>
+        <span>{months} months</span>
+      </div>
     </div>
   );
 }

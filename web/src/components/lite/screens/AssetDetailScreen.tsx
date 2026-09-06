@@ -172,29 +172,11 @@ export function AssetDetailScreen({
             data={sparkData}
             up={winUp}
             height={216}
+            ranges={RANGES}
+            range={RANGES[r]}
+            onRange={(rr) => setR(RANGES.indexOf(rr))}
             label={`${d.name} price chart, ${winUp ? "up" : "down"} ${Math.abs(rangeChange).toFixed(1)}% over ${RANGES[r]}`}
           />
-          {/* range selector — sliding-thumb segmented control */}
-          <div className="seg" style={{ marginTop: 14, background: "var(--surface-2)" }}>
-            <span
-              className="seg-thumb"
-              style={{
-                width: `calc((100% - 8px) / ${RANGES.length})`,
-                left: 4,
-                transform: `translateX(calc(${r} * 100%))`,
-              }}
-            />
-            {RANGES.map((rr, idx) => (
-              <button
-                key={rr}
-                onClick={() => setR(idx)}
-                className={`seg-item ${r === idx ? "is-on" : ""}`}
-                style={{ height: 32, fontSize: 13 }}
-              >
-                {rr}
-              </button>
-            ))}
-          </div>
         </div>
       </div>
 
