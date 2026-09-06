@@ -1,100 +1,180 @@
 "use client";
 
-// Placing — "securing your investment" progress. Faithful re-skin of the design
-// (screens_invest.jsx · Placing) wired to the REAL invest phase from useInvest:
-//   planning  -> "Confirming your plan"     (server signs the plan)
-//   approving -> "Buying each holding"
-//   investing -> "Securing it to your account" (batched, sponsored UserOp)
-// The ring + active step are derived from the real phase, not a fixed timer.
-import { Icon, VeraOrb, Seal } from "@/components/design";
+// Placing — "securing your investment" progress, used for BOTH Vera invests and
+// manual trades (screens_invest.jsx · Placing).
+//
+//   kind="invest": steps follow the REAL invest phase from useInvest
+//     planning  -> "Confirming your plan"
+//     approving -> "Buying each holding"
+//     investing -> "Securing it to your account"
+//   kind="trade":  useSwap only has one live phase ("swapping"), so the first
+//     two steps advance on a short cosmetic timer and the last one completes
+//     when the swap is done (phase "done").
+//
+// Each finished step draws its check (DrawCheck); the active label pulses once
+// on arrival; the orb breathes until everything is done. LiteApp keeps this
+// screen up for at least 1.2 s so it never flashes.
+import { useEffect, useState } from "react";
+import { VeraOrb, Seal } from "@/components/design";
+import { DrawCheck } from "@/components/motion";
+import { useChain } from "@/lib/chains/active";
 import { Spinner } from "./primitives";
 
-const STEPS = ["Confirming your plan", "Buying each holding", "Securing it to your account"];
+const INVEST_STEPS = ["Confirming your plan", "Buying each holding", "Securing it to your account"];
 
-// Map invest phase → active step index (0..2).
-function stepFor(phase: string): number {
+function investStep(phase: string): number {
+  if (phase === "done") return 3;
   if (phase === "planning") return 0;
   if (phase === "approving") return 1;
   return 2; // investing
 }
 
-export function PlacingScreen({ phase }: { phase: string }) {
-  const i = stepFor(phase);
+export function PlacingScreen({
+  phase,
+  kind = "invest",
+  side = "buy",
+}: {
+  phase: string;
+  kind?: "invest" | "trade";
+  side?: "buy" | "sell";
+}) {
+  const chain = useChain();
+  const steps =
+    kind === "trade"
+      ? [
+          side === "sell" ? "Confirming your sell" : "Confirming your buy",
+          `Trading on ${chain.name}`,
+          side === "sell" ? "Adding it to your cash" : "Securing it to your account",
+        ]
+      : INVEST_STEPS;
+
+  // Trade: cosmetic advance for the first two steps; the last waits for the swap.
+  const [ticks, setTicks] = useState(0);
+  useEffect(() => {
+    if (kind !== "trade") return;
+    const a = setTimeout(() => setTicks(1), 650);
+    const b = setTimeout(() => setTicks(2), 1350);
+    return () => {
+      clearTimeout(a);
+      clearTimeout(b);
+    };
+  }, [kind]);
+  const i = kind === "trade" ? (phase === "done" ? 3 : ticks) : investStep(phase);
+  const done = i >= steps.length;
 
   return (
-    <div
-      className="screen screen-pad-top"
-      style={{ alignItems: "center", justifyContent: "center", padding: "0 36px", textAlign: "center" }}
-    >
-      {/* Soft breathing glow (no progress ring) — the step list below shows progress. */}
-      <div style={{ position: "relative", width: 110, height: 110, marginBottom: 30, display: "grid", placeItems: "center" }}>
-        <span
-          aria-hidden
+    <div className="screen screen-pad-top" style={{ justifyContent: "center", padding: "0 24px" }}>
+      {/* Centring fix: one auto-margin column, never wider than the screen. */}
+      <div style={{ width: "100%", maxWidth: 320, margin: "0 auto", textAlign: "center" }}>
+        <div
           style={{
-            position: "absolute",
-            width: 132,
-            height: 132,
-            borderRadius: "50%",
-            background:
-              "radial-gradient(circle, color-mix(in srgb, var(--primary) 42%, transparent), transparent 68%)",
-            filter: "blur(26px)",
-            animation: "breathe 3.6s ease-in-out infinite",
+            position: "relative",
+            width: 110,
+            height: 110,
+            margin: "0 auto 26px",
+            display: "grid",
+            placeItems: "center",
           }}
-        />
-        <VeraOrb size={64} pulse />
-      </div>
-
-      <h1 className="serif" style={{ margin: "0 0 24px", fontSize: 26 }}>
-        Securing your
-        <br />
-        investment
-      </h1>
-
-      <div
-        className="card"
-        style={{ width: "100%", maxWidth: 300, padding: "4px 18px", textAlign: "left" }}
-      >
-        {STEPS.map((s, idx) => (
-          <div
-            key={idx}
+        >
+          <span
+            aria-hidden
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              padding: "13px 0",
-              borderTop: idx ? "1px solid var(--line-2)" : "none",
-              opacity: idx <= i ? 1 : 0.4,
-              transition: "opacity .3s var(--ease-out)",
+              position: "absolute",
+              width: 132,
+              height: 132,
+              borderRadius: "50%",
+              background:
+                "radial-gradient(circle, color-mix(in srgb, var(--primary) 42%, transparent), transparent 68%)",
+              filter: "blur(26px)",
+              animation: done ? "none" : "breathe 3.6s ease-in-out infinite",
+              opacity: done ? 0.55 : 1,
+              transition: "opacity .4s var(--ease-out)",
             }}
-          >
-            <span
-              style={{
-                width: 24,
-                height: 24,
-                borderRadius: 99,
-                flex: "none",
-                display: "grid",
-                placeItems: "center",
-                background: idx < i ? "var(--primary)" : "var(--surface-2)",
-                color: idx < i ? "var(--primary-ink)" : "var(--ink-3)",
-                transition: "background .3s var(--ease-out), color .3s var(--ease-out)",
-              }}
-            >
-              {idx < i ? (
-                <Icon name="check" size={15} stroke={2.6} />
-              ) : idx === i ? (
-                <Spinner small />
-              ) : (
-                <span style={{ width: 6, height: 6, borderRadius: 99, background: "currentColor" }} />
-              )}
-            </span>
-            <span style={{ fontSize: 15, fontWeight: 500, textAlign: "left" }}>{s}</span>
-          </div>
-        ))}
-      </div>
+          />
+          <VeraOrb size={64} pulse={!done} />
+        </div>
 
-      <div style={{ marginTop: 28, display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 600, color: "var(--ink-2)" }}>
-        <Seal size={18} /> Gas-free · signed &amp; verified on-chain
+        <h1 className="serif" style={{ margin: "0 0 22px", fontSize: 26, lineHeight: 1.15 }}>
+          {kind === "trade" ? (
+            <>
+              Placing your
+              <br />
+              {side === "sell" ? "sell" : "buy"}
+            </>
+          ) : (
+            <>
+              Securing your
+              <br />
+              investment
+            </>
+          )}
+        </h1>
+
+        <div className="card" style={{ width: "100%", padding: "4px 18px", textAlign: "left" }}>
+          {steps.map((s, idx) => {
+            const state = idx < i ? "done" : idx === i ? "active" : "todo";
+            return (
+              <div
+                key={idx}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  padding: "12px 0",
+                  borderTop: idx ? "1px solid var(--line-2)" : "none",
+                  opacity: state === "todo" ? 0.4 : 1,
+                  transition: "opacity .3s var(--ease-out)",
+                }}
+              >
+                <span
+                  style={{
+                    width: 24,
+                    height: 24,
+                    borderRadius: 99,
+                    flex: "none",
+                    display: "grid",
+                    placeItems: "center",
+                    background: state === "done" ? "transparent" : "var(--surface-2)",
+                    color: "var(--ink-3)",
+                  }}
+                >
+                  {state === "done" ? (
+                    <DrawCheck size={24} />
+                  ) : state === "active" ? (
+                    <Spinner small />
+                  ) : (
+                    <span style={{ width: 6, height: 6, borderRadius: 99, background: "currentColor" }} />
+                  )}
+                </span>
+                {/* key flips when the step becomes active so the label fades in once */}
+                <span
+                  key={state === "active" ? "on" : "off"}
+                  style={{
+                    fontSize: 15,
+                    fontWeight: state === "active" ? 600 : 500,
+                    animation: state === "active" ? "fade .6s var(--ease-out) both" : "none",
+                  }}
+                >
+                  {s}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        <div
+          style={{
+            marginTop: 26,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            fontSize: 12.5,
+            fontWeight: 600,
+            color: "var(--ink-2)",
+          }}
+        >
+          <Seal size={18} /> No network cost · signed &amp; recorded on {chain.name}
+        </div>
       </div>
     </div>
   );

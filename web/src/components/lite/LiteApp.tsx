@@ -18,6 +18,8 @@
 // The bottom TabBar lives here (the design owns its own chrome).
 import { useCallback, useEffect, useRef, useState, type TouchEvent as ReactTouchEvent } from "react";
 import { useInvest } from "@/hooks/useInvest";
+import { useSwap } from "@/hooks/useSwap";
+import { usePortfolio } from "@/hooks/useBalances";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { haptic } from "@/lib/haptics";
 import { TabBar, type TabId, useToast } from "@/components/design";
@@ -49,6 +51,7 @@ import { BasketDetailScreen } from "./screens/BasketDetailScreen";
 import { decodeBasketLink, type Basket, type DecodeResult } from "@/lib/baskets";
 import { fetchSharedBasket } from "@/hooks/useBaskets";
 import type { AllocateResult } from "@/lib/invest-types";
+import { usd as formatUsd } from "@/lib/format";
 
 type Screen =
   | "home"
@@ -79,6 +82,55 @@ interface Route {
   screen: Screen;
   params: Params;
 }
+
+// ── feel-trade: closing the loop ─────────────────────────────────────────────
+// Route params that carry a finished trade/invest to its destination so the
+// screen can acknowledge it: `home` → { loop?: LoopParams }; `asset` →
+// { symbol: string; loop?: LoopParams }. Home/Owned/AssetDetail render
+// `<Money prev={loop.prevCash}>` and `flashKey={`${symbol}:${loop.txHash}`}`.
+export interface LoopParams {
+  /** Symbols whose HoldingRow should flash once. */
+  flash: string[];
+  /** Tx hash of the trade / invest that just completed (keys the flash). */
+  txHash: string;
+  /** Cash balance before the trade (Money counts prevCash → cash). */
+  prevCash?: number;
+  /** Total balance before the trade (Money counts prevTotal → total). */
+  prevTotal?: number;
+}
+
+/** A manual trade as it travels Trade → Placing → Receipt (`params.order`). */
+export interface TradeOrder {
+  side: "buy" | "sell";
+  symbol: string;
+  name: string;
+  ticker: string;
+  /** "shares" for stocks, else the ticker. */
+  unit: string;
+  /** Display quantity, e.g. "0.4303". */
+  qty: string;
+  priceUsd: number;
+  feeUsd: number;
+  /** Buy: total paid (fee included). Sell: what lands in cash. */
+  amountUsd: number;
+}
+
+/** Trade form state restored when a trade bounces back with an error. */
+export interface TradeDraft {
+  amt: string;
+  sellPct: number;
+  tol: number;
+}
+
+/** Balances the moment Placing appeared (`params.before` on placing/success). */
+interface Snapshot {
+  cash?: number;
+  total?: number;
+}
+
+/** Placing and Thinking stay up at least this long so they never flash. */
+const DWELL_MS = 1200;
+// ── end feel-trade types ─────────────────────────────────────────────────────
 
 const TONE_RISK: Record<Tone, "conservative" | "balanced" | "aggressive"> = {
   balanced: "balanced",
@@ -132,10 +184,86 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
   const [dragging, setDragging] = useState(false);
   const dragRef = useRef<{ x: number; y: number; active: boolean } | null>(null);
 
+  // ── feel-trade: manual trades + closing the loop ────────────────────────────
+  // The swap lives here (not in TradeScreen) so it survives the route change to
+  // Placing. Balances are snapshotted into the placing route's params the moment
+  // it is pushed (before the post-trade refetch) so destinations count old → new.
+  const swap = useSwap();
+  const { data: loopPort } = usePortfolio(address ?? undefined);
+  const loopPortRef = useRef(loopPort);
+  useEffect(() => {
+    loopPortRef.current = loopPort;
+  }, [loopPort]);
+  const snapshot = useCallback(
+    (): Snapshot => ({ cash: loopPortRef.current?.cashUsd, total: loopPortRef.current?.totalUsd }),
+    [],
+  );
+  const placingAt = useRef(0);
+  useEffect(() => {
+    if (screen === "placing") placingAt.current = Date.now();
+  }, [screen]);
+  /** Run `fn` once Placing has been up for at least DWELL_MS. */
+  const afterDwell = useCallback((fn: () => void) => {
+    const t = setTimeout(fn, Math.max(0, DWELL_MS - (Date.now() - placingAt.current)));
+    return () => clearTimeout(t);
+  }, []);
+
+  // Manual trade: Placing → Receipt (dwell first), or bounce back to Trade with
+  // the form restored and the swap error shown.
+  const placingTrade = screen === "placing" && params.kind === "trade";
+  useEffect(() => {
+    if (!placingTrade) return;
+    if (swap.phase === "done" && swap.result) {
+      const r = swap.result;
+      const order = params.order as TradeOrder;
+      const before = (params.before as Snapshot | undefined) ?? {};
+      return afterDwell(() => {
+        const loop: LoopParams = { flash: [order.symbol], txHash: r.txHash, prevCash: before.cash, prevTotal: before.total };
+        setDir("push");
+        // Trade and Placing both leave the stack: back from the receipt is the asset.
+        setStack((s) => [
+          ...s.filter((x) => x.screen !== "placing" && x.screen !== "trade"),
+          { screen: "receipt", params: { order, txHash: r.txHash, at: Date.now(), loop } },
+        ]);
+        swap.reset();
+      });
+    }
+    if (swap.phase === "error") {
+      const draft = params.draft as TradeDraft | undefined;
+      return afterDwell(() => {
+        setDir("pop");
+        setStack((s) =>
+          s
+            .filter((x) => x.screen !== "placing")
+            .map((x, i, arr) => (i === arr.length - 1 && x.screen === "trade" ? { ...x, params: { ...x.params, draft } } : x)),
+        );
+      });
+    }
+  }, [placingTrade, swap, params, afterDwell]);
+
+  // Leaving a trade receipt: land on the asset with the loop params + a toast.
+  const closeTrade = useCallback(
+    (order: TradeOrder, loop: LoopParams | undefined) => {
+      notify(`${order.side === "sell" ? "Sold" : "Bought"} ${order.qty} ${order.ticker} · ${formatUsd(order.amountUsd)}`);
+      setDir("pop");
+      setStack((s) => {
+        const base = s.filter((x) => x.screen !== "receipt" && x.screen !== "trade" && x.screen !== "placing");
+        let i = base.length - 1;
+        while (i >= 0 && base[i].screen !== "asset") i--;
+        const trimmed = i >= 0 ? base.slice(0, i) : base;
+        return [...trimmed, { screen: "asset", params: { symbol: order.symbol, loop } }];
+      });
+    },
+    [notify],
+  );
+  // ── end feel-trade runtime (closeInvest follows `go` below) ─────────────────
+
   const goalRef = useRef(goal);
   const amountRef = useRef(amount);
-  goalRef.current = goal;
-  amountRef.current = amount;
+  useEffect(() => {
+    goalRef.current = goal;
+    amountRef.current = amount;
+  }, [goal, amount]);
 
   // go(target, params) pushes a route; go(-1) pops back; tab roots reset history.
   const go = useCallback(
@@ -156,12 +284,15 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
         setAmount(a);
         setTone("balanced");
         setStack((s) => [...s, { screen: "thinking", params: {} }]);
+        const startedAt = Date.now(); // feel-trade: Thinking dwells ≥ DWELL_MS
         void invest.allocate(g, a, "balanced").then((res) => {
-          setStack((s) => {
-            // Replace the thinking route with plan (or fall back to goal).
-            const base = s.filter((r) => r.screen !== "thinking");
-            return [...base, { screen: res ? "plan" : "goal", params: {} }];
-          });
+          const swapIn = () =>
+            setStack((s) => {
+              // Replace the thinking route with plan (or fall back to goal).
+              const base = s.filter((r) => r.screen !== "thinking");
+              return [...base, { screen: res ? "plan" : "goal", params: {} }];
+            });
+          setTimeout(swapIn, Math.max(0, DWELL_MS - (Date.now() - startedAt)));
         });
         return;
       }
@@ -174,6 +305,13 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
         setGoal("");
         setTone("balanced");
         setStack((s) => [...s, { screen: "plan", params: {} }]);
+        return;
+      }
+
+      // feel-trade: a manual trade's Placing carries the balances it started from.
+      if (next === "placing") {
+        setDir("push");
+        setStack((s) => [...s, { screen: "placing", params: { ...p, before: snapshot() } }]);
         return;
       }
 
@@ -192,8 +330,21 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
       setDir("push");
       setStack((s) => [...s, { screen: next, params: p }]);
     },
-    [invest],
+    [invest, snapshot],
   );
+
+  // feel-trade: leaving Success → Home with the loop params + a toast.
+  const closeInvest = useCallback(() => {
+    const s = invest.success;
+    const before = (params.before as Snapshot | undefined) ?? {};
+    if (s) {
+      notify(`Invested ${formatUsd(s.amountUsd)} across ${s.holdings.length} ${s.holdings.length === 1 ? "holding" : "holdings"}`);
+      const loop: LoopParams = { flash: s.holdings.map((h) => h.symbol), txHash: s.txHash, prevCash: before.cash, prevTotal: before.total };
+      go("home", { loop });
+      return;
+    }
+    go("home");
+  }, [invest.success, params.before, notify, go]);
 
   // Nudge Vera: re-run allocate with adjusted risk + goal hint; plan rebuilds.
   const onNudge = useCallback(
@@ -218,9 +369,10 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
     }
     haptic.medium();
     setDir("push");
-    setStack((s) => [...s, { screen: "placing", params: {} }]);
+    // feel-trade: kind + the balances before, for Success's consequence line.
+    setStack((s) => [...s, { screen: "placing", params: { kind: "invest", before: snapshot() } }]);
     void invest.invest(activeAllocation, amount, address);
-  }, [invest, activeAllocation, address, amount, notify]);
+  }, [invest, activeAllocation, address, amount, notify, snapshot]);
 
   // Shared basket links open the basket on load:
   //   `/app?b=<id>`         a server-stored basket, fetched from /api/baskets/<id>
@@ -265,9 +417,11 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
 
   // Latest handlers for the demo autoplay driver (avoids stale closures).
   const goRef = useRef(go);
-  goRef.current = go;
   const onInvestRef = useRef(onInvest);
-  onInvestRef.current = onInvest;
+  useEffect(() => {
+    goRef.current = go;
+    onInvestRef.current = onInvest;
+  }, [go, onInvest]);
 
   // Demo autoplay for the landing phones. Loops a scripted walkthrough; fully
   // inert in the real app (demoPlay is null) and cancels cleanly on unmount.
@@ -321,21 +475,27 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
     return () => window.removeEventListener("pointermove", onMove);
   }, []);
 
-  // Drive screen from the real invest phase.
+
+  // Drive screen from the real invest phase (Placing dwells ≥ DWELL_MS first).
   useEffect(() => {
-    if (invest.phase === "done" && invest.success) {
-      setDir("push");
-      setStack((s) => {
-        const base = s.filter((r) => r.screen !== "placing");
-        return [...base, { screen: "success", params: {} }];
+    if (invest.phase === "done" && invest.success && screen === "placing" && params.kind === "invest") {
+      const before = params.before;
+      return afterDwell(() => {
+        setDir("push");
+        setStack((s) => {
+          const base = s.filter((r) => r.screen !== "placing");
+          return [...base, { screen: "success", params: { before } }];
+        });
       });
     }
     if (invest.phase === "error" && screen === "placing") {
       // Invest error bounces back to the plan with the inline message.
-      setDir("pop");
-      setStack((s) => s.filter((r) => r.screen !== "placing"));
+      return afterDwell(() => {
+        setDir("pop");
+        setStack((s) => s.filter((r) => r.screen !== "placing"));
+      });
     }
-  }, [invest.phase, invest.success, screen]);
+  }, [invest.phase, invest.success, screen, params.kind, params.before, afterDwell]);
 
   // Each screen names the browser tab (e.g. "Market · Stax") — in the real app
   // only; the demo phones embedded on the marketing page leave the page's title alone.
@@ -469,11 +629,17 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
       );
       break;
     case "placing":
-      view = <PlacingScreen phase={invest.phase} />;
+      // feel-trade: manual trades follow the swap; Vera invests follow useInvest.
+      view =
+        params.kind === "trade" ? (
+          <PlacingScreen phase={swap.phase} kind="trade" side={(params.order as TradeOrder).side} />
+        ) : (
+          <PlacingScreen phase={invest.phase} kind="invest" />
+        );
       break;
     case "success":
       view = invest.success ? (
-        <SuccessScreen success={invest.success} onDone={() => go("home")} />
+        <SuccessScreen success={invest.success} prevCash={(params.before as Snapshot | undefined)?.cash} onDone={closeInvest} />
       ) : (
         <HomeScreen go={go} />
       );
@@ -485,6 +651,7 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
       view = <MarketScreen go={go} />;
       break;
     case "asset":
+      // feel-tabs: pass loop={params.loop as LoopParams | undefined} once AssetDetailScreen accepts it.
       view = <AssetDetailScreen go={go} symbol={String(params.symbol ?? "")} />;
       break;
     case "trade":
@@ -493,21 +660,39 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
           go={go}
           symbol={String(params.symbol ?? "")}
           initialSide={params.side === "sell" ? "sell" : "buy"}
+          swap={swap}
+          draft={params.draft as TradeDraft | undefined}
         />
       );
       break;
-    case "receipt":
+    case "receipt": {
+      // feel-trade: a just-filled manual trade carries `order`; history receipts don't.
+      const rp = params as {
+        title?: string;
+        amount?: number;
+        txHash?: string;
+        ref?: string;
+        date?: string;
+        order?: TradeOrder;
+        at?: number;
+        loop?: LoopParams;
+      };
+      const { order, loop, ref: refCode, ...rest } = rp;
       view = (
         <ReceiptScreen
           go={go}
-          title={params.title as string | undefined}
-          amount={params.amount as number | undefined}
-          txHash={params.txHash as string | undefined}
-          ref={params.ref as string | undefined}
-          date={params.date as string | undefined}
+          title={rest.title}
+          amount={rest.amount}
+          txHash={rest.txHash}
+          ref={refCode}
+          date={rest.date}
+          order={order}
+          at={rest.at}
+          onClose={order ? () => closeTrade(order, loop) : undefined}
         />
       );
       break;
+    }
     case "vera":
       view = <VeraScreen go={go} />;
       break;
@@ -522,6 +707,7 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
       break;
     case "home":
     default:
+      // feel-tabs: pass loop={params.loop as LoopParams | undefined} once HomeScreen accepts it.
       view = <HomeScreen go={go} />;
   }
 

@@ -1,58 +1,69 @@
 "use client";
 
-// Trade — Pro manual buy/sell (screens_pro.jsx · Trade) wired to the REAL gasless
-// path. BUY: useQuote (live venue spot on the active chain) + useSwap.buy (batched
-// approve + swap as one sponsored UserOp). SELL: useSellQuote + useSwap.sell (the
-// held token -> USDC, recipient = user). Venues come from lib/chains (Uniswap V3 /
-// Aave on Base; Fluxion / Agni on Mantle). Tolerance maps Tight / Normal / Loose
-// to 50 / 100 / 300 bps (the on-chain amountOutMinimum is the real protection).
-// On success we route to the plain-words receipt.
-import { useEffect, useState } from "react";
+// Trade — manual buy/sell wired to the REAL gasless path. BUY: useQuote (live
+// venue spot on the active chain) + swap.buy (batched fee + approve + swap as
+// one sponsored UserOp). SELL: useSellQuote + swap.sell (held token -> USDC).
+// Venues come from lib/chains. The "Advanced" tolerance maps Tight / Normal /
+// Loose to 0.5 / 1 / 3 % (the on-chain amountOutMinimum is the real protection).
+//
+// Flow: amount → "Review buy" → ReviewSheet (hold to confirm) → Placing →
+// Receipt. `swap` is owned by LiteApp so the swap survives the route change to
+// Placing; this screen only reads its state and fires buy()/sell().
+import { useState } from "react";
 import { isRoutable, type Asset } from "@/lib/chains";
 import { useChain } from "@/lib/chains/active";
 import { useQuote, useSellQuote } from "@/hooks/useQuote";
-import { useSwap } from "@/hooks/useSwap";
+import type { useSwap } from "@/hooks/useSwap";
 import { useUsdcBalance, usePortfolio } from "@/hooks/useBalances";
 import { usePrice } from "@/hooks/usePrices";
 import { useMarketHistory } from "@/hooks/useMarket";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { displayFor } from "@/lib/displayAssets";
-import { Icon, AssetTile, Crossfade, PriceChart, MarketStatus } from "@/components/design";
+import { Icon, AssetTile, useMarketStatus } from "@/components/design";
+import { describeNextChange } from "@/lib/marketHours";
 import { usd, tokenQty, fromUnits } from "@/lib/format";
-import { STAX_FEE_LABEL } from "@/lib/fees";
-import { iconBtn, Spinner } from "./primitives";
+import { feeUsd, feeOf } from "@/lib/fees";
+import { haptic } from "@/lib/haptics";
+import { iconBtn } from "./primitives";
+import { ReviewSheet } from "./ReviewSheet";
+import type { TradeOrder, TradeDraft } from "../LiteApp";
 
 const BPS = BigInt(10000);
 
 const TOL_BPS = [50, 100, 300]; // Tight / Normal / Loose
 const TOL_LABELS = ["Tight", "Normal", "Loose"];
-const TOL_PCT = ["0.5%", "1.0%", "3.0%"];
+const TOL_PCT = ["0.5%", "1%", "3%"];
 
 export function TradeScreen({
   go,
   symbol,
   initialSide = "buy",
+  swap,
+  draft,
 }: {
   go: (target: string | number, params?: Record<string, unknown>) => void;
   symbol: string;
   initialSide?: "buy" | "sell";
+  swap: ReturnType<typeof useSwap>;
+  /** Restored form state when a trade bounced back here with an error. */
+  draft?: TradeDraft;
 }) {
   const chain = useChain();
   const asset: Asset = chain.assets.all.find((a) => a.symbol === symbol) ?? chain.assets.all[0];
   const d = displayFor(asset.symbol, asset.name);
+  const ticker = d.ticker ?? asset.symbol;
+  const decimals = asset.decimals ?? 18;
   // Sellable = anything with a validated swap route on this chain. `coming`
-  // assets (no liquid market yet) are never buyable or sellable, even if a route
-  // entry exists.
+  // assets (no liquid market yet) are never buyable or sellable.
   const coming = Boolean(asset.coming || d.coming);
   const sellable = isRoutable(chain, asset.symbol) && !coming;
-  // Real market context: live on-chain spot + real 1D move/series, with the
-  // presentational reference as the offline fallback.
   const { priceUsd: livePrice } = usePrice(asset.symbol);
   const { data: dayMarket } = useMarketHistory(asset.symbol, "1D");
   const shownPrice = livePrice ?? d.price;
   const day = dayMarket?.changePct ?? d.day;
-  const spark = dayMarket?.series ?? d.spark;
   const up = day >= 0;
+  const market = useMarketStatus();
+  const closed = asset.tier === "stock" && market !== null && !market.open;
   const { address } = useSmartAccount();
   const { data: bal } = useUsdcBalance(address ?? undefined);
   const { data: port } = usePortfolio(address ?? undefined);
@@ -60,18 +71,19 @@ export function TradeScreen({
   const holding = port?.holdings.find((h) => h.asset.symbol === asset.symbol);
 
   const [side, setSide] = useState<"buy" | "sell">(initialSide);
-  const [amt, setAmt] = useState("");
-  const [tol, setTol] = useState(1);
+  const [amt, setAmt] = useState(draft?.amt ?? "");
+  const [tol, setTol] = useState(draft?.tol ?? 1);
+  const [advanced, setAdvanced] = useState(false);
+  const [review, setReview] = useState(false);
 
   const n = parseFloat(amt) || 0;
   const { data: quote, isFetching } = useQuote(side === "buy" ? asset : null, n);
-  const swap = useSwap();
 
-  // Sell side: percentage of the held position to sell (default 100%).
-  const [sellPct, setSellPct] = useState(100);
+  // Sell side: share of the held position to sell. No default — "All" is a chip.
+  const [sellPct, setSellPct] = useState(draft?.sellPct ?? 0);
   const heldRaw = holding?.raw ?? BigInt(0);
   const sellRaw = (heldRaw * BigInt(Math.round(sellPct))) / BigInt(100);
-  const sellQty = holding ? fromUnits(sellRaw, asset.decimals ?? 18) : 0;
+  const sellQty = holding ? fromUnits(sellRaw, decimals) : 0;
   const { data: sellQuote, isFetching: sellFetching } = useSellQuote(
     side === "sell" && sellable ? asset : null,
     side === "sell" ? sellRaw : BigInt(0),
@@ -88,21 +100,52 @@ export function TradeScreen({
     sellQuote.expectedUsdcRaw > BigInt(0) &&
     !!address;
 
-  // On a filled buy/sell, jump to the plain-words receipt.
-  useEffect(() => {
-    if (swap.phase === "done" && swap.result) {
-      const isSell = swap.result.side === "sell";
-      go("receipt", {
-        title: `${isSell ? "Sold" : "Bought"} ${swap.result.asset.name}`,
-        amount: isSell ? swap.result.amountUsd : -swap.result.amountUsd,
-        txHash: swap.result.txHash,
-      });
-    }
-  }, [swap.phase, swap.result, go]);
+  // Buy: the quote is for the gross amount; the fee comes off first, so the
+  // shares you actually get are scaled to the net (mirrors useSwap.buy).
+  const fee = side === "buy" ? feeUsd(n) : 0;
+  let netOutRaw = BigInt(0);
+  if (quote && n > 0) {
+    const amountIn = BigInt(Math.round(n * 1_000_000));
+    const netIn = amountIn - feeOf(amountIn);
+    netOutRaw = amountIn > BigInt(0) ? (quote.expectedOutRaw * netIn) / amountIn : BigInt(0);
+  }
+  const unit = asset.tier === "stock" ? "shares" : ticker;
 
-  const submit = () => {
-    if (side === "buy") {
-      if (!quote || !address) return;
+  const order: TradeOrder | null =
+    side === "buy" && canBuy && quote
+      ? {
+          side: "buy",
+          symbol: asset.symbol,
+          name: d.name,
+          ticker,
+          unit,
+          qty: tokenQty(netOutRaw, decimals),
+          priceUsd: quote.pricePerToken,
+          feeUsd: fee,
+          amountUsd: n,
+        }
+      : side === "sell" && canSell && sellQuote
+        ? {
+            side: "sell",
+            symbol: asset.symbol,
+            name: d.name,
+            ticker,
+            unit,
+            qty: tokenQty(sellRaw, decimals),
+            priceUsd: sellQty > 0 ? sellQuote.expectedUsd / sellQty : 0,
+            feeUsd: 0,
+            amountUsd: sellQuote.expectedUsd,
+          }
+        : null;
+
+  // Hold-to-confirm completed: fire the real swap and move to Placing. LiteApp
+  // watches swap.phase from there and routes to the receipt (or back here).
+  const confirm = () => {
+    if (!order || !address) return;
+    haptic.medium();
+    const nextDraft: TradeDraft = { amt, sellPct, tol };
+    if (order.side === "buy") {
+      if (!quote) return;
       void swap.buy({
         asset,
         amountUsd: n,
@@ -110,64 +153,145 @@ export function TradeScreen({
         slippageBps: TOL_BPS[tol],
         recipient: address,
       });
-      return;
+    } else {
+      if (!sellQuote) return;
+      const minUsdcOut = (sellQuote.expectedUsdcRaw * (BPS - BigInt(TOL_BPS[tol]))) / BPS;
+      void swap.sell({
+        asset,
+        amountIn: sellRaw,
+        minUsdcOut,
+        estUsdcValue: sellQuote.expectedUsd,
+        recipient: address,
+        slippageBps: TOL_BPS[tol],
+      });
     }
-    // sell
-    if (!sellQuote || !address) return;
-    const minUsdcOut =
-      (sellQuote.expectedUsdcRaw * (BPS - BigInt(TOL_BPS[tol]))) / BPS;
-    void swap.sell({
-      asset,
-      amountIn: sellRaw,
-      minUsdcOut,
-      estUsdcValue: sellQuote.expectedUsd,
-      recipient: address,
-      slippageBps: TOL_BPS[tol],
-    });
+    setReview(false);
+    go("placing", { kind: "trade", order, draft: nextDraft });
   };
+
+  const sellEmpty = side === "sell" && (!sellable || !holding || heldRaw <= BigInt(0));
+  const canReview = side === "buy" ? canBuy : canSell;
+
+  const tolerance = (
+    <div style={{ padding: "14px 22px 0" }}>
+      <div className="card" style={{ padding: "4px 16px" }}>
+        <button
+          type="button"
+          className="tap"
+          onClick={() => setAdvanced((v) => !v)}
+          aria-expanded={advanced}
+          style={{
+            width: "100%",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "12px 0",
+            background: "none",
+            textAlign: "left",
+          }}
+        >
+          <Icon name="sliders" size={17} style={{ color: "var(--ink-3)" }} />
+          <span style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>Advanced</span>
+          <span style={{ flex: 1, fontSize: 13, color: "var(--ink-2)", textAlign: "right" }}>
+            Up to {TOL_PCT[tol]} price movement
+          </span>
+          <Icon
+            name="chevD"
+            size={16}
+            style={{
+              color: "var(--ink-3)",
+              transform: advanced ? "rotate(180deg)" : "none",
+              transition: "transform .26s var(--ease-out)",
+            }}
+          />
+        </button>
+        {advanced && (
+          <div style={{ padding: "0 0 14px" }}>
+            <div style={{ display: "flex", gap: 6 }}>
+              {TOL_LABELS.map((t, i) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => {
+                    haptic.select();
+                    setTol(i);
+                  }}
+                  className={`chip tap ${tol === i ? "is-dark" : ""}`}
+                  style={{ flex: 1, justifyContent: "center" }}
+                >
+                  {t} · {TOL_PCT[i]}
+                </button>
+              ))}
+            </div>
+            <p style={{ margin: "10px 0 0", fontSize: 12.5, lineHeight: 1.5, color: "var(--ink-3)" }}>
+              If the price moves more than this while your order goes through, it is cancelled and nothing is
+              charged.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 
   return (
     <div className="screen screen-pad-top" style={{ paddingBottom: 20 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 22px 0" }}>
+      {/* one-line header: back · tile · name · price · change */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 22px 0" }}>
         <button onClick={() => go(-1)} style={iconBtn} className="tap" aria-label="Back">
           <Icon name="back" size={20} />
         </button>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginLeft: 4 }}>
-          <AssetTile asset={d} size={30} />
-          <h1 style={{ margin: 0, fontWeight: 700, fontSize: 17, letterSpacing: "-.01em" }}>{d.name}</h1>
-        </div>
-      </div>
-
-      {/* price + market context */}
-      <div style={{ padding: "12px 22px 0", display: "flex", alignItems: "baseline", gap: 10 }}>
-        <span className="tnum" style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-.02em" }}>
+        <AssetTile asset={d} size={32} />
+        <h1
+          style={{
+            margin: 0,
+            flex: 1,
+            minWidth: 0,
+            fontWeight: 700,
+            fontSize: 17,
+            letterSpacing: "-.01em",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {d.name}
+        </h1>
+        <span className="tnum" style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-.01em" }}>
           {shownPrice !== undefined ? usd(shownPrice) : "—"}
         </span>
         <span
           className="tnum"
-          style={{ fontSize: 13, fontWeight: 700, color: up ? "var(--pos)" : "var(--neg)" }}
+          style={{
+            fontSize: 12,
+            fontWeight: 700,
+            padding: "3px 8px",
+            borderRadius: 99,
+            color: up ? "var(--pos)" : "var(--neg)",
+            background: up ? "var(--primary-soft)" : "color-mix(in srgb, var(--neg) 14%, transparent)",
+          }}
         >
-          {(up ? "+" : "") + day.toFixed(2)}% today
+          {(up ? "+" : "") + day.toFixed(2)}%
         </span>
       </div>
-      {/* stock-market clock beside the quote — a closed market means the
-          reference price is stale and the pool price can drift from it */}
-      {asset.tier === "stock" && (
-        <div style={{ padding: "10px 22px 0" }}>
-          <MarketStatus detail />
+      {closed && market && (
+        <div
+          role="status"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 7,
+            padding: "8px 22px 0",
+            fontSize: 12.5,
+            color: "var(--ink-3)",
+          }}
+        >
+          <span style={{ width: 6, height: 6, borderRadius: 99, background: "var(--ink-3)", flex: "none" }} />
+          Market closed · price can drift until {describeNextChange(market).replace(/^opens /, "")}
         </div>
       )}
-      <div style={{ padding: "10px 22px 2px" }}>
-        <PriceChart
-          data={spark}
-          up={up}
-          height={120}
-          label={`${d.name} price chart, ${up ? "up" : "down"} ${Math.abs(day).toFixed(1)}% today`}
-        />
-      </div>
 
-      {/* buy/sell toggle — sliding-thumb segmented control */}
-      <div style={{ padding: "16px 22px 0" }}>
+      {/* buy/sell toggle */}
+      <div style={{ padding: "14px 22px 0" }}>
         <div className="seg">
           <span
             className="seg-thumb"
@@ -180,8 +304,13 @@ export function TradeScreen({
           {(["buy", "sell"] as const).map((s) => (
             <button
               key={s}
-              onClick={() => setSide(s)}
+              onClick={() => {
+                haptic.select();
+                setSide(s);
+                if (swap.error) swap.reset();
+              }}
               className={`seg-item ${side === s ? "is-on" : ""}`}
+              aria-label={s === "buy" ? "Buy" : "Sell"}
               style={{ textTransform: "capitalize" }}
             >
               {s}
@@ -190,7 +319,7 @@ export function TradeScreen({
         </div>
       </div>
 
-      {side === "sell" && (!sellable || !holding || heldRaw <= BigInt(0)) ? (
+      {sellEmpty ? (
         <div style={{ padding: "40px 30px 0", textAlign: "center", color: "var(--ink-2)" }}>
           <div
             style={{
@@ -217,111 +346,56 @@ export function TradeScreen({
         </div>
       ) : side === "sell" ? (
         <>
-          {/* sell amount */}
-          <div style={{ padding: "30px 22px 0", textAlign: "center" }}>
+          {/* sell amount — what you'd get for the chosen share of your position */}
+          <div style={{ padding: "26px 22px 0", textAlign: "center" }}>
             <div
               className="tnum"
-              style={{ fontSize: 50, fontWeight: 700, letterSpacing: "-.04em" }}
+              style={{
+                fontSize: 50,
+                fontWeight: 700,
+                letterSpacing: "-.04em",
+                color: sellRaw > BigInt(0) ? "var(--ink)" : "var(--ink-3)",
+              }}
             >
-              {sellFetching && !sellQuote
-                ? "…"
-                : sellQuote
-                  ? usd(sellQuote.expectedUsd)
-                  : "—"}
+              {sellRaw <= BigInt(0)
+                ? "$0"
+                : sellFetching && !sellQuote
+                  ? "…"
+                  : sellQuote
+                    ? usd(sellQuote.expectedUsd)
+                    : "—"}
             </div>
             <div className="tnum" style={{ fontSize: 13.5, color: "var(--ink-2)", marginTop: 4 }}>
-              {`Selling ${tokenQty(sellRaw, asset.decimals ?? 18)} ${d.ticker ?? asset.symbol}`}
+              {sellRaw > BigInt(0)
+                ? `Selling ${tokenQty(sellRaw, decimals)} ${ticker}`
+                : "Pick how much to sell"}
             </div>
-            <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 4 }}>
-              {`You own ${tokenQty(heldRaw, asset.decimals ?? 18)}`}
+            <div className="tnum" style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 4 }}>
+              {`You own ${tokenQty(heldRaw, decimals)} ${ticker}`}
             </div>
           </div>
 
-          {/* sell percentage */}
           <div style={{ display: "flex", gap: 8, padding: "18px 22px 0", justifyContent: "center" }}>
             {[25, 50, 75, 100].map((p) => (
               <button
                 key={p}
                 className={`chip tap ${sellPct === p ? "is-dark" : ""}`}
-                onClick={() => setSellPct(p)}
-                style={{ height: 38 }}
+                onClick={() => {
+                  haptic.select();
+                  setSellPct(p);
+                  if (swap.error) swap.reset();
+                }}
               >
                 {p === 100 ? "All" : `${p}%`}
               </button>
             ))}
           </div>
-
-          {/* tolerance */}
-          <div style={{ padding: "18px 22px 0" }}>
-            <div className="card" style={{ padding: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-                <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--ink-2)" }}>
-                  Price movement I&apos;ll allow
-                </span>
-                <span className="mono" style={{ fontSize: 12, color: "var(--ink-2)" }}>
-                  {TOL_PCT[tol]}
-                </span>
-              </div>
-              <div style={{ display: "flex", gap: 6 }}>
-                {TOL_LABELS.map((t, i) => (
-                  <button
-                    key={t}
-                    onClick={() => setTol(i)}
-                    className={`chip tap ${tol === i ? "is-dark" : ""}`}
-                    style={{ flex: 1, justifyContent: "center" }}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {swap.error && (
-            <div style={{ padding: "14px 22px 0" }}>
-              <div
-                onClick={swap.reset}
-                style={{
-                  background: "color-mix(in srgb, var(--neg) 14%, var(--surface))",
-                  color: "var(--neg)",
-                  padding: "11px 14px",
-                  borderRadius: "var(--rr)",
-                  fontSize: 13.5,
-                  fontWeight: 500,
-                }}
-              >
-                {swap.error}
-              </div>
-            </div>
-          )}
-
-          <div style={{ flex: 1 }} />
-          <div style={{ padding: "12px 22px calc(18px + env(safe-area-inset-bottom))" }}>
-            <div style={{ textAlign: "center", marginBottom: 12, fontSize: 12.5, color: "var(--ink-3)" }}>
-              Free · paid into your cash balance
-            </div>
-            <button
-              className="btn btn-primary btn-block btn-lg tap"
-              disabled={!canSell || swap.busy}
-              onClick={submit}
-            >
-              <Crossfade
-                showFirst={swap.busy}
-                style={{ alignItems: "center" }}
-                first={
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 9 }}>
-                    <Spinner small /> Securing…
-                  </span>
-                }
-                second={<span>Sell{sellQuote ? ` for ${usd(sellQuote.expectedUsd)}` : ""}</span>}
-              />
-            </button>
-          </div>
+          {tolerance}
         </>
       ) : (
         <>
           {/* amount — the big number IS the input (tap to type a custom amount) */}
-          <div style={{ padding: "30px 22px 0", textAlign: "center" }}>
+          <div style={{ padding: "26px 22px 0", textAlign: "center" }}>
             <div style={{ display: "flex", justifyContent: "center", alignItems: "baseline" }}>
               <span
                 className="tnum"
@@ -360,14 +434,15 @@ export function TradeScreen({
             <div className="tnum" style={{ fontSize: 13.5, color: "var(--ink-2)", marginTop: 4 }}>
               {isFetching && !quote
                 ? "Getting a live price…"
-                : quote && quote.expectedOutRaw > BigInt(0)
-                  ? `≈ ${tokenQty(quote.expectedOutRaw, asset.decimals ?? 18)} ${asset.tier === "stock" ? "shares" : d.ticker ?? asset.symbol}`
+                : quote && netOutRaw > BigInt(0)
+                  ? `≈ ${tokenQty(netOutRaw, decimals)} ${unit}`
                   : shownPrice !== undefined
                     ? `${usd(shownPrice)} each`
                     : ""}
             </div>
             <div
-              style={{ fontSize: 12.5, color: over ? "var(--neg)" : "var(--ink-2)", marginTop: 4 }}
+              className="tnum"
+              style={{ fontSize: 12.5, color: over ? "var(--neg)" : "var(--ink-3)", marginTop: 4 }}
             >
               {over ? `That’s more than the ${usd(balance)} you have` : `${usd(balance)} available`}
             </div>
@@ -384,89 +459,75 @@ export function TradeScreen({
               <button
                 key={q}
                 className={`chip tap ${amt === String(q) ? "is-dark" : ""}`}
-                onClick={() => setAmt(String(q))}
-                style={{ height: 38 }}
+                onClick={() => {
+                  haptic.select();
+                  setAmt(String(q));
+                }}
               >
                 ${q}
               </button>
             ))}
             <button
               className="chip tap"
-              onClick={() => setAmt(String(Math.floor(balance * 100) / 100))}
-              style={{ height: 38 }}
+              onClick={() => {
+                haptic.select();
+                setAmt(String(Math.floor(balance * 100) / 100));
+              }}
             >
               Max
             </button>
           </div>
+          {tolerance}
+        </>
+      )}
 
-          {/* tolerance */}
-          <div style={{ padding: "18px 22px 0" }}>
-            <div className="card" style={{ padding: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-                <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--ink-2)" }}>
-                  Price movement I&apos;ll allow
-                </span>
-                <span className="mono" style={{ fontSize: 12, color: "var(--ink-2)" }}>
-                  {TOL_PCT[tol]}
-                </span>
-              </div>
-              <div style={{ display: "flex", gap: 6 }}>
-                {TOL_LABELS.map((t, i) => (
-                  <button
-                    key={t}
-                    onClick={() => setTol(i)}
-                    className={`chip tap ${tol === i ? "is-dark" : ""}`}
-                    style={{ flex: 1, justifyContent: "center" }}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
-            </div>
+      {swap.error && !sellEmpty && (
+        <div style={{ padding: "14px 22px 0" }}>
+          <div
+            role="button"
+            aria-label="Dismiss error"
+            onClick={swap.reset}
+            style={{
+              background: "color-mix(in srgb, var(--neg) 14%, var(--surface))",
+              color: "var(--neg)",
+              padding: "11px 14px",
+              borderRadius: "var(--rr)",
+              fontSize: 13.5,
+              fontWeight: 500,
+            }}
+          >
+            {swap.error}
           </div>
+        </div>
+      )}
 
-          {swap.error && (
-            <div style={{ padding: "14px 22px 0" }}>
-              <div
-                onClick={swap.reset}
-                style={{
-                  background: "color-mix(in srgb, var(--neg) 14%, var(--surface))",
-                  color: "var(--neg)",
-                  padding: "11px 14px",
-                  borderRadius: "var(--rr)",
-                  fontSize: 13.5,
-                  fontWeight: 500,
-                }}
-              >
-                {swap.error}
-              </div>
-            </div>
-          )}
-
+      {!sellEmpty && (
+        <>
           <div style={{ flex: 1 }} />
           <div style={{ padding: "12px 22px calc(18px + env(safe-area-inset-bottom))" }}>
-            <div style={{ textAlign: "center", marginBottom: 12, fontSize: 12.5, color: "var(--ink-3)" }}>
-              Gas-free · {STAX_FEE_LABEL} fee
+            <div
+              className="tnum"
+              style={{ textAlign: "center", marginBottom: 12, fontSize: 12.5, color: "var(--ink-3)" }}
+            >
+              {side === "buy"
+                ? `${n > 0 ? usd(fee) : usd(feeUsd(100))} fee · no network cost`
+                : "No fee · no network cost"}
             </div>
             <button
               className="btn btn-primary btn-block btn-lg tap"
-              disabled={!canBuy || swap.busy}
-              onClick={submit}
+              disabled={!canReview || swap.busy}
+              onClick={() => {
+                haptic.light();
+                setReview(true);
+              }}
             >
-              <Crossfade
-                showFirst={swap.busy}
-                style={{ alignItems: "center" }}
-                first={
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 9 }}>
-                    <Spinner small /> Securing…
-                  </span>
-                }
-                second={<span>Buy {n ? usd(n) : ""}</span>}
-              />
+              {side === "buy" ? `Review buy${n ? ` · ${usd(n)}` : ""}` : "Review sell"}
             </button>
           </div>
         </>
       )}
+
+      <ReviewSheet open={review} onClose={() => setReview(false)} onConfirm={confirm} order={order} tile={d} />
     </div>
   );
 }
