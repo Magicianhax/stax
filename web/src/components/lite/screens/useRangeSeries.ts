@@ -117,10 +117,13 @@ export function blendSeries(
 ): PricePoint[] {
   const usable = parts.filter((p) => p.points.length > 1 && p.weight > 0);
   if (!usable.length) return [];
+  // A holding whose history failed to load still counts: it contributes its
+  // current value flat, so the blend never understates the account.
+  const flat = parts.filter((p) => p.weight > 0 && p.points.length <= 1).reduce((s, p) => s + p.weight, 0);
   const longest = usable.reduce((a, b) => (b.points.length > a.points.length ? b : a)).points;
   const count = Math.min(n, longest.length);
   const ts = pick(longest, count).map((p) => p.t);
-  const out = new Array<number>(count).fill(base);
+  const out = new Array<number>(count).fill(base + (anchor === "end" ? flat : 0));
   for (const p of usable) {
     const vs = pick(p.points, count).map((x) => x.v);
     const ref = anchor === "end" ? vs[vs.length - 1] : vs[0];

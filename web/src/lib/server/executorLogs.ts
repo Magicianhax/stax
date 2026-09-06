@@ -15,7 +15,7 @@ import "server-only";
 //
 // An undeployed executor (Base before launch) yields empty results, never errors.
 import { createPublicClient, decodeEventLog, encodeEventTopics, fallback, http, parseAbiItem, type AbiEvent, type PublicClient } from "viem";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import type { ChainKey, StaxChain } from "@/lib/chains/types";
 import { db, executorEvents } from "@/lib/db";
 import { serverClient } from "@/lib/server/chain";
@@ -326,8 +326,35 @@ async function readRecommendationRows(chain: StaxChain, user?: `0x${string}`): P
   }));
 }
 
+/**
+ * Holdings bought per tx, from the LegFilled events indexed for the same
+ * transactions (LegFilled carries tokenOut but no user, so we key by txHash).
+ * Unknown tokens are skipped; a tx with no legs maps to no entry.
+ */
+async function symbolsByTx(chain: StaxChain, txHashes: string[]): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  if (!txHashes.length) return out;
+  const bySymbolAddr = new Map<string, string>(
+    chain.assets.all.filter((a) => !!a.address).map((a) => [a.address!.toLowerCase(), a.symbol]),
+  );
+  const legs = await db
+    .select()
+    .from(executorEvents)
+    .where(and(eq(executorEvents.chain, chain.key), eq(executorEvents.event, "LegFilled"), inArray(executorEvents.txHash, txHashes)))
+    .orderBy(executorEvents.logIndex);
+  for (const l of legs) {
+    const symbol = bySymbolAddr.get(String(dataOf(l).tokenOut ?? "").toLowerCase());
+    if (!symbol) continue;
+    const list = out.get(l.txHash) ?? [];
+    if (!list.includes(symbol)) list.push(symbol);
+    out.set(l.txHash, list);
+  }
+  return out;
+}
+
 async function readExecutionRows(chain: StaxChain, user?: `0x${string}`): Promise<ExecutionRow[]> {
   const rows = await eventRows(chain, "AllocationExecuted", user);
+  const symbols = await symbolsByTx(chain, rows.map((r) => r.txHash));
   return rows.map((r) => ({
     planId: (r.planId ?? "0x") as `0x${string}`,
     user: (r.user ?? "0x") as `0x${string}`,
@@ -336,6 +363,7 @@ async function readExecutionRows(chain: StaxChain, user?: `0x${string}`): Promis
     txHash: r.txHash as `0x${string}`,
     blockNumber: BigInt(r.blockNumber),
     timestamp: unixSeconds(r.timestamp),
+    symbols: symbols.get(r.txHash),
   }));
 }
 

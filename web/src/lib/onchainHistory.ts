@@ -40,6 +40,8 @@ export interface ExecutionRow {
   txHash: `0x${string}`;
   blockNumber: bigint;
   timestamp?: number;
+  /** Holdings the plan bought, from LegFilled (absent when not indexed). */
+  symbols?: string[];
 }
 
 export interface VeraRecord {
@@ -132,8 +134,10 @@ export function aggregateVeraRecord(
   // Map executed USDC by planId (a plan can be committed once and executed once
   // in the same call, sharing planId).
   const spentByPlan = new Map<string, number>();
+  const symbolsByPlan = new Map<string, string[]>();
   for (const e of execs) {
     spentByPlan.set(e.planId, (spentByPlan.get(e.planId) ?? 0) + e.usdcSpent);
+    if (e.symbols?.length) symbolsByPlan.set(e.planId, e.symbols);
   }
 
   const totalExecutedUsd = execs.reduce((s, e) => s + e.usdcSpent, 0);
@@ -148,6 +152,7 @@ export function aggregateVeraRecord(
       txHash: r.txHash,
       blockNumber: r.blockNumber,
       timestamp: r.timestamp,
+      symbols: symbolsByPlan.get(r.planId),
     }));
 
   return {
@@ -169,6 +174,7 @@ export function toActivityRows(execs: ExecutionRow[]): ActivityRow[] {
       txHash: e.txHash,
       blockNumber: e.blockNumber,
       timestamp: e.timestamp,
+      symbols: e.symbols,
     }));
 }
 

@@ -379,8 +379,8 @@ export interface VerifiedBadgeProps {
   onClick?: () => void;
 }
 
-// Stax verification seal — the sage gradient check we use as the "verified /
-// signed" mark everywhere (Vera's identity, trust badges, receipts). One shared
+// Stax verification seal — the sage gradient shield-check we use as the "verified /
+// signed" mark everywhere (distinct from the plain completion check) (Vera's identity, trust badges, receipts). One shared
 // element keeps the trust language consistent across the app.
 export function Seal({ size = 22 }: { size?: number }) {
   return (
@@ -397,7 +397,7 @@ export function Seal({ size = 22 }: { size?: number }) {
         boxShadow: `0 2px ${Math.round(size / 3)}px color-mix(in srgb, var(--primary) 36%, transparent)`,
       }}
     >
-      <Icon name="check" size={Math.round(size * 0.56)} stroke={3} style={{ color: "var(--primary-ink)" }} />
+      <Icon name="shield" size={Math.round(size * 0.6)} stroke={2.6} style={{ color: "var(--primary-ink)" }} />
     </span>
   );
 }
