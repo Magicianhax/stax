@@ -11,8 +11,16 @@ import { usd, shortAddress } from "@/lib/format";
 import { ONRAMP_PRESETS } from "@/lib/onramp";
 import { Spinner } from "../screens/primitives";
 import { SheetHeader } from "./SheetHeader";
-import { SheetStep } from "@/components/motion";
+import { Reveal, SheetStep } from "@/components/motion";
+import { WalletMarkRow } from "./WalletMarks";
 import s from "./receive.module.css";
+
+// What happens, in three steps, shown before the wallet is connected.
+const STEPS: { title: string; body: string }[] = [
+  { title: "Connect", body: "Pick the wallet you already use. Nothing moves yet." },
+  { title: "Choose an amount", body: "Any USDC you hold on Base, up to the balance in that wallet." },
+  { title: "Confirm in that wallet", body: "It pays the network fee. The dollars land in Stax within a minute." },
+];
 
 function parseAmount(v: string): number {
   const n = parseFloat(v);
@@ -71,16 +79,31 @@ export function FromWallet({
       <SheetStep step="wallet" style={{ display: "flex", flexDirection: "column", gap: 14, padding: "2px 0 6px" }}>
         {!t.walletAddress ? (
           <>
+            <WalletMarkRow />
             <p style={{ margin: "0 2px", fontSize: 14.5, color: "var(--ink-2)", lineHeight: 1.55 }}>
-              Already have USDC in a wallet like MetaMask or Rainbow? Connect it and move dollars to Stax in one step.
+              Already have USDC in MetaMask, Coinbase Wallet, Rainbow or any WalletConnect app? Connect it and move dollars to Stax in one step.
             </p>
+            <Reveal as="ol" aria-label="What happens" style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 10 }}>
+              {STEPS.map((step, i) => (
+                <li key={step.title} style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                  <span
+                    aria-hidden
+                    className="tnum"
+                    style={{ width: 26, height: 26, borderRadius: 99, flex: "none", display: "grid", placeItems: "center", background: "var(--primary-soft)", color: "var(--primary)", fontSize: 12.5, fontWeight: 700 }}
+                  >
+                    {i + 1}
+                  </span>
+                  <span style={{ minWidth: 0, paddingTop: 3 }}>
+                    <span style={{ display: "block", fontSize: 14.5, fontWeight: 600, letterSpacing: "-.01em" }}>{step.title}</span>
+                    <span style={{ display: "block", fontSize: 13, color: "var(--ink-2)", lineHeight: 1.45, marginTop: 2 }}>{step.body}</span>
+                  </span>
+                </li>
+              ))}
+            </Reveal>
             <button type="button" className="btn btn-primary btn-block tap" onClick={() => { haptic.light(); t.connect(); }} style={{ height: 52 }}>
               <Icon name="wallet" size={19} stroke={2.2} />
               Connect a wallet
             </button>
-            <p style={{ margin: "0 2px", fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.5 }}>
-              Your other wallet pays the network fee for this one.
-            </p>
           </>
         ) : (
           <>
@@ -148,7 +171,7 @@ export function FromWallet({
 
             {tooMuch && (
               <p role="alert" style={{ margin: "-4px 2px 0", fontSize: 13, color: "var(--neg)", lineHeight: 1.45 }}>
-                That&apos;s more than the {usd(balance ?? 0)} in this wallet.
+                That’s more than the {usd(balance ?? 0)} in this wallet.
               </p>
             )}
             {t.phase === "error" && t.error && (
@@ -156,7 +179,7 @@ export function FromWallet({
             )}
             {t.phase === "done" && (
               <p aria-live="polite" style={{ margin: "-4px 2px 0", display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, fontWeight: 600, color: "var(--primary)" }}>
-                <Icon name="check" size={16} stroke={2.6} /> It&apos;s in your Stax account.
+                <Icon name="check" size={16} stroke={2.6} /> It’s in your Stax account.
               </p>
             )}
 

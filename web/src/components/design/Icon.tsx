@@ -43,6 +43,8 @@ import {
   Vibrate,
   Signature,
   Globe,
+  Copy,
+  ClipboardPaste,
   type LucideIcon,
 } from "lucide-react";
 
@@ -82,7 +84,9 @@ export type IconName =
   | "moon"
   | "vibrate"
   | "signature"
-  | "globe";
+  | "globe"
+  | "copy"
+  | "paste";
 
 export interface IconProps {
   name: IconName;
@@ -131,6 +135,8 @@ const MAP: Record<IconName, LucideIcon> = {
   vibrate: Vibrate,
   signature: Signature,
   globe: Globe,
+  copy: Copy,
+  paste: ClipboardPaste,
 };
 
 export function Icon({ name, size = 22, stroke = 1.8, style, className }: IconProps) {

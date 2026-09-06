@@ -3,10 +3,10 @@
 // Settings — faithful re-skin of the design's Settings screen, wired to REAL
 // state: profile identity from Privy + the smart-account address, Appearance from
 // useTheme, and a real sign-out via useLogout.
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { usePrivy, useLogout } from "@privy-io/react-auth";
-import { Icon, NetworkSwitch, type IconName } from "@/components/design";
-import { useTheme } from "@/hooks/useTheme";
+import { Icon, NetworkSwitch, StaxMark, type IconName } from "@/components/design";
+import { useTheme, type ColorMode } from "@/hooks/useTheme";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { useHaptics, haptic } from "@/lib/haptics";
 import { shortAddress } from "@/lib/format";
@@ -131,12 +131,20 @@ export function SettingsScreen({
   const name = localPart
     ? localPart.charAt(0).toUpperCase() + localPart.slice(1)
     : "Investor";
-  const initial = (name[0] ?? "I").toUpperCase();
 
-  const darkOn = colorMode === "dark";
+  // The Appearance row must describe what is on screen. The real app renders
+  // useTheme's mode, but the demo pins `data-mode` on `.stax` regardless of the
+  // stored preference, so read the rendered mode from the DOM and prefer it.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [rendered, setRendered] = useState<ColorMode | null>(null);
+  useEffect(() => {
+    const m = rootRef.current?.closest(".stax")?.getAttribute("data-mode");
+    setRendered(m === "light" || m === "dark" ? m : null);
+  }, [colorMode]);
+  const darkOn = (rendered ?? colorMode) === "dark";
 
   return (
-    <div className="screen screen-pad-top" style={{ paddingBottom: 40 }}>
+    <div ref={rootRef} className="screen screen-pad-top" style={{ paddingBottom: 40 }}>
       {/* header */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 22px 0" }}>
         <button onClick={() => go(-1)} style={iconBtn} className="tap" aria-label="Back">
@@ -151,6 +159,7 @@ export function SettingsScreen({
       <div className="anim-rise" style={{ padding: "18px 22px 0" }}>
         <div className="card" style={{ padding: 18, display: "flex", alignItems: "center", gap: 14 }}>
           <span
+            aria-hidden
             style={{
               width: 56,
               height: 56,
@@ -158,13 +167,11 @@ export function SettingsScreen({
               flex: "none",
               display: "grid",
               placeItems: "center",
-              background: "var(--accent)",
-              color: "#fff",
-              fontWeight: 700,
-              fontSize: 24,
+              background: "var(--primary-soft)",
+              boxShadow: "inset 0 0 0 1px var(--line-2)",
             }}
           >
-            {initial}
+            <StaxMark size={30} />
           </span>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontWeight: 700, fontSize: 18, letterSpacing: "-.01em" }}>{name}</div>

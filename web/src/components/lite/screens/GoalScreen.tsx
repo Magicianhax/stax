@@ -29,10 +29,19 @@ export function GoalScreen({
   const balance = bal?.value ?? 0;
 
   const [goal, setGoal] = useState("");
-  const [amt, setAmt] = useState("300");
+  // Default amount: $300 when the cash covers it, otherwise a round figure the
+  // balance does cover, so the screen never opens already in an error state.
+  // The user's own edits win once they type.
+  const [edited, setEdited] = useState<string | null>(null);
+  const suggested = balance >= 300 ? "300" : String(Math.floor(balance / 10) * 10 || Math.floor(balance));
+  const amt = edited ?? suggested;
+  const setAmt = (v: string) => setEdited(v);
 
   const amount = parseFloat(amt);
-  const canBuild = goal.trim().length > 3 && amount > 0;
+  // More than the cash on hand: say so inline, right under the amount, and hold
+  // the button rather than letting the plan fail later at the allocate step.
+  const over = amount > balance + 1e-6;
+  const canBuild = goal.trim().length > 3 && amount > 0 && !over;
 
   return (
     <div className="screen screen-pad-top" style={{ paddingBottom: 20 }}>
@@ -52,7 +61,7 @@ export function GoalScreen({
           hoping to do?
         </h1>
         <p className="body" style={{ marginTop: 12, maxWidth: 300 }}>
-          Say it however feels natural. No finance words needed; I&apos;ll handle the rest.
+          Say it however feels natural. No finance words needed; I’ll handle the rest.
         </p>
 
         {/* amount */}
@@ -67,6 +76,7 @@ export function GoalScreen({
               alignItems: "center",
               gap: 6,
               padding: "12px 16px",
+              ...(over ? { boxShadow: "var(--glass-shadow), var(--glass-hi), inset 0 0 0 1.5px var(--neg)" } : {}),
             }}
           >
             <span className="tnum" style={{ fontSize: 30, fontWeight: 700, color: "var(--ink-3)" }}>
@@ -77,6 +87,8 @@ export function GoalScreen({
               onChange={(e) => setAmt(e.target.value.replace(/[^0-9.]/g, ""))}
               inputMode="decimal"
               aria-label="Amount to invest"
+              aria-invalid={over || undefined}
+              aria-describedby={over ? "goal-amount-error" : undefined}
               className="tnum"
               style={{
                 flex: 1,
@@ -88,6 +100,11 @@ export function GoalScreen({
             />
             <span className="caption" style={{ fontWeight: 500 }}>of {usd(balance)}</span>
           </div>
+          {over && (
+            <p id="goal-amount-error" role="alert" style={{ margin: "8px 4px 0", fontSize: 13, fontWeight: 500, color: "var(--neg)", lineHeight: 1.45 }}>
+              That’s more than the {usd(balance)} you have to invest. Add cash, or start smaller.
+            </p>
+          )}
         </div>
 
         {/* goal text */}

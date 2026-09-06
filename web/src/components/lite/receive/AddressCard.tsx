@@ -2,7 +2,8 @@
 
 // The address card — the only place a deposit address is ever shown, and only
 // after both the network and the token are chosen. QR on a white tile (QR
-// readers need the contrast in dark mode too), mono address with Copy, the
+// readers need the contrast in dark mode too), one mono address row that IS the
+// copy button (no second "Copy address" button under it), the
 // one loud line on the accent surface (icon in accent, words in ink so the
 // pairing clears AA in both modes), and the live deposit list beneath.
 import { useState } from "react";
@@ -49,18 +50,22 @@ export function AddressCard({
         <QRCodeSVG value={data.address} size={168} level="M" marginSize={0} bgColor="#ffffff" fgColor="#1c201a" />
       </div>
 
+      {/* One copy affordance: the address row itself. Tapping anywhere on it copies. */}
       <button
         type="button"
         onClick={copy}
         className={`${s.option} tap`}
         aria-label={`Copy address ${data.address}`}
-        style={{ minHeight: 48, padding: "10px 14px", justifyContent: "center", gap: 10 }}
+        style={{ minHeight: 52, padding: "8px 8px 8px 16px", gap: 12 }}
       >
-        <span className="mono" style={{ fontSize: 13.5, letterSpacing: "-.01em", overflowWrap: "anywhere" }}>{shortMid(data.address)}</span>
-        <Icon name="link" size={17} style={{ color: "var(--ink-2)", flex: "none" }} />
-      </button>
-      <button type="button" onClick={copy} className="btn btn-primary btn-block tap" style={{ height: 50 }}>
-        Copy address
+        <span className="mono" style={{ flex: 1, minWidth: 0, fontSize: 13.5, letterSpacing: "-.01em", overflowWrap: "anywhere" }}>{shortMid(data.address)}</span>
+        <span
+          aria-hidden
+          style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 36, padding: "0 12px", borderRadius: 99, flex: "none", background: "var(--primary)", color: "var(--primary-ink)", fontSize: 13, fontWeight: 700 }}
+        >
+          <Icon name="copy" size={15} stroke={2.2} />
+          Copy
+        </span>
       </button>
 
       <div

@@ -4,7 +4,7 @@
 // the active network (Base / Mantle). Pick an asset, enter amount + recipient, confirm, and it goes as one
 // gasless transfer (useTransfer). Real funds: address is validated, amount is
 // capped to the balance, and a confirm step guards against accidental sends.
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { isAddress, parseUnits } from "viem";
 import { useUsdcBalance, usePortfolio } from "@/hooks/useBalances";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
@@ -70,6 +70,29 @@ export function SendScreen({
   const [to, setTo] = useState("");
   const [confirming, setConfirming] = useState(false);
 
+  // Paste: reads the clipboard when the browser allows it (secure context +
+  // permission). Hidden where readText doesn't exist; a denied read just puts
+  // the caret in the field so the user can paste by hand.
+  const toRef = useRef<HTMLInputElement>(null);
+  const canPaste = useSyncExternalStore(
+    () => () => {},
+    () => typeof navigator.clipboard?.readText === "function",
+    () => false,
+  );
+  const paste = async () => {
+    try {
+      const text = (await navigator.clipboard.readText()).trim();
+      if (text) {
+        setTo(text);
+        setConfirming(false);
+        return;
+      }
+    } catch {
+      /* permission denied or unavailable — fall through */
+    }
+    toRef.current?.focus();
+  };
+
   const balanceNum = fromUnits(asset.raw, asset.decimals);
   const amountNum = Number(amount) || 0;
   const amountRaw = (() => {
@@ -82,6 +105,8 @@ export function SendScreen({
   const usdValue = asset.priceUsd !== undefined ? amountNum * asset.priceUsd : undefined;
 
   const addrValid = isAddress(to.trim());
+  // Only complain once there's something address-shaped to judge.
+  const addrError = to.trim().length >= 6 && !addrValid;
   const overBalance = amountRaw > asset.raw;
   const canReview = amountRaw > BigInt(0) && !overBalance && addrValid;
 
@@ -138,7 +163,9 @@ export function SendScreen({
         <h1 className="serif" style={{ margin: 0, fontSize: 27, letterSpacing: "-.01em" }}>Send</h1>
       </div>
 
-      <div style={{ padding: "16px 22px 0", flex: 1, overflowY: "auto" }}>
+      {/* The form sits directly under the header; the action follows the form
+          instead of being pushed to the bottom over a band of empty space. */}
+      <div style={{ padding: "16px 22px 0" }}>
         {/* asset selector */}
         <div className="label-eyebrow" style={{ marginBottom: 8 }}>Asset</div>
         <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4, marginBottom: 18 }}>
@@ -200,16 +227,28 @@ export function SendScreen({
         </div>
         {overBalance && (
           <div style={{ marginTop: 8, fontSize: 13, color: "var(--neg)", fontWeight: 500 }}>
-            That&apos;s more than your {asset.symbol} balance.
+            That’s more than your {asset.symbol} balance.
           </div>
         )}
 
         {/* recipient */}
         <div className="label-eyebrow" style={{ margin: "18px 0 8px" }}>To</div>
-        <div className="card" style={{ padding: "4px 16px", display: "flex", alignItems: "center", gap: 10 }}>
+        <div
+          className="card"
+          style={{
+            padding: "4px 8px 4px 16px",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            ...(addrError ? { boxShadow: "var(--glass-shadow), var(--glass-hi), inset 0 0 0 1.5px var(--neg)" } : {}),
+          }}
+        >
           <input
+            ref={toRef}
             placeholder={`${chain.name} address (0x…)`}
             aria-label={`Recipient ${chain.name} address`}
+            aria-invalid={addrError || undefined}
+            aria-describedby={addrError ? "send-to-error" : undefined}
             value={to}
             onChange={(e) => { setTo(e.target.value); setConfirming(false); }}
             spellCheck={false}
@@ -218,21 +257,36 @@ export function SendScreen({
             className="mono"
             style={{ flex: 1, minWidth: 0, border: "none", background: "transparent", outline: "none", fontSize: 14, padding: "14px 0", color: "var(--ink)" }}
           />
-          {to.trim().length > 0 && (
+          {to.trim().length === 0 && canPaste ? (
+            <button
+              type="button"
+              onClick={paste}
+              className="tap"
+              style={{ minHeight: 40, padding: "0 12px", borderRadius: 11, flex: "none", display: "inline-flex", alignItems: "center", gap: 6, background: "var(--surface-2)", color: "var(--primary)", fontWeight: 700, fontSize: 13 }}
+            >
+              <Icon name="paste" size={15} stroke={2.2} />
+              Paste
+            </button>
+          ) : to.trim().length > 0 ? (
             <Icon
               name={addrValid ? "check" : "close"}
               size={18}
               stroke={2.2}
-              style={{ color: addrValid ? "var(--primary)" : "var(--ink-3)", flex: "none" }}
+              style={{ color: addrValid ? "var(--primary)" : "var(--neg)", flex: "none", marginRight: 8 }}
             />
-          )}
+          ) : null}
         </div>
+        {addrError && (
+          <p id="send-to-error" role="alert" style={{ margin: "8px 4px 0", fontSize: 13, fontWeight: 500, color: "var(--neg)", lineHeight: 1.45 }}>
+            That doesn’t look like a {chain.name} address. It starts with 0x and is 42 characters long.
+          </p>
+        )}
 
         {/* safety note */}
         <div style={{ display: "flex", alignItems: "flex-start", gap: 9, padding: "11px 13px", marginTop: 16, borderRadius: 14, background: "var(--accent-soft)", color: "var(--ink-2)", fontSize: 12.5, lineHeight: 1.5 }}>
           <Icon name="info" size={16} stroke={2} style={{ flex: "none", marginTop: 1, color: "var(--accent)" }} />
           <span>
-            Double-check the address, on the <b style={{ color: "var(--ink)" }}>{chain.name}</b> network. Transfers can&apos;t be undone.
+            Double-check the address. It must be on the <b style={{ color: "var(--ink)" }}>{`${chain.name} network`}</b>. Transfers can’t be undone.
           </span>
         </div>
 
@@ -242,7 +296,7 @@ export function SendScreen({
       </div>
 
       {/* pinned action */}
-      <div style={{ position: "sticky", bottom: 0, padding: "12px 22px calc(18px + env(safe-area-inset-bottom))", background: "linear-gradient(to top, var(--paper), var(--paper) 64%, transparent)" }}>
+      <div style={{ padding: "20px 22px calc(18px + env(safe-area-inset-bottom))" }}>
         {!confirming ? (
           <button
             className="btn btn-primary btn-block btn-lg tap"

@@ -8,20 +8,56 @@ import { useEffect, useState, useCallback } from "react";
 import { useSessionSigners, usePrivy } from "@privy-io/react-auth";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { useUsdcBalance } from "@/hooks/useBalances";
-import { useToast, Icon, Seal, BottomSheet, ChainLaunching, ChainMark } from "@/components/design";
+import { useToast, Icon, Seal, BottomSheet, ChainLaunching, ChainMark, ProjectionChart } from "@/components/design";
+import { Reveal } from "@/components/motion";
 import { TokenLogo } from "@/components/lite/TokenLogo";
+import { useDemo } from "@/components/demo/DemoProvider";
 import { displayFor } from "@/lib/displayAssets";
 import { authedFetch } from "@/lib/authedFetch";
-import { CADENCE_LABEL, type Cadence, type AutopilotConfig } from "@/lib/autopilot";
+import { CADENCE_LABEL, nextRunAfter, type Cadence, type AutopilotConfig } from "@/lib/autopilot";
 import { getChain, explorerTx, type ChainKey } from "@/lib/chains";
 import { useChainKey } from "@/lib/chains/active";
+import { DEMO_NOW, projection } from "@/lib/demoSeries";
 import { usd } from "@/lib/format";
-import { STAX_FEE_LABEL } from "@/lib/fees";
+import { feeUsd } from "@/lib/fees";
 import { haptic } from "@/lib/haptics";
 import { iconBtn, Spinner, sectionLabel } from "./primitives";
 import { useChainReady } from "../useChainReady";
 
 const CADENCES: Cadence[] = ["daily", "weekly", "biweekly", "monthly"];
+// "$25/week", "$25 every 2 weeks" — the per-run phrasing for previews.
+const PER_RUN: Record<Cadence, string> = { daily: "/day", weekly: "/week", biweekly: " every 2 weeks", monthly: "/month" };
+const PROJECTION_MONTHS = 12;
+
+const wholeUsd = (v: number) => usd(v).replace(/\.00$/, "");
+/** "Mon 14 Sep" — weekday, day, month; no year, no time. */
+function shortDay(ms: number): string {
+  const d = new Date(ms);
+  const wd = d.toLocaleDateString("en-US", { weekday: "short" });
+  const mon = d.toLocaleDateString("en-US", { month: "short" });
+  return `${wd} ${d.getDate()} ${mon}`;
+}
+
+/** Projection chart + its one-line reading, live from amount · cadence · risk. */
+function Projection({ amount, cadence, riskBps }: { amount: number; cadence: Cadence; riskBps: number }) {
+  const { contributed, projected } = projection({ amount, cadence, riskBps, months: PROJECTION_MONTHS });
+  const end = projected[projected.length - 1]?.v ?? 0;
+  return (
+    <div className="card" style={{ padding: "16px 16px 14px" }}>
+      <ProjectionChart contributed={contributed} projected={projected} height={132} />
+      <div aria-live="polite" style={{ marginTop: 12, fontSize: 13.5, color: "var(--ink-2)", lineHeight: 1.45 }}>
+        {amount > 0 ? (
+          <>
+            ≈ <b className="tnum" style={{ color: "var(--ink)" }}>{wholeUsd(Math.round(end))}</b> in {PROJECTION_MONTHS} months at{" "}
+            <b className="tnum" style={{ color: "var(--ink)" }}>{wholeUsd(amount)}{PER_RUN[cadence]}</b>. A guide, not a promise.
+          </>
+        ) : (
+          "Set an amount to see where it could go."
+        )}
+      </div>
+    </div>
+  );
+}
 const RISK_TIERS: { label: string; bps: number }[] = [
   { label: "Careful", bps: 4000 },
   { label: "Balanced", bps: 6000 },
@@ -65,6 +101,11 @@ export function AutopilotScreen({
   const cash = bal?.value ?? 0;
   const { addSessionSigners, removeSessionSigners } = useSessionSigners();
   const { notify } = useToast();
+  // Demo previews anchor to the fixed demo clock so screenshots are stable.
+  // Read once on mount; the preview only needs a "from now" that doesn't drift
+  // between keystrokes.
+  const demo = useDemo();
+  const [now] = useState(() => (demo ? DEMO_NOW : Date.now()));
 
   // The embedded wallet linked account carries the `delegated` flag + the server
   // `id` (walletId) that the backend signs with. (ConnectedWallet from useWallets
@@ -119,6 +160,8 @@ export function AutopilotScreen({
   }, []);
 
   const amountNum = Number(amount) || 0;
+  const riskBps = RISK_TIERS[risk].bps;
+  const nextRun = nextRunAfter(Math.floor(now / 1000), cadence) * 1000;
   const active = Boolean(config?.active);
   // The autopilot runs on the network it was saved on, not the one the UI is
   // showing. Receipts link to that chain's explorer.
@@ -365,13 +408,16 @@ export function AutopilotScreen({
                     {usd(cash)} available{cash + 1e-6 < config.amountUsd ? " · add cash to keep running" : ""}
                   </div>
                 </div>
+                <div style={{ marginTop: 10 }}>
+                  <Projection amount={config.amountUsd} cadence={config.cadence} riskBps={config.riskCeilingBps} />
+                </div>
               </div>
 
               <div style={{ padding: "20px 22px 0" }}>
                 <div style={sectionLabel}>Activity</div>
                 {runs.length === 0 ? (
                   <div className="card" style={{ padding: "26px 18px", textAlign: "center", color: "var(--ink-2)", fontSize: 13.5, lineHeight: 1.5 }}>
-                    No runs yet. Vera&apos;s actions will appear here, each one tappable.
+                    No runs yet. Vera’s actions will appear here, each one tappable.
                   </div>
                 ) : (
                   <div className="card" style={{ padding: "4px 16px" }}>
@@ -421,19 +467,17 @@ export function AutopilotScreen({
           <>
           <div style={{ padding: "18px 22px 0" }}>
             <div style={sectionLabel}>Authorization</div>
+            {/* Status only. The one CTA at the bottom authorizes first, then starts. */}
             <div className="card" style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 }}>
-              <Icon name={delegated ? "shield" : "lock"} size={20} style={{ color: delegated ? "var(--primary)" : "var(--ink-3)", flex: "none" }} />
+              <span style={{ width: 36, height: 36, borderRadius: 99, flex: "none", display: "grid", placeItems: "center", background: delegated ? "var(--primary-soft)" : "var(--surface-2)", color: delegated ? "var(--primary)" : "var(--ink-3)" }}>
+                <Icon name={delegated ? "shield" : "lock"} size={19} stroke={2} />
+              </span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: 14.5 }}>{delegated ? "Vera is authorized" : "Authorize Vera"}</div>
+                <div style={{ fontWeight: 600, fontSize: 14.5 }}>{delegated ? "Vera is authorized" : "Not yet authorized"}</div>
                 <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 2 }}>
-                  {delegated ? "Bounded, gasless, revocable any time." : "A one-time grant so Vera can place your scheduled plans."}
+                  {delegated ? "Bounded, gasless, revocable any time." : "A one-time grant lets Vera place your scheduled plans. Revocable any time."}
                 </div>
               </div>
-              {!delegated && (
-                <button className="btn btn-primary tap" disabled={busy} onClick={authorize} style={{ height: 38, padding: "0 14px", flex: "none" }}>
-                  {busy ? <Spinner small /> : "Authorize"}
-                </button>
-              )}
             </div>
           </div>
 
@@ -505,7 +549,7 @@ export function AutopilotScreen({
               </div>
 
               <div>
-                <span style={{ fontSize: 13, color: "var(--ink-2)" }}>Risk ceiling Vera won&apos;t cross</span>
+                <span style={{ fontSize: 13, color: "var(--ink-2)" }}>Risk ceiling Vera won’t cross</span>
                 <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
                   {RISK_TIERS.map((t, i) => (
                     <button key={t.label} onClick={() => { setRisk(i); setActiveTemplate(null); }} className={`chip tap ${risk === i ? "is-dark" : ""}`} style={{ height: 36, flex: 1, justifyContent: "center" }}>
@@ -515,8 +559,23 @@ export function AutopilotScreen({
                 </div>
               </div>
             </div>
+            {/* preview: what the first run will look like */}
+            <div
+              aria-live="polite"
+              style={{ display: "flex", alignItems: "center", gap: 9, margin: "10px 2px 0", fontSize: 13.5, fontWeight: 600, color: "var(--ink)" }}
+            >
+              <Icon name="clock" size={16} stroke={2} style={{ color: "var(--primary)", flex: "none" }} />
+              <span className="tnum">
+                Next run {shortDay(nextRun)} · {wholeUsd(amountNum)} · {RISK_TIERS[risk].label}
+              </span>
+            </div>
+
+            <Reveal style={{ marginTop: 14 }}>
+              <Projection amount={amountNum} cadence={cadence} riskBps={riskBps} />
+            </Reveal>
+
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 10, lineHeight: 1.5 }}>
-              Each run deploys {usd(amountNum)} ({STAX_FEE_LABEL} fee, gas on us) only if your balance covers it and Vera&apos;s
+              Each run puts in {usd(amountNum)} ({usd(feeUsd(amountNum))} fee, no network cost) only if your balance covers it and Vera’s
               risk stays at or under your ceiling. Capped at {usd(amountNum * 2)} per period.
             </div>
           </div>
@@ -526,8 +585,9 @@ export function AutopilotScreen({
           {/* actions */}
           <div style={{ padding: "22px 22px 0" }}>
             {!active ? (
-              <button className="btn btn-primary btn-block btn-lg tap" disabled={busy || !delegated} style={{ opacity: delegated ? 1 : 0.5 }} onClick={save}>
-                {busy ? <Spinner small /> : delegated ? "Start autopilot" : "Authorize Vera first"}
+              // One CTA: it authorizes when that's the next step, and starts once it's done.
+              <button className="btn btn-primary btn-block btn-lg tap" disabled={busy} onClick={delegated ? save : authorize}>
+                {busy ? <Spinner small /> : delegated ? "Start autopilot" : "Authorize Vera"}
               </button>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -619,7 +679,7 @@ export function AutopilotScreen({
         <div style={{ textAlign: "center" }}>
           <p style={{ margin: "0 auto", maxWidth: 320, fontSize: 14.5, color: "var(--ink-2)", lineHeight: 1.55 }}>
             Vera will invest <b style={{ color: "var(--ink)" }}>{usd(config?.amountUsd ?? amountNum)}</b> of your cash
-            right now, following your current plan. This places a real on-chain order and can&apos;t be undone.
+            right now, following your current plan. This places a real on-chain order and can’t be undone.
           </p>
           <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
             <button className="btn btn-ghost btn-block tap" onClick={() => setConfirmOpen(false)} disabled={busy}>
