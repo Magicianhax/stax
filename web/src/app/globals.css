@@ -709,6 +709,11 @@
 .stax .sheet-panel[data-open="true"] {
   animation: sheetUp 0.42s var(--ease-drawer) backwards;
 }
+/* While a BottomSheet is open the screens behind it must not scroll (the sheet
+   is portaled to .stax, so wheel/touch on the scrim would otherwise reach them). */
+.stax[data-sheet-open="true"] .screen {
+  overflow-y: hidden;
+}
 @keyframes breathe {
   0%,
   100% {

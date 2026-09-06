@@ -118,8 +118,9 @@ export function Sparkline({
     >
       <defs>
         <linearGradient id={`sp${id}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity={strong ? 0.22 : 0.14} />
-          <stop offset="100%" stopColor={color} stopOpacity="0" />
+          {/* CSS vars don't resolve in SVG presentation attributes; set stop-color via style. */}
+          <stop offset="0%" style={{ stopColor: color, stopOpacity: strong ? 0.22 : 0.14 }} />
+          <stop offset="100%" style={{ stopColor: color, stopOpacity: 0 }} />
         </linearGradient>
       </defs>
       {showArea && (

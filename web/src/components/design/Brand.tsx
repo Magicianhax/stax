@@ -182,7 +182,7 @@ export function LogoCluster({ assets, size = 24, max = 4, ring = "var(--surface)
   const shown = assets.length > max ? assets.slice(0, max) : assets;
   const rest = assets.length - shown.length;
   const radius = Math.round(size * 0.295);
-  const overlap = Math.round(size * 0.28);
+  const overlap = Math.round(size * 0.22);
   const item = (i: number): React.CSSProperties => ({
     display: "block",
     flex: "none",
@@ -196,7 +196,9 @@ export function LogoCluster({ assets, size = 24, max = 4, ring = "var(--surface)
     <span
       aria-label={assets.map((a) => a.name ?? a.symbol).join(", ")}
       role="img"
-      style={{ display: "inline-flex", alignItems: "center", flex: "none", padding: 2 }}
+      // isolate: the per-tile z-index must not escape into the page (it was
+      // painting clusters over sticky bars).
+      style={{ display: "inline-flex", alignItems: "center", flex: "none", padding: 2, isolation: "isolate" }}
     >
       {shown.map((a, i) => (
         <span key={a.symbol} style={item(i)}>

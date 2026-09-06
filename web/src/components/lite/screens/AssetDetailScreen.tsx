@@ -321,6 +321,7 @@ export function AssetDetailScreen({
         style={{
           position: "sticky",
           bottom: 0,
+          zIndex: 5,
           marginTop: "auto",
           padding: "16px 22px calc(18px + env(safe-area-inset-bottom))",
           background: "linear-gradient(to top, var(--paper), var(--paper) 62%, transparent)",

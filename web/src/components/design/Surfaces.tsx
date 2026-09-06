@@ -3,7 +3,8 @@
 // Stax surface + layout primitives — ported from the design handoff (components.jsx).
 // BottomSheet, HoldingRow, Eyebrow, VerifiedBadge, Stat, SectionTitle.
 // (Confetti now lives in the motion kit as Burst; re-exported below.)
-import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Icon, type IconName } from "./Icon";
 import { AssetTile, type TileAsset } from "./Brand";
 import { Sparkline } from "./Charts";
@@ -73,9 +74,29 @@ export function BottomSheet({ open, onClose, title, label, children }: BottomShe
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  if (!mounted) return null;
+  // Render at the app root (`.stax`), not inside the scrolling `.screen`: an
+  // absolutely-positioned overlay inside a scroll container scrolls away with
+  // the content, so a sheet opened on a scrolled page sat mid-page with the
+  // page still moving underneath it. While open, `data-sheet-open` on the root
+  // freezes every `.screen` scroller (see globals.css).
+  const anchor = useRef<HTMLSpanElement>(null);
+  const [host, setHost] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    setHost((anchor.current?.closest(".stax") as HTMLElement | null) ?? null);
+  }, []);
+  useEffect(() => {
+    if (!host || !open) return;
+    const prev = host.getAttribute("data-sheet-open");
+    host.setAttribute("data-sheet-open", "true");
+    return () => {
+      if (prev === null) host.removeAttribute("data-sheet-open");
+    };
+  }, [host, open]);
 
-  return (
+  const marker = <span ref={anchor} hidden aria-hidden />;
+  if (!mounted) return marker;
+
+  const overlay = (
     <div
       onClick={onClose}
       data-open={shown ? "true" : "false"}
@@ -179,6 +200,12 @@ export function BottomSheet({ open, onClose, title, label, children }: BottomShe
         {children}
       </div>
     </div>
+  );
+  return (
+    <>
+      {marker}
+      {host ? createPortal(overlay, host) : overlay}
+    </>
   );
 }
 
