@@ -1,18 +1,15 @@
 "use client";
 
-// Wallet — the account's money in one place: total balance, Add money (Coinbase
-// Onramp, card/bank → USDC on Base) with Cash out beside it, quick Send / Receive
-// / Buy, spendable cash (USDC), holdings (live price · qty · value), and the full
-// incoming/outgoing transaction history. Receive is an in-place sheet (QR +
-// address); each transaction opens a detail sheet with an explorer link.
+// Wallet — the account's money in one place: total balance, quick Receive /
+// Send / Invest (and Cash out when Coinbase Offramp is configured for this
+// chain), spendable cash (USDC), holdings (live price · qty · value), and the
+// full incoming/outgoing transaction history. Each transaction opens a detail
+// sheet with an explorer link.
 //
-// Add money is env-gated (NEXT_PUBLIC_CDP_PROJECT_ID): unset → the button opens
-// the Receive sheet, so the screen never shows a dead primary. On a chain Coinbase
-// can't deliver to (Mantle) the sheet says so and points at Receive.
-//
-// Receive on Base is the three-way chooser (components/lite/receive, docs/RECEIVE.md):
-// from another wallet, add cash, or from any network. Mantle keeps the plain
-// address + QR sheet.
+// Receive is the single way in. On Base it is the three-way chooser
+// (components/lite/receive, docs/RECEIVE.md): from another wallet, Add cash
+// (Coinbase Onramp sheet when NEXT_PUBLIC_CDP_PROJECT_ID is set, otherwise
+// "Coming soon"), or from any network. Mantle keeps the plain address + QR sheet.
 import { useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { usePrivy } from "@privy-io/react-auth";
@@ -92,13 +89,11 @@ export function WalletScreen({
   const buyUrl = rampHere && rampParams ? onrampUrl(rampParams) : undefined;
   const sellUrl = rampHere && rampParams ? offrampUrl({ ...rampParams, amountUsd: undefined }) : undefined;
 
+  // Receive is the single way in: on Base it opens the chooser (external
+  // wallet / Add cash / any network); Add cash inside it opens the onramp sheet.
   const openAddMoney = () => {
     haptic.light();
-    if (!rampOn) {
-      setReceiveOpen(true);
-      return;
-    }
-    setAddOpen(true);
+    setReceiveOpen(true);
   };
   const continueToCoinbase = () => {
     if (!buyUrl) return;
@@ -184,36 +179,12 @@ export function WalletScreen({
         </div>
       </div>
 
-      {/* the one obvious action: put money in. Cash out sits beside it as the
-          quiet reverse, only when Coinbase can actually do it on this chain. */}
-      <div style={{ display: "flex", gap: 10, padding: "14px 22px 0" }}>
-        <button
-          type="button"
-          className="btn btn-primary tap"
-          onClick={openAddMoney}
-          style={{ flex: 1, height: 52, fontSize: 16 }}
-        >
-          <Icon name="plus" size={19} stroke={2.4} />
-          Add money
-        </button>
-        {sellUrl && (
-          <button
-            type="button"
-            className="btn btn-ghost tap"
-            onClick={cashOut}
-            aria-label="Cash out with Coinbase (opens in a new tab)"
-            style={{ flex: "none", height: 52, padding: "0 18px", fontSize: 15 }}
-          >
-            Cash out
-          </button>
-        )}
-      </div>
-
       {/* quick actions */}
-      <div style={{ display: "flex", gap: 10, padding: "12px 22px 0" }}>
+      <div style={{ display: "flex", gap: 10, padding: "14px 22px 0" }}>
+        <Action icon="arrowDR" label="Receive" onClick={openAddMoney} />
         <Action icon="arrowUR" label="Send" onClick={() => go("send")} />
-        <Action icon="arrowDR" label="Receive" onClick={() => { haptic.light(); setReceiveOpen(true); }} />
         <Action icon="trend" label="Invest" onClick={() => go("market")} />
+        {sellUrl && <Action icon="bank" label="Cash out" onClick={cashOut} />}
       </div>
 
       {/* cash */}

@@ -40,6 +40,10 @@ const BUNDLER_URL = "/api/pimlico";
 
 const ENTRY_POINT = { address: entryPoint07Address, version: "0.7" } as const;
 
+// callGasLimit padding over the bundler's estimate (see sendSponsoredCalls).
+const BPS = BigInt(10_000);
+const CALL_GAS_PAD_BPS = BigInt(15_000); // +50%
+
 /**
  * Ask the owner wallet to point at `chain` before we build. Privy's embedded
  * wallet switches silently; an injected wallet may prompt. Unsupported or
@@ -131,10 +135,26 @@ export async function sendSponsoredCalls(
   if (calls.length === 0) throw new Error("sendSponsoredCalls: no calls provided.");
 
   const { smartAccountClient, account } = await getSmartAccountClient(provider, chain);
+  const ops = calls.map((c) => ({ to: c.to, data: c.data, value: c.value ?? BigInt(0) }));
 
+  // Estimate first, then send with a padded callGasLimit. The bundler's estimate
+  // is a simulation at the current state; aggregator routes (Kyber through
+  // Uniswap v4 / Aerodrome) can need noticeably more gas a block later, and an
+  // out-of-gas inside the router surfaces as a reverted op ("Call failed") that
+  // still costs the sponsor. The paymaster pays actual gas, not the limit, so
+  // the padding is free when unused. Fees + paymaster data are re-derived for
+  // the padded limits by `sendUserOperation` itself.
+  const prepared = await smartAccountClient.prepareUserOperation({ account, calls: ops });
   const userOpHash = await smartAccountClient.sendUserOperation({
     account,
-    calls: calls.map((c) => ({ to: c.to, data: c.data, value: c.value ?? BigInt(0) })),
+    calls: ops,
+    callGasLimit: (prepared.callGasLimit * CALL_GAS_PAD_BPS) / BPS,
+    verificationGasLimit: prepared.verificationGasLimit,
+    preVerificationGas: prepared.preVerificationGas,
+    paymasterVerificationGasLimit: prepared.paymasterVerificationGasLimit,
+    paymasterPostOpGasLimit: prepared.paymasterPostOpGasLimit,
+    maxFeePerGas: prepared.maxFeePerGas,
+    maxPriorityFeePerGas: prepared.maxPriorityFeePerGas,
   });
 
   const receipt = await smartAccountClient.waitForUserOperationReceipt({ hash: userOpHash });
