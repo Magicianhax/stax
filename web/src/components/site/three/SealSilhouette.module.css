@@ -1,0 +1,44 @@
+/* One glass slab leaned back ~18°, roughly the pose the 3D seal takes so the
+   swap is quiet. Sizes are percentages of the box so it scales with the stage. */
+.root {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.slab {
+  position: relative;
+  width: 78%;
+  aspect-ratio: 1.6 / 1;
+  border-radius: 4% / 6%;
+  background: var(--s-glass);
+  border: 1px solid var(--s-glass-line);
+  box-shadow: var(--s-glass-hi), var(--s-glass-shadow);
+  transform: perspective(1100px) rotateX(18deg) rotateY(-6deg);
+  opacity: 0.85;
+}
+
+.seal {
+  position: absolute;
+  right: 9%;
+  bottom: 12%;
+  width: 17%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--s-accent) 45%, transparent);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--s-accent) 55%, transparent);
+}
+
+.shadow {
+  position: absolute;
+  left: 50%;
+  top: 74%;
+  width: 60%;
+  height: 10%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(40, 52, 38, 0.18), transparent);
+}

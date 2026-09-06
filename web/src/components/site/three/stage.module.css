@@ -1,0 +1,33 @@
+/* The stage fills the reserved aspect box (Hero.module.css .stage). */
+.root {
+  position: absolute;
+  inset: 0;
+}
+
+.canvas {
+  position: absolute !important;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+  opacity: 0;
+  transition: opacity 500ms var(--s-ease-expo);
+}
+
+.root[data-ready] .canvas {
+  opacity: 1;
+}
+
+.fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  color: var(--s-ink-3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas {
+    transition: none;
+  }
+}

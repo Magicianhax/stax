@@ -2,7 +2,7 @@
 
 // First viewport. Left, 7 columns: kicker with the two award rosettes, the
 // H1, one sentence, two buttons, the film link and the proof strip. Right,
-// 5 columns: the stack, a 3D object of seven glass share tiles (three, loaded
+// 5 columns: the seal, a 3D signed-plan slab that stamps itself verified (three, loaded
 // lazily, never server-rendered; a CSS silhouette holds its box until then).
 // The ground is the DotField (sparse breathing lattice + pointer glow), masked
 // at the edges, on this section only. One staggered entrance on the copy; the
@@ -10,7 +10,7 @@
 import { useState } from "react";
 import dynamic from "next/dynamic";
 import { ArrowRight, Play } from "lucide-react";
-import { StackSilhouette } from "@/components/site/three/StackSilhouette";
+import { SealSilhouette } from "@/components/site/three/SealSilhouette";
 import { FilmLightbox } from "@/components/site/FilmLightbox";
 import { DotField } from "@/components/site/ui/DotField";
 import { Reveal } from "@/components/site/ui/Reveal";
@@ -20,9 +20,9 @@ import { ProofWall } from "./ProofWall";
 import { AwardMark, AWARD_EVENT } from "./Awards";
 import s from "./Hero.module.css";
 
-const HeroStack = dynamic(() => import("@/components/site/three/HeroStack"), {
+const HeroSeal = dynamic(() => import("@/components/site/three/HeroSeal"), {
   ssr: false,
-  loading: () => <StackSilhouette />,
+  loading: () => <SealSilhouette />,
 });
 
 export function Hero() {
@@ -80,7 +80,7 @@ export function Hero() {
         </Reveal>
 
         <div className={s.stage} aria-hidden="true">
-          <HeroStack />
+          <HeroSeal />
         </div>
       </div>
 
