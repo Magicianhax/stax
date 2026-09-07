@@ -35,6 +35,8 @@ jobs:
         run: npx tsc --noEmit -p tsconfig.json
       - name: Lint
         run: npx eslint src --max-warnings=1000
+      - name: Money maths (gift split, fee, parked amounts)
+        run: npx vitest run
       - name: Migration drift (schema ↔ drizzle/ folder)
         run: node node_modules/drizzle-kit/bin.cjs check
 

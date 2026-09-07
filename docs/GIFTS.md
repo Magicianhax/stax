@@ -137,6 +137,21 @@ authorisation, a successful claim submitted by a third party, a replayed claim, 
 before the window, reclaim by a stranger, a successful reclaim, an unknown id, and signer
 rotation.
 
+The money maths has its own suite: `web/src/lib/gifts.test.ts`, twenty cases, run with
+`npm test` in `web/`. It covers `splitGiftBasket`, `mergeGiftTokens`, `giftCreateCalls` and
+the review card's four money lines. It runs in CI as the "Money maths" step and inside
+`npm run verify`, so a broken money invariant fails a Vercel build the same way a type
+error does. Vitest is configured for node and pure functions only — no jsdom, no
+testing-library, nothing that renders.
+
+Two of its assertions exist because of bugs that shipped past review. The cash row must
+equal the cash total exactly: the card once spread the platform fee across every holding,
+showing $39.94 against a summary line reading $40.00, and only the distribution was wrong
+so every total still balanced. And the displayed lines are bounded to within one cent of
+what the giver pays: three lines each rounded on their own do not always sum to the rounded
+total, so a card that wants exact agreement has to let one line absorb the remainder, the
+way `splitByWeight` lets the last leg take the dust.
+
 ---
 
 ## The data
