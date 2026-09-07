@@ -7,9 +7,11 @@
 //   - Crypto / yield tokens (BTC, ETH, sUSDe, mETH, FBTC, USDY): CoinGecko charts.
 //   - USDC / aUSDC / mUSD: flat $1 series, synthesized (they are dollar pegs).
 //
-// Everything is cached in-memory per instance (promise-deduped) so a screenful
-// of clients costs at most one upstream call per symbol per TTL window.
+// Everything goes through lib/server/cache.ts (Upstash Redis when configured,
+// else a per-instance map; single-flight per key) so a screenful of clients
+// costs at most one upstream call per symbol per TTL window.
 import type { StaxChain } from "@/lib/chains/types";
+import { cached } from "@/lib/server/cache";
 
 export type MarketRange = "1D" | "1W" | "1M" | "1Y" | "5Y";
 export const MARKET_RANGES: MarketRange[] = ["1D", "1W", "1M", "1Y", "5Y"];
@@ -25,19 +27,6 @@ export interface DaySummaryEntry {
   dayChangePct: number;
   /** Downsampled 1D series for row sparklines. */
   spark: number[];
-}
-
-// ── tiny TTL cache (promise-deduped, per warm instance) ──────────────────────
-const cacheStore = new Map<string, { at: number; value: Promise<unknown> }>();
-function ttlCache<T>(key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
-  const hit = cacheStore.get(key);
-  if (hit && Date.now() - hit.at < ttlMs) return hit.value as Promise<T>;
-  const value = load().catch((err) => {
-    cacheStore.delete(key); // don't cache failures for the whole TTL
-    throw err;
-  });
-  cacheStore.set(key, { at: Date.now(), value });
-  return value;
 }
 
 // ── source mapping ────────────────────────────────────────────────────────────
@@ -149,21 +138,20 @@ export function downsample(series: number[], n: number): number[] {
   return out;
 }
 
-// Intraday data moves; long ranges don't. Cache accordingly.
+// Cache TTLs in seconds: short ranges move, long ranges don't.
 const HISTORY_TTL: Record<MarketRange, number> = {
-  "1D": 3 * 60_000,
-  "1W": 15 * 60_000,
-  "1M": 60 * 60_000,
-  "1Y": 6 * 60 * 60_000,
-  "5Y": 6 * 60 * 60_000,
+  "1D": 5 * 60,
+  "1W": 5 * 60,
+  "1M": 5 * 60,
+  "1Y": 30 * 60,
+  "5Y": 30 * 60,
 };
+const SUMMARY_TTL = 60;
 
 /** Real price history for one asset on `chain`, or null when no source exists / upstream fails. */
 export function getHistory(chain: StaxChain, symbol: string, range: MarketRange): Promise<MarketHistory | null> {
-  // Stock history is chain-independent (same real ticker), so it's cached without
-  // the chain key; token/peg lookups are symbol-keyed too. The chain only decides
-  // which source applies.
-  return ttlCache(`history:${symbol}:${range}`, HISTORY_TTL[range], async () => {
+  // Keyed per (chain, symbol, range); the chain decides which source applies.
+  return cached<MarketHistory | null>(`market:history:${chain.key}:${symbol}:${range}`, HISTORY_TTL[range], async () => {
     if (FLAT_DOLLAR.has(symbol)) return { series: Array(20).fill(1), changePct: 0 };
     if (isStock(chain, symbol)) return yahooHistory(symbol, range);
     const cgId = COINGECKO_IDS[symbol];
@@ -183,7 +171,7 @@ export function getHistory(chain: StaxChain, symbol: string, range: MarketRange)
  * Powers the portfolio rows and the market list. One cached object per chain.
  */
 export function getDaySummary(chain: StaxChain): Promise<Record<string, DaySummaryEntry>> {
-  return ttlCache(`day-summary:${chain.key}`, 5 * 60_000, async () => {
+  return cached(`market:summary:${chain.key}`, SUMMARY_TTL, async () => {
     const entries = await Promise.all(
       chain.assets.all.map(async (asset) => {
         try {

@@ -14,6 +14,7 @@
     "db:migrate": "node --env-file=.env.local node_modules/drizzle-kit/bin.cjs migrate",
     "db:studio": "node --env-file=.env.local node_modules/drizzle-kit/bin.cjs studio",
     "db:smoke": "tsx --conditions=react-server --env-file=.env.local scripts/db-smoke.ts",
+    "upstash:smoke": "tsx --conditions=react-server --env-file=.env.local scripts/upstash-smoke.ts",
     "db:import": "tsx --conditions=react-server --env-file=.env.local scripts/import-supabase.ts"
   },
   "dependencies": {
@@ -25,6 +26,8 @@
     "@react-three/fiber": "^9.7.0",
     "@sentry/nextjs": "^10.73.0",
     "@tanstack/react-query": "^5.100.14",
+    "@upstash/ratelimit": "^2.0.8",
+    "@upstash/redis": "^1.38.4",
     "@vercel/analytics": "^2.0.1",
     "@vercel/functions": "^3.9.5",
     "ai": "^6.0.193",

@@ -12,7 +12,7 @@ import { badRequest, tooManyRequests, serverError } from "@/lib/server/respond";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const limit = rateLimit(`transactions:${clientIp(req)}`, 30, 60_000);
+  const limit = await rateLimit(`transactions:${clientIp(req)}`, 30, 60_000);
   if (!limit.ok) return tooManyRequests(limit.retryAfter);
 
   const address = req.nextUrl.searchParams.get("address") ?? "";

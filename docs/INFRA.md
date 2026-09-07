@@ -68,7 +68,7 @@ Indexes: `autopilots (active, next_run_at)`, `executor_events (chain, user)`, `e
   author "shared"), `Cache-Control: public, s-maxage=300`; 400 on a malformed id, 404 when unknown
   or no longer investable. Share button: signed-in → `publish()` (POST, id memoised per contents this
   session) and the short link; signed out, demo, or any failure → the encoded link. Demo never fetches `?b=`.
-- **Rate limiting**: keep `rateLimit.ts` in-memory (single region) — Upstash deferred.
+- **Rate limiting**: `rateLimit.ts` — Upstash sliding window when configured, else in-memory (see *Upstash Redis* below).
 - **Removal**: delete `lib/server/supabase.ts`, `@supabase/supabase-js`, `web/supabase/`, Supabase env
   keys from `.env.example`; README/MULTICHAIN updated. Data migration (done 2026-09-06): 2 autopilots + 100 run
   logs from the Mantle-era Supabase imported with `npm run db:import -- scripts/supabase-dump.json`
@@ -106,6 +106,24 @@ key and renames `inTxs[].hash` → `txHash` (the parser already accepts both) �
 a key is in place. USD amounts come from `data.metadata.currencyIn.amountUsd`.
 `npm run db:smoke` covers find-or-create idempotency, the own-address path, refund validation, and
 the ownership check with Relay mocked.
+
+## Upstash Redis — rate limits + response cache
+
+Env: `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` (Vercel → Storage → Upstash Redis, or the
+upstash.com free tier; set both on Vercel and in `web/.env.local`). Unset = per-instance memory, so
+nothing breaks locally or on a single instance; set = shared across every instance and region.
+- **Rate limiting** (`lib/server/rateLimit.ts`): `await rateLimit(key, limit, windowMs)` → `{ok, retryAfter}`
+  (async since 2026-09-07; every route awaits it). Upstash = `@upstash/ratelimit` sliding window, one
+  `Ratelimit` per (limit, window), keys `stax:rl:<route>:<ip|userId>`, ephemeral in-process cache for
+  already-blocked ids. Redis errors **fail open** (allow + one `console.warn` per minute), never a 500.
+- **Cache** (`lib/server/cache.ts`): `cached(key, ttlSeconds, fn)` / `cacheDel(key)`, keys `stax:cache:<key>`,
+  JSON with `EX`; bigint values throw (convert first); single-flight per key per process; in-memory Map
+  fallback with the same TTL. Only public, non-user data: `/api/prices` (`prices:<chain>`, 15 s; the
+  price-snapshot write-through runs only on a miss), `/api/market` history (`market:history:<chain>:<symbol>:<range>`,
+  5 min for 1D/1W/1M, 30 min for 1Y/5Y) and the day summary (`market:summary:<chain>`, 60 s).
+  `CACHE_DEBUG=1` logs `[cache] hit|miss|join <key>` at debug level.
+- **Smoke**: `npm run upstash:smoke` (`scripts/upstash-smoke.ts`) hits the real Redis: 7 hits at 5/10 s → 5 ok +
+  2 blocked with a sane `Retry-After`, cache miss/hit/TTL, single-flight, cached `null`, bigint rejection, del.
 
 ## Verification
 

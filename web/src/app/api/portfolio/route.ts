@@ -47,7 +47,7 @@ interface PortfolioHolding {
 }
 
 export async function GET(req: NextRequest) {
-  const limit = rateLimit(`portfolio:${clientIp(req)}`, 30, 60_000);
+  const limit = await rateLimit(`portfolio:${clientIp(req)}`, 30, 60_000);
   if (!limit.ok) return tooManyRequests(limit.retryAfter);
 
   const address = req.nextUrl.searchParams.get("address");

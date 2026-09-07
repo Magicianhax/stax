@@ -19,7 +19,7 @@ import { badRequest, tooManyRequests, serverError } from "@/lib/server/respond";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const limit = rateLimit(`vera-record:${clientIp(req)}`, 30, 60_000);
+  const limit = await rateLimit(`vera-record:${clientIp(req)}`, 30, 60_000);
   if (!limit.ok) return tooManyRequests(limit.retryAfter);
 
   const user = req.nextUrl.searchParams.get("user");

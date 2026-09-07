@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
   if (gate) return gate;
 
   // M-5: cap signing requests per user.
-  const limit = rateLimit(`invest-plan:${user.userId}`, 20, 60_000);
+  const limit = await rateLimit(`invest-plan:${user.userId}`, 20, 60_000);
   if (!limit.ok) return tooManyRequests(limit.retryAfter);
 
   // Which chain the plan is for (x-stax-chain header / ?chain=; Base default).

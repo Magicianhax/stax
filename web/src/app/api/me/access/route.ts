@@ -13,7 +13,7 @@ export const runtime = "nodejs";
 export async function GET(req: NextRequest) {
   const user = await verifyRequest(req);
   if (!user) return unauthorized();
-  const limit = rateLimit(`me-access:${user.userId}`, 120, 60_000);
+  const limit = await rateLimit(`me-access:${user.userId}`, 120, 60_000);
   if (!limit.ok) return tooManyRequests(limit.retryAfter);
   try {
     const access = await getAccess(user.userId);

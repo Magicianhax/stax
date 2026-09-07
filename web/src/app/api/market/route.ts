@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   // Public market data (shown pre-login), so no auth — rate-limited per IP.
-  const limit = rateLimit(`market:${clientIp(req)}`, 60, 60_000);
+  const limit = await rateLimit(`market:${clientIp(req)}`, 60, 60_000);
   if (!limit.ok) return tooManyRequests(limit.retryAfter);
 
   const chain = chainFromRequest(req);

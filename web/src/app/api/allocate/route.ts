@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
   if (gate) return gate;
 
   // M-5: cap AI calls per user (cost-amplification guard).
-  const limit = rateLimit(`allocate:${user.userId}`, 12, 60_000);
+  const limit = await rateLimit(`allocate:${user.userId}`, 12, 60_000);
   if (!limit.ok) return tooManyRequests(limit.retryAfter);
 
   // The chain decides the investable universe Vera may allocate across.

@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
 
   // Rate limit per user (the bundler is chatty — estimate + sponsor + send +
   // receipt polling — so the ceiling is generous; it's a backstop, not the gate).
-  const limit = rateLimit(`pimlico:${user.userId}`, 600, 60_000);
+  const limit = await rateLimit(`pimlico:${user.userId}`, 600, 60_000);
   if (!limit.ok) return tooManyRequests(limit.retryAfter);
 
   // Which chain's bundler to hit (?chain= from the transport URL, or the header).

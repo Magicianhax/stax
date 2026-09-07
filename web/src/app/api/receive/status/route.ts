@@ -18,7 +18,7 @@ const NO_STORE = { "Cache-Control": "no-store" };
 export async function GET(req: NextRequest) {
   const user = await verifyRequest(req);
   if (!user) return unauthorized();
-  const limit = rateLimit(`receive-status:${user.userId}`, 120, 60_000);
+  const limit = await rateLimit(`receive-status:${user.userId}`, 120, 60_000);
   if (!limit.ok) return tooManyRequests(limit.retryAfter);
 
   const address = req.nextUrl.searchParams.get("address")?.trim() ?? "";

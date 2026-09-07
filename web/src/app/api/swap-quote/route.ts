@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
   if (gate) return gate;
 
   // Quotes refetch on every keystroke burst + a 15s interval; 120/min is ample.
-  const limit = rateLimit(`swap-quote:${user.userId}`, 120, 60_000);
+  const limit = await rateLimit(`swap-quote:${user.userId}`, 120, 60_000);
   if (!limit.ok) return tooManyRequests(limit.retryAfter);
 
   const chain = chainFromRequest(req);

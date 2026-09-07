@@ -66,7 +66,7 @@ const Body = z.discriminatedUnion("action", [
 async function gate(req: NextRequest) {
   const user = await verifyRequest(req);
   if (!user) return { res: unauthorized() };
-  const limit = rateLimit(`admin-beta:${user.userId}`, 60, 60_000);
+  const limit = await rateLimit(`admin-beta:${user.userId}`, 60, 60_000);
   if (!limit.ok) return { res: tooManyRequests(limit.retryAfter) };
   const denied = await requireAdmin(user);
   if (denied) return { res: denied };

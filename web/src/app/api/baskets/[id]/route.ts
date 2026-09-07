@@ -11,7 +11,7 @@ import { badRequest, jsonError, serverError, tooManyRequests } from "@/lib/serve
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const limit = rateLimit(`baskets-get:${clientIp(req)}`, 60, 60_000);
+  const limit = await rateLimit(`baskets-get:${clientIp(req)}`, 60, 60_000);
   if (!limit.ok) return tooManyRequests(limit.retryAfter);
 
   const { id } = await params;

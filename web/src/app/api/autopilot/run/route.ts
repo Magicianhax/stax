@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
   if (gate) return gate;
 
   // Tight cap — each call signs and submits an on-chain UserOp.
-  const limit = rateLimit(`autopilot-run:${user.userId}`, 6, 60_000);
+  const limit = await rateLimit(`autopilot-run:${user.userId}`, 6, 60_000);
   if (!limit.ok) return tooManyRequests(limit.retryAfter);
 
   const cfg = await getAutopilot(user.userId);

@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
-  const limit = rateLimit(`beta-stats:${clientIp(req)}`, 120, 60_000);
+  const limit = await rateLimit(`beta-stats:${clientIp(req)}`, 120, 60_000);
   if (!limit.ok) return tooManyRequests(limit.retryAfter);
   try {
     const stats = await getStats();

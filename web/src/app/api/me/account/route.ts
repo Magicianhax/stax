@@ -23,7 +23,7 @@ const Body = z.object({
 export async function POST(req: NextRequest) {
   const user = await verifyRequest(req);
   if (!user) return unauthorized();
-  const limit = rateLimit(`me-account:${user.userId}`, 20, 60_000);
+  const limit = await rateLimit(`me-account:${user.userId}`, 20, 60_000);
   if (!limit.ok) return tooManyRequests(limit.retryAfter);
 
   let body: z.infer<typeof Body>;
