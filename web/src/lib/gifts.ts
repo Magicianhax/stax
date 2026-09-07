@@ -26,7 +26,13 @@ export const GIFT_MAX_USD = 100_000;
 /** A note is shown verbatim to the recipient; the contract rejects anything longer. */
 export const GIFT_NOTE_MAX = 200;
 /** An unlock date must be at least this far out — a gift is a wait, not a transfer. */
-export const GIFT_MIN_UNLOCK_DAYS = 1;
+/**
+ * How far ahead an unlock must be. Minutes, not days: someone should be able to
+ * send a birthday gift on the morning of the birthday. The floor exists only so
+ * the invest and park transactions can land before the gift is claimable, never
+ * to make people wait.
+ */
+export const GIFT_MIN_UNLOCK_MINUTES = 15;
 /** …and at most this far out. */
 export const GIFT_MAX_UNLOCK_YEARS = 25;
 /** How long after the unlock date the giver must wait before they may take it back. */

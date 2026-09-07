@@ -31,10 +31,12 @@ import { Money, Reveal, formatMoney } from "@/components/motion";
 import { toTile } from "@/lib/displayAssets";
 import { usd, tokenQty } from "@/lib/format";
 import { rampColor } from "./basketPrimitives";
-import { blendSeries, changeOf, readoutDate, useSymbolSeries, type MarketRange } from "./useRangeSeries";
+import { changeOf, readoutDate, useSymbolSeries, type MarketRange } from "./useRangeSeries";
 import type { LoopParams } from "../LiteApp";
 
-const RANGES = ["1D", "1W", "1M", "1Y", "5Y"] as const;
+// No 5Y: this account's value line starts when our snapshots did, and offering a
+// range we cannot fill invites the reader to trust a shape that is not there.
+const RANGES = ["1D", "1W", "1M", "1Y"] as const;
 const RANGE_WORD: Record<MarketRange, string> = {
   "1D": "today",
   "1W": "past week",
@@ -68,28 +70,21 @@ export function PortfolioScreen({
   const { series, loading: seriesLoading } = useSymbolSeries(symbols, range);
   const { data: hist } = usePortfolioHistory(address ?? undefined, range);
 
-  // Market-series estimate: each holding's series scaled to its current value,
-  // plus flat cash — ends exactly at the real total. Used when we have no
-  // value history of our own for the range.
-  const estimate = useMemo(
-    () =>
-      blendSeries(
-        priced.map((h) => ({ points: series.get(h.asset.symbol) ?? [], weight: h.valueUsd ?? 0 })),
-        { base: cash, anchor: "end" },
-      ),
-    [priced, series, cash],
-  );
   // The real line: account value at each of our price snapshots (cash and
   // quantities from the lots), ending at live prices.
   const real = hist && hist.series.length > 1 ? hist.series : null;
-  const points = real ?? estimate;
-  const pnl = changeOf(points);
+  // Only ever draw the real line. The market-series estimate is anchored to each
+  // holding's own weight, so it lands at a different scale from the account
+  // total — a $114 account drew a $63 line, which reads as a bug because it is
+  // one. When there is no real history yet we say so instead.
+  const points = real;
+  const pnl = changeOf(points ?? []);
   const up = pnl.abs >= 0;
   const covered = hist ? rangeCovered(hist.coverageFrom, range) : false;
   const sinceLabel = hist?.coverageFrom ? `since ${coverageLabel(hist.coverageFrom)}` : null;
   // What the P&L line means: the range when fully covered; "since Sep 6" when
   // our history starts inside the range; "price movement" for the estimate.
-  const pnlWord = real ? (covered ? RANGE_WORD[range] : (sinceLabel ?? RANGE_WORD[range])) : `price movement ${RANGE_WORD[range]}`;
+  const pnlWord = covered ? RANGE_WORD[range] : (sinceLabel ?? RANGE_WORD[range]);
   const totals = hist && hist.totals.costBasisUsd > 0 ? hist.totals : null;
   const positions = useMemo(() => new Map((hist?.positions ?? []).map((p) => [p.symbol, p])), [hist]);
 
@@ -187,7 +182,7 @@ export function PortfolioScreen({
     })),
     ...(cash > 0 ? [{ key: "cash", name: "Cash", value: cash, color: "color-mix(in srgb, var(--ink-3) 45%, var(--surface-2))" }] : []),
   ];
-  const chartReady = points.length > 1;
+  const chartReady = (points?.length ?? 0) > 1;
 
   return (
     <div className="screen screen-pad-top" style={{ paddingBottom: 110 }}>
@@ -244,7 +239,7 @@ export function PortfolioScreen({
               )}
             </div>
             <div style={{ marginTop: 12 }}>
-              {chartReady ? (
+              {chartReady && points ? (
                 <PriceChart
                   points={points}
                   up={up}

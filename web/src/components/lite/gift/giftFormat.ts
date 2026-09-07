@@ -32,6 +32,35 @@ export function toDateInput(unixSec: number): string {
   return new Date(unixSec * 1000).toISOString().slice(0, 10);
 }
 
+/** For a `datetime-local` input: the same instant, in the reader's own zone. */
+export function toDateTimeInput(unixSec: number): string {
+  const d = new Date(unixSec * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** Read one back. Parsed as local time, which is what the field showed. */
+export function fromDateTimeInput(value: string): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)) return null;
+  const ms = new Date(value).getTime();
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+}
+
+/**
+ * "Sep 7, 2031" for a distant unlock, "Sep 7 at 4:30 pm" when it opens within a
+ * couple of days — a same-day gift needs its time on screen, and a gift twelve
+ * years out does not.
+ */
+export function unlockWhenFromSeconds(unixSec: number, nowMs: number = Date.now()): string {
+  const at = unixSec * 1000;
+  const soon = at - nowMs < 2 * 86_400_000;
+  const d = new Date(at);
+  if (!soon) return DATE.format(d);
+  const day = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return `${day} at ${time}`;
+}
+
 /** Read a native date input back to unix seconds at midday UTC (never drifts a day). */
 export function fromDateInput(value: string): number | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
@@ -44,6 +73,15 @@ export function addYears(unixSec: number, n: number): number {
   const d = new Date(unixSec * 1000);
   d.setUTCFullYear(d.getUTCFullYear() + n);
   return Math.floor(d.getTime() / 1000);
+}
+
+/**
+ * The earliest instant a gift may open: far enough ahead that the invest and
+ * park transactions land first. A clock read, kept here beside the other date
+ * helpers so screens never call `Date.now` during render.
+ */
+export function earliestUnlock(minutes: number, nowMs: number = Date.now()): number {
+  return Math.floor(nowMs / 1000) + minutes * 60;
 }
 
 /** Midday UTC today — the anchor every preset counts from. */

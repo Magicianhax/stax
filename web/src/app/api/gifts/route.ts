@@ -17,7 +17,7 @@ import { getChain } from "@/lib/chains";
 import {
   GIFT_MAX_USD,
   GIFT_MAX_UNLOCK_YEARS,
-  GIFT_MIN_UNLOCK_DAYS,
+  GIFT_MIN_UNLOCK_MINUTES,
   GIFT_MIN_USD,
   GIFT_NOTE_MAX,
   GIFT_RECLAIM_GRACE_DAYS,
@@ -142,8 +142,8 @@ export async function POST(req: NextRequest) {
   const now = Date.now();
   const unlockAt = new Date(body.unlockAt);
   if (Number.isNaN(unlockAt.getTime())) return badRequest("That unlock date isn't a date.");
-  if (unlockAt.getTime() < now + GIFT_MIN_UNLOCK_DAYS * DAY_MS) {
-    return badRequest("Pick an unlock date at least a day from now.");
+  if (unlockAt.getTime() < now + GIFT_MIN_UNLOCK_MINUTES * 60_000) {
+    return badRequest(`Pick a time at least ${GIFT_MIN_UNLOCK_MINUTES} minutes from now.`);
   }
   if (unlockAt.getTime() > now + GIFT_MAX_UNLOCK_YEARS * 365 * DAY_MS) {
     return badRequest(`Pick an unlock date within ${GIFT_MAX_UNLOCK_YEARS} years.`);

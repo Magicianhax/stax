@@ -29,16 +29,20 @@ import { GiftPlacing } from "../gift/GiftPlacing";
 import { GiftSent } from "../gift/GiftSent";
 import {
   addYears,
+  earliestUnlock,
   fromDateInput,
+  fromDateTimeInput,
   reviewRows,
   todayAnchor,
   toDateInput,
-  unlockDateFromSeconds,
+  toDateTimeInput,
+  unlockWhenFromSeconds,
   untilLabelFromSeconds,
 } from "../gift/giftFormat";
 import {
   GIFT_AMOUNTS,
   GIFT_MAX_UNLOCK_YEARS,
+  GIFT_MIN_UNLOCK_MINUTES,
   GIFT_MAX_USD,
   GIFT_MIN_USD,
   GIFT_NOTE_MAX,
@@ -60,7 +64,7 @@ const PRESETS: { id: Preset; label: string }[] = [
   { id: "1y", label: "In a year" },
   { id: "5y", label: "In 5 years" },
   { id: "18th", label: "Their 18th" },
-  { id: "custom", label: "Pick a date" },
+  { id: "custom", label: "Pick a date and time" },
 ];
 
 /** The unlock day the chosen preset works out to, in unix seconds, or null. */
@@ -71,7 +75,7 @@ function resolveUnlock(preset: Preset | null, today: number, dob: string, custom
     const born = fromDateInput(dob);
     return born ? addYears(born, 18) : null;
   }
-  if (preset === "custom") return fromDateInput(custom);
+  if (preset === "custom") return fromDateTimeInput(custom);
   return null;
 }
 
@@ -138,7 +142,9 @@ export function GiftScreen({
   // each render (it is a clock read), which is exactly the kind of dependency a
   // useMemo here could not honestly hold on to.
   const unlockAt = resolveUnlock(preset, today, dob, custom);
-  const unlockOk = unlockAt !== null && unlockAt > today && unlockAt <= latest;
+  // Far enough ahead for the two transactions to land, and inside the cap.
+  const earliest = earliestUnlock(GIFT_MIN_UNLOCK_MINUTES);
+  const unlockOk = unlockAt !== null && unlockAt >= earliest && unlockAt <= latest;
 
   const [note, setNote] = useState("");
 
@@ -226,7 +232,7 @@ export function GiftScreen({
                 ? "Add the X username it's for."
                 : "Add the email address it's for."
               : !unlockOk
-                ? "Choose the day they can open it."
+                ? "Choose when they can open it."
                 : null;
 
   // ── sending / sent ──────────────────────────────────────────────────────────
@@ -508,7 +514,7 @@ export function GiftScreen({
             n={4}
             title="When can they open it?"
             hint="It stays invested the whole time."
-            answer={unlockOk ? unlockDateFromSeconds(unlockAt as number) : undefined}
+            answer={unlockOk ? unlockWhenFromSeconds(unlockAt as number) : undefined}
             open={openStep(4)}
             onEdit={unlockOk ? () => { blurFields(); setEditing(4); } : undefined}
           >
@@ -547,16 +553,16 @@ export function GiftScreen({
 
             {preset === "custom" && (
               <label style={{ display: "block", marginTop: 14 }}>
-                <span className="label-eyebrow">The day it opens</span>
+                <span className="label-eyebrow">When it opens</span>
                 <div className="field" style={{ padding: "12px 14px", marginTop: 7 }}>
                   <input
-                    type="date"
+                    type="datetime-local"
                     value={custom}
-                    min={toDateInput(today + 86_400)}
-                    max={toDateInput(latest)}
+                    min={toDateTimeInput(earliest)}
+                    max={toDateTimeInput(latest)}
                     onChange={(e) => setCustom(e.target.value)}
                     className="tnum"
-                    aria-label="The day it opens"
+                    aria-label="When it opens"
                     style={{ fontSize: 16, width: "100%", minHeight: 24 }}
                   />
                 </div>
@@ -566,7 +572,7 @@ export function GiftScreen({
             {unlockOk && (
               <>
                 <p className="tnum" style={{ margin: "14px 0 0", fontSize: 14, fontWeight: 600, lineHeight: 1.45 }}>
-                  Unlocks {unlockDateFromSeconds(unlockAt as number)}
+                  Unlocks {unlockWhenFromSeconds(unlockAt as number)}
                   <span style={{ color: "var(--ink-2)", fontWeight: 500 }}>
                     {" "}
                     · {untilLabelFromSeconds(unlockAt as number)}
@@ -581,7 +587,7 @@ export function GiftScreen({
               <p role="status" style={{ margin: "12px 0 0", fontSize: 13, color: "var(--ink-2)", lineHeight: 1.45 }}>
                 {unlockAt !== null && unlockAt > latest
                   ? `The furthest out a gift can go is ${GIFT_MAX_UNLOCK_YEARS} years.`
-                  : "Pick a day that hasn't happened yet."}
+                  : `Pick a time at least ${GIFT_MIN_UNLOCK_MINUTES} minutes from now, so it is invested before it opens.`}
               </p>
             )}
           </Step>
@@ -625,7 +631,7 @@ export function GiftScreen({
                 label="Opens"
                 value={
                   <span className="tnum">
-                    {unlockDateFromSeconds(unlockAt as number)}
+                    {unlockWhenFromSeconds(unlockAt as number)}
                     <span style={{ color: "var(--ink-2)", fontWeight: 500 }}>
                       {" "}
                       · {untilLabelFromSeconds(unlockAt as number)}
@@ -645,7 +651,7 @@ export function GiftScreen({
               <DetailRow label="You pay" value={usd(amount)} />
             </div>
             <p style={{ fontSize: 13, color: "var(--ink-2)", margin: "12px 0 0", lineHeight: 1.5 }}>
-              The money is invested now and held safely until {unlockDateFromSeconds(unlockAt as number)}. They can
+              The money is invested now and held safely until {unlockWhenFromSeconds(unlockAt as number)}. They can
               claim it from their own account that day. If they never do, you can take it back three months later.
             </p>
           </div>
