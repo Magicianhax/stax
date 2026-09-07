@@ -13,6 +13,7 @@
 //   - big button    -> onInvest() (useInvest.invest → /api/invest-plan + send)
 import { useState } from "react";
 import { Icon, VeraOrb, AssetTile, RiskMeter, VerifiedBadge, Crossfade, ChainLaunchingLine, BottomSheet, useToast } from "@/components/design";
+import { HoldButton } from "@/components/motion";
 import { useBaskets } from "@/hooks/useBaskets";
 import { allocationToBasket, shortName, BASKET_NAME_MAX, type Basket } from "@/lib/baskets";
 import { haptic } from "@/lib/haptics";
@@ -320,18 +321,20 @@ export function PlanScreen({
             <ChainLaunchingLine chain={chain} />
           </div>
         )}
-        <button className="btn btn-primary btn-block btn-lg tap" disabled={rethinking || busy || !ready} onClick={onInvest}>
-          <Crossfade
-            showFirst={busy && !rethinking}
-            style={{ alignItems: "center" }}
-            first={
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 9 }}>
-                <Spinner small /> Securing…
-              </span>
-            }
-            second={<span>Invest {usd(amount)}</span>}
-          />
-        </button>
+        {/* Same hold-to-confirm as manual trades: a plan (or basket) invest moves
+            real money, so a tap never fires it. The busy state is a plain, quiet
+            button while the transaction is secured. */}
+        {busy && !rethinking ? (
+          <button className="btn btn-primary btn-block btn-lg" disabled aria-live="polite">
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 9 }}>
+              <Spinner small /> Securing…
+            </span>
+          </button>
+        ) : (
+          <HoldButton onComplete={onInvest} disabled={rethinking || busy || !ready} className="btn-lg">
+            {`Hold to invest ${usd(amount)}`}
+          </HoldButton>
+        )}
       </div>
     </div>
   );
