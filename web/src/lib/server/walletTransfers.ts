@@ -21,7 +21,7 @@ const ALCHEMY_KEY = process.env.ALCHEMY_API_KEY;
 const MAX = 50;
 
 /** Which data source the history will use (surfaced in the API response). */
-export const TXN_SOURCE: "etherscan" | "alchemy-logs" | "none" =
+export const TXN_SOURCE: "etherscan" | "blockscout" | "alchemy-logs" | "none" =
   ETHERSCAN_KEY ? "etherscan" : ALCHEMY_KEY ? "alchemy-logs" : "none";
 
 /** Alchemy RPC for `chain` (network slug derives from the chain key: base-mainnet / mantle-mainnet). */
@@ -70,16 +70,30 @@ interface EsTransfer {
 }
 
 async function viaEtherscan(chain: StaxChain, address: string): Promise<WalletTx[]> {
-  const tokens = knownTokens(chain);
   const url =
     `https://api.etherscan.io/v2/api?chainid=${chain.etherscanChainId}&module=account&action=tokentx` +
     `&address=${address}&page=1&offset=${MAX}&sort=desc&apikey=${ETHERSCAN_KEY}`;
-  const res = await fetch(url);
-  const json = (await res.json()) as { status: string; message: string; result: EsTransfer[] | string };
+  return viaEtherscanCompatible(chain, url);
+}
 
-  if (json.status !== "1" || !Array.isArray(json.result)) {
+/** Blockscout speaks the same `account/tokentx` dialect, no key needed. */
+async function viaBlockscout(chain: StaxChain, address: string): Promise<WalletTx[]> {
+  if (!chain.blockscoutUrl) throw new Error("no blockscout for chain");
+  const url = `${chain.blockscoutUrl}/api?module=account&action=tokentx&address=${address}&page=1&offset=${MAX}&sort=desc`;
+  return viaEtherscanCompatible(chain, url);
+}
+
+async function viaEtherscanCompatible(chain: StaxChain, url: string): Promise<WalletTx[]> {
+  const address = new URL(url).searchParams.get("address") ?? "";
+  const tokens = knownTokens(chain);
+  const res = await fetch(url, { signal: AbortSignal.timeout(12_000) });
+  const json = (await res.json()) as { status?: string; message: string; result: EsTransfer[] | string };
+
+  // Etherscan reports status "1"; Blockscout reports message "OK" (status may be absent).
+  const ok = Array.isArray(json.result) && (json.status === "1" || json.message === "OK" || json.status === undefined);
+  if (!ok || !Array.isArray(json.result)) {
     if (typeof json.message === "string" && json.message.toLowerCase().includes("no transactions")) return [];
-    throw new Error(typeof json.result === "string" ? json.result : json.message || "etherscan error");
+    throw new Error(typeof json.result === "string" ? json.result : json.message || "explorer error");
   }
 
   const lc = address.toLowerCase();
@@ -167,6 +181,13 @@ export async function getWalletTransfers(chain: StaxChain, address: string): Pro
   if (ETHERSCAN_KEY) {
     try {
       return await viaEtherscan(chain, address);
+    } catch {
+      /* fall through: Etherscan's free tier refuses some chains (Base) */
+    }
+  }
+  if (chain.blockscoutUrl) {
+    try {
+      return await viaBlockscout(chain, address);
     } catch {
       /* fall through */
     }

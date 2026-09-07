@@ -110,9 +110,13 @@ export function AddressCard({
         )}
       </div>
 
-      <div style={{ width: "100%", borderTop: "1px solid var(--line-2)" }}>
-        <DepositHistory deposits={deposits} loading={depositsLoading} />
-      </div>
+      {/* Bridged addresses get a live deposit list; the account's own address
+          shows nothing here (its history lives in Wallet transactions). */}
+      {!data.ownAddress && (
+        <div style={{ width: "100%", borderTop: "1px solid var(--line-2)" }}>
+          <DepositHistory deposits={deposits} loading={depositsLoading} />
+        </div>
+      )}
     </div>
   );
 }

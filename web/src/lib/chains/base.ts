@@ -66,7 +66,7 @@ const STOCKS: Asset[] = [
 const SAFE: Asset[] = [
   // Aave v3 USDC deposit. Buy = Pool.supply(USDC, amt, recipient, 0) → aBasUSDC (rebasing, 6 dec).
   // Sell = Pool.withdraw(USDC, amt, recipient) from the user's own account.
-  { symbol: "aUSDC", name: "Safe Dollars (Aave)", tier: "safe", address: A_BAS_USDC, decimals: 6, via: "aave_v3", onchainSymbol: "aBasUSDC" },
+  { symbol: "aUSDC", name: "Safe Dollars (Aave)", tier: "safe", address: A_BAS_USDC, decimals: 6, via: "aave_v3", onchainSymbol: "aBasUSDC", venue: "Aave" },
 ];
 
 const CRYPTO: Asset[] = [
@@ -88,6 +88,7 @@ export const BASE: StaxChain = {
   rpcFallbacks: RPC_FALLBACKS,
   explorer: { name: "Basescan", url: "https://basescan.org" },
   etherscanChainId: 8453,
+  blockscoutUrl: "https://base.blockscout.com",
   nativeSymbol: "ETH",
   usdc: { address: USDC_ADDR, symbol: "USDC", decimals: 6 },
   multicall3: MULTICALL3,

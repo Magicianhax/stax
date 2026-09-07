@@ -8,7 +8,7 @@ import { Icon, type IconName } from "@/components/design";
 import { haptic } from "@/lib/haptics";
 import s from "./receive.module.css";
 
-export type ReceiveOption = "wallet" | "cash" | "network";
+export type ReceiveOption = "own" | "wallet" | "cash" | "network";
 
 function Row({
   icon,
@@ -60,6 +60,12 @@ export function ReceiveChooser({
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "2px 0 6px" }}>
+      <Row
+        icon="qr"
+        title="Your Base address"
+        hint="Scan or copy it to receive USDC on Base."
+        onClick={() => onPick("own")}
+      />
       <Row
         icon="wallet"
         title="From another wallet"

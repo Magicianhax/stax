@@ -24,6 +24,8 @@ export interface Asset {
   name: string;
   tier: AssetTier;
   address?: `0x${string}`; // token address on this chain
+  /** Where the yield comes from, for the safe tier's tag ("Aave", "Ethena", "Ondo"). */
+  venue?: string;
   pool?: `0x${string}`; // single-hop USDC pool (V3) — present ⇒ single-hop buy on `chain.routers.v3`
   feeTier?: number; // V3 fee tier for `pool`
   decimals?: number;
@@ -77,6 +79,9 @@ export interface StaxChain {
   explorer: { name: string; url: string };
   /** Etherscan V2 `chainid` param for account/tokentx history. */
   etherscanChainId: number;
+  /** Blockscout instance (Etherscan-compatible `?module=account&action=tokentx`), the
+   *  no-key history fallback for chains Etherscan's free tier refuses (Base). */
+  blockscoutUrl?: string;
   nativeSymbol: string;
   usdc: { address: `0x${string}`; symbol: "USDC"; decimals: 6 };
   multicall3: `0x${string}`;

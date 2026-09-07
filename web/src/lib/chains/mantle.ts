@@ -48,10 +48,10 @@ const STOCKS: Asset[] = [
 const SAFE: Asset[] = [
   // sUSDe is disabled: the Agni USDe/sUSDe pool was drained to zero liquidity (see git e98d496).
   // The route below is kept so existing holders can still SELL.
-  { symbol: "sUSDe", name: "Staked Ethena USD (real yield)", tier: "safe", address: SUSDE, decimals: 18, via: "agni", coming: true },
+  { symbol: "sUSDe", name: "Staked Ethena USD (real yield)", tier: "safe", address: SUSDE, decimals: 18, via: "agni", coming: true, venue: "Ethena" },
   // Ondo USDY / mUSD: real on Mantle but KYC mint only, no liquid USDC route → listed-only.
-  { symbol: "USDY",  name: "Ondo US Dollar Yield", tier: "safe", address: "0x5bE26527e817998A7206475496fDE1E68957c5A6", decimals: 18, via: "route", coming: true },
-  { symbol: "mUSD",  name: "Mantle USD (Ondo)",    tier: "safe", address: "0xab575258d37EaA5C8956EfABe71F4eE8F6397cF3", decimals: 18, via: "route", coming: true },
+  { symbol: "USDY",  name: "Ondo US Dollar Yield", tier: "safe", venue: "Ondo", address: "0x5bE26527e817998A7206475496fDE1E68957c5A6", decimals: 18, via: "route", coming: true },
+  { symbol: "mUSD",  name: "Mantle USD (Ondo)",    tier: "safe", venue: "Ondo", address: "0xab575258d37EaA5C8956EfABe71F4eE8F6397cF3", decimals: 18, via: "route", coming: true },
 ];
 
 const CRYPTO: Asset[] = [
@@ -93,6 +93,7 @@ export const MANTLE: StaxChain = {
   rpcFallbacks: RPC_FALLBACKS,
   explorer: { name: "Mantlescan", url: "https://mantlescan.xyz" },
   etherscanChainId: 5000,
+  blockscoutUrl: "https://explorer.mantle.xyz",
   nativeSymbol: "MNT",
   usdc: { address: USDC_ADDR, symbol: "USDC", decimals: 6 },
   multicall3: MULTICALL3,

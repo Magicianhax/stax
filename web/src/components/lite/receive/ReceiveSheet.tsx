@@ -11,8 +11,10 @@ import { ReceiveChooser, type ReceiveOption } from "./ReceiveChooser";
 import { FromWallet } from "./FromWallet";
 import { AnyNetwork } from "./AnyNetwork";
 import { SheetHeader } from "./SheetHeader";
+import { AddressCard } from "./AddressCard";
+import { useChain } from "@/lib/chains/active";
 
-type View = "chooser" | "wallet" | "network";
+type View = "chooser" | "own" | "wallet" | "network";
 
 export function ReceiveSheet({
   open,
@@ -28,6 +30,7 @@ export function ReceiveSheet({
   addCashEnabled: boolean;
   onAddCash: () => void;
 }) {
+  const chain = useChain();
   const [view, setView] = useState<View>("chooser");
   const [dir, setDir] = useState<"fwd" | "back">("fwd");
   const show = (v: View) => {
@@ -61,6 +64,27 @@ export function ReceiveSheet({
           <>
             <SheetHeader title="Receive" onClose={onClose} />
             <ReceiveChooser addCashEnabled={addCashEnabled} onPick={pick} />
+          </>
+        )}
+        {view === "own" && recipient && (
+          <>
+            <SheetHeader title="Your Base address" onBack={() => show("chooser")} onClose={onClose} />
+            <AddressCard
+              data={{
+                address: recipient,
+                originChainId: chain.chain.id,
+                originCurrency: chain.usdc.address,
+                symbol: "USDC",
+                vm: "evm",
+                minUsd: 0,
+                feeUsd: 0,
+                reusable: true,
+                ownAddress: true,
+              }}
+              networkName={chain.name}
+              deposits={undefined}
+              depositsLoading={false}
+            />
           </>
         )}
         {view === "wallet" && <FromWallet recipient={recipient} onBack={() => show("chooser")} onClose={onClose} />}

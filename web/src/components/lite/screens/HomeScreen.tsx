@@ -110,7 +110,10 @@ export function HomeScreen({
   const balLen = usd(total).length;
   const balSize = balLen <= 9 ? 56 : balLen <= 11 ? 46 : 38;
 
-  const shown = holdings.slice(0, TOP_HOLDINGS);
+  // Top holdings by value, plus the safe-tier cushion even when it is small: a
+  // person who just bought Safe Dollars should see them without "See all".
+  const top = holdings.slice(0, TOP_HOLDINGS);
+  const shown = [...top, ...holdings.slice(TOP_HOLDINGS).filter((h) => h.asset.tier === "safe")];
   const recent = (activity ?? []).slice(0, RECENT);
 
   return (

@@ -20,9 +20,10 @@ import { haptic } from "@/lib/haptics";
 import { shareBasket, WeightBar } from "./basketPrimitives";
 import { toTile, catFor } from "@/lib/displayAssets";
 import { usd } from "@/lib/format";
+import { assetBySymbol } from "@/lib/chains";
 import { STAX_FEE_LABEL, feeUsd } from "@/lib/fees";
 import type { AllocateResult } from "@/lib/invest-types";
-import { iconBtn, Spinner, ThinkingDots } from "./primitives";
+import { iconBtn, Spinner, ThinkingDots, YieldTag } from "./primitives";
 import { useChainReady } from "../useChainReady";
 
 type Tone = "balanced" | "safer" | "bolder" | "simple";
@@ -211,7 +212,11 @@ export function PlanScreen({
                     </span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 1 }}>
-                    <span style={{ fontSize: 13, color: "var(--ink-2)" }}>{catFor(a.symbol)}</span>
+                    {assetBySymbol(chain, a.symbol)?.tier === "safe" ? (
+                      <YieldTag symbol={a.symbol} />
+                    ) : (
+                      <span style={{ fontSize: 13, color: "var(--ink-2)" }}>{catFor(a.symbol)}</span>
+                    )}
                     <span className="tnum" style={{ fontSize: 12.5, color: "var(--ink-2)", fontWeight: 600 }}>
                       {Math.round(a.weightPct)}%
                     </span>

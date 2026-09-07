@@ -8,6 +8,8 @@ import { useEffect } from "react";
 import { SectionTitle, HoldingRow, Icon } from "@/components/design";
 import { Burst, DrawCheck, Money, Reveal } from "@/components/motion";
 import { toTile, catFor } from "@/lib/displayAssets";
+import { YieldTag } from "./primitives";
+import { assetBySymbol } from "@/lib/chains";
 import { usd, txUrl } from "@/lib/format";
 import { useChain } from "@/lib/chains/active";
 import { haptic } from "@/lib/haptics";
@@ -93,7 +95,7 @@ export function SuccessScreen({
             <div key={h.symbol} style={{ borderBottom: i < holdings.length - 1 ? "1px solid var(--line-2)" : "none" }}>
               <HoldingRow
                 asset={toTile(h.symbol, h.name)}
-                sub={catFor(h.symbol, h.name)}
+                sub={assetBySymbol(chain, h.symbol)?.tier === "safe" ? <YieldTag symbol={h.symbol} /> : catFor(h.symbol, h.name)}
                 showSpark={false}
                 value={usd(h.amountUsd)}
                 change={{ label: `${h.weightPct}% of the plan` }}

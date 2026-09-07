@@ -2,6 +2,10 @@
 
 // Tiny shared primitives for the Lite screens — ported from the design handoff
 // (the inline Spinner / iconBtn / VeraTag used across onboarding + invest screens).
+import { useChain } from "@/lib/chains/active";
+import { assetBySymbol } from "@/lib/chains";
+import { usePrices } from "@/hooks/usePrices";
+import { displayFor } from "@/lib/displayAssets";
 import type { CSSProperties } from "react";
 import { Icon, VeraOrb, Seal } from "@/components/design";
 
@@ -126,5 +130,43 @@ export function VeraTag({ verified = false }: { verified?: boolean }) {
         </span>
       )}
     </div>
+  );
+}
+
+// Venue + live rate for a safe-tier asset ("Aave · 3.8% APY"). Live APY comes
+// from /api/prices (Aave Pool read on Base); falls back to the reference rate.
+// Renders nothing for assets that don't earn.
+export function YieldTag({ symbol, size = "sm" }: { symbol: string; size?: "sm" | "md" }) {
+  const chain = useChain();
+  const asset = assetBySymbol(chain, symbol);
+  const { data } = usePrices();
+  const live = data?.prices[symbol]?.apy;
+  const ref = displayFor(symbol).apy?.replace("~", "");
+  const rate = live !== undefined && Number.isFinite(live) ? `${live.toFixed(1)}%` : ref;
+  if (!asset || asset.tier !== "safe" || (!asset.venue && !rate)) return null;
+  const md = size === "md";
+  return (
+    <span
+      className="tnum"
+      title="Variable rate, can change"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        height: md ? 26 : 22,
+        padding: md ? "0 10px" : "0 8px",
+        borderRadius: 99,
+        fontSize: md ? 12.5 : 11.5,
+        fontWeight: 700,
+        whiteSpace: "nowrap",
+        background: "var(--accent-soft)",
+        color: "var(--accent)",
+        boxShadow: "inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent)",
+      }}
+    >
+      {asset.venue}
+      {asset.venue && rate ? " · " : ""}
+      {rate ? `${rate} APY` : ""}
+    </span>
   );
 }
