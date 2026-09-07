@@ -9,7 +9,7 @@
 // mid-flight, so a back-swipe can't strand a half-sent gift — which matters more
 // here than anywhere else, because giving is two transactions (docs/GIFTS.md).
 import { useMemo, useState } from "react";
-import { Icon, ChainLaunching, AmountInput, Keypad } from "@/components/design";
+import { Icon, ChainLaunching, AmountInput, Keypad, LogoCluster } from "@/components/design";
 import { useAmountKeypad } from "@/hooks/useAmountKeypad";
 import { HoldButton, Reveal } from "@/components/motion";
 import { useBaskets } from "@/hooks/useBaskets";
@@ -23,7 +23,7 @@ import { usd } from "@/lib/format";
 import { haptic } from "@/lib/haptics";
 import { iconBtn } from "./primitives";
 import { useChainReady } from "../useChainReady";
-import { BasketRailTile } from "./basketPrimitives";
+import { clusterOf } from "./basketPrimitives";
 import { CashSliceNote, GiftBasketHead, DetailRow, SplitList, Step } from "../gift/giftPrimitives";
 import { GiftPlacing } from "../gift/GiftPlacing";
 import { GiftSent } from "../gift/GiftSent";
@@ -270,42 +270,62 @@ export function GiftScreen({
               Nothing to gift on {chain.name} yet. Save a basket first and it&apos;ll appear here.
             </p>
           ) : (
-            <div
-              style={{
-                display: "flex",
-                gap: 10,
-                overflowX: "auto",
-                scrollSnapType: "x mandatory",
-                // Bleed to the card's edge so the rail reads as scrollable, then fade
-                // the last tile out instead of guillotining it on the rounded corner.
-                margin: "0 -16px",
-                // Room for the selected tile's outline (2px, offset 2) and the card
-                // shadow underneath it — a scroll container clips whatever it can't fit.
-                padding: "6px 16px 10px",
-                maskImage: "linear-gradient(to right, black 0, black calc(100% - 28px), transparent 100%)",
-                WebkitMaskImage: "linear-gradient(to right, black 0, black calc(100% - 28px), transparent 100%)",
-              }}
-            >
-              {giftable.map((b) => (
-                <div
-                  key={b.id}
-                  style={{
-                    borderRadius: 20,
-                    outline: b.id === pickedId ? "2px solid var(--primary)" : "none",
-                    outlineOffset: 2,
-                    flex: "none",
-                  }}
-                >
-                  <BasketRailTile
-                    basket={b}
+            /* A stacked list, not a rail: this step owns a tall, otherwise empty
+               screen, so sideways scrolling hid most of the choices behind an
+               edge for no reason. Every basket is visible and comparable. */
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, margin: "4px -4px 0" }} role="radiogroup" aria-label="Basket to gift">
+              {giftable.map((b) => {
+                const on = b.id === pickedId;
+                return (
+                  <button
+                    key={b.id}
+                    role="radio"
+                    aria-checked={on}
                     onClick={() => {
                       haptic.select();
                       setPickedId(b.id);
                       answerStep(1);
                     }}
-                  />
-                </div>
-              ))}
+                    className="tap"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      width: "100%",
+                      minHeight: 64,
+                      padding: "12px 12px",
+                      borderRadius: 16,
+                      textAlign: "left",
+                      background: on ? "var(--primary-soft)" : "var(--surface-2)",
+                      boxShadow: on
+                        ? "inset 0 0 0 1.5px var(--primary)"
+                        : "inset 0 0 0 1px var(--line)",
+                      transition: "background .2s var(--ease-out), box-shadow .2s var(--ease-out)",
+                    }}
+                  >
+                    <LogoCluster assets={clusterOf(b)} size={26} max={3} />
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span
+                        style={{
+                          display: "block",
+                          fontWeight: 600,
+                          fontSize: 15,
+                          letterSpacing: "-.01em",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {b.name}
+                      </span>
+                      <span style={{ display: "block", fontSize: 12.5, color: "var(--ink-2)", marginTop: 2 }}>
+                        {riskWord(b.riskScore)} · {b.items.length} holdings
+                      </span>
+                    </span>
+                    {on && <Icon name="check" size={18} style={{ color: "var(--primary)", flex: "none" }} />}
+                  </button>
+                );
+              })}
             </div>
           )}
         </Step>
