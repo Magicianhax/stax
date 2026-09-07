@@ -249,8 +249,14 @@ export function GiftScreen({
                 gap: 10,
                 overflowX: "auto",
                 scrollSnapType: "x mandatory",
+                // Bleed to the card's edge so the rail reads as scrollable, then fade
+                // the last tile out instead of guillotining it on the rounded corner.
                 margin: "0 -16px",
-                padding: "2px 16px 6px",
+                // Room for the selected tile's outline (2px, offset 2) and the card
+                // shadow underneath it — a scroll container clips whatever it can't fit.
+                padding: "6px 16px 10px",
+                maskImage: "linear-gradient(to right, black 0, black calc(100% - 28px), transparent 100%)",
+                WebkitMaskImage: "linear-gradient(to right, black 0, black calc(100% - 28px), transparent 100%)",
               }}
             >
               {giftable.map((b) => (
