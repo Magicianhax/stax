@@ -12,6 +12,8 @@
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { useChain } from "@/lib/chains/active";
 import { authedFetch } from "@/lib/authedFetch";
+import { useDemo } from "@/components/demo/DemoProvider";
+import { DEMO_MARKET_SUMMARY } from "@/lib/demo/demoData";
 
 export type MarketRange = "1D" | "1W" | "1M" | "1Y" | "All";
 
@@ -54,11 +56,15 @@ export function useMarketHistory(symbol: string | undefined, range: MarketRange)
 /** Real 1D change + sparkline for every asset on the active chain (market list rows). */
 export function useMarketSummary() {
   const chain = useChain();
-  return useQuery({
+  const demo = useDemo();
+  const query = useQuery({
     queryKey: ["market-summary", chain.key],
     staleTime: 4 * 60_000,
     refetchInterval: 5 * 60_000,
+    enabled: !demo,
     queryFn: () =>
       getJson<MarketSummaryResponse>("/api/market", "Couldn't load market data."),
   });
+  if (demo) return { ...query, data: DEMO_MARKET_SUMMARY, isLoading: false, isPending: false } as typeof query;
+  return query;
 }

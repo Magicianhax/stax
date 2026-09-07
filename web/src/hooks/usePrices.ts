@@ -13,6 +13,8 @@ import type { AssetPrice } from "@/lib/prices";
 import type { ChainKey } from "@/lib/chains";
 import { useChain } from "@/lib/chains/active";
 import { authedFetch } from "@/lib/authedFetch";
+import { useDemo } from "@/components/demo/DemoProvider";
+import { DEMO_PRICES } from "@/lib/demo/demoData";
 
 export interface PricesResponse {
   chain: ChainKey;
@@ -33,12 +35,17 @@ export async function fetchPrices(): Promise<PricesResponse> {
 /** All live asset prices (symbol -> AssetPrice). Refreshes every 30s; re-keyed on chain switch. */
 export function usePrices() {
   const chain = useChain();
-  return useQuery({
+  const demo = useDemo();
+  const query = useQuery({
     queryKey: ["prices", chain.key],
     queryFn: fetchPrices,
     staleTime: 20_000,
     refetchInterval: 30_000,
+    enabled: !demo,
   });
+  // Demo: one reference price table for every screen (holdings are valued from it too).
+  if (demo) return { ...query, data: DEMO_PRICES, isLoading: false, isPending: false } as typeof query;
+  return query;
 }
 
 /** Convenience: the live USD price for one symbol (undefined while loading / no source). */

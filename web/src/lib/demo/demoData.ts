@@ -12,7 +12,9 @@ import type { ActivityRow, VeraRecord } from "@/lib/onchainHistory";
 import type { AllocateResult, InvestSuccess } from "@/lib/invest-types";
 import type { Allocation } from "@/lib/allocation-schema";
 import type { Basket } from "@/lib/baskets";
-import type { MarketHistoryResponse, MarketRange } from "@/hooks/useMarket";
+import type { MarketHistoryResponse, MarketRange, MarketSummaryResponse } from "@/hooks/useMarket";
+import type { PricesResponse } from "@/hooks/usePrices";
+import type { AssetPrice } from "@/lib/prices";
 import type { WalletTx } from "@/lib/walletTx";
 import { DEMO_NOW } from "@/lib/demoSeries";
 
@@ -52,6 +54,37 @@ const DEMO_HOLDINGS: Holding[] = [
 const DEMO_INVESTED = DEMO_HOLDINGS.reduce((s, h) => s + (h.valueUsd ?? 0), 0);
 
 export const DEMO_USDC = { raw: parseUnits("240.55", 6), value: 240.55 };
+
+// Every demo screen prices assets from the same reference table (displayAssets),
+// so a holding is worth the same on Home, Owned, Market and Asset detail.
+export const DEMO_PRICES: PricesResponse = {
+  chain: DEMO_CHAIN.key,
+  asOf: new Date(DEMO_NOW).toISOString(),
+  prices: Object.fromEntries(
+    DEMO_CHAIN.assets.all.map((a) => {
+      const d = displayFor(a.symbol, a.name);
+      const price: AssetPrice = {
+        symbol: a.symbol,
+        priceUsd: d.price ?? 1,
+        marketPrice: d.price ?? 1,
+        marketPriceAt: Math.floor(DEMO_NOW / 1000) - 2 * 24 * 3600,
+        apy: typeof d.apy === "number" ? d.apy : d.apy ? parseFloat(String(d.apy)) || undefined : undefined,
+        source: "none",
+      };
+      return [a.symbol, price];
+    }),
+  ),
+};
+
+export const DEMO_MARKET_SUMMARY: MarketSummaryResponse = {
+  asOf: new Date(DEMO_NOW).toISOString(),
+  summary: Object.fromEntries(
+    DEMO_CHAIN.assets.all.map((a) => {
+      const d = displayFor(a.symbol, a.name);
+      return [a.symbol, { dayChangePct: d.day ?? 0, spark: d.spark ?? [] }];
+    }),
+  ),
+};
 
 export const DEMO_PORTFOLIO = {
   holdings: DEMO_HOLDINGS,
