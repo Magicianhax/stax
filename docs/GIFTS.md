@@ -164,6 +164,17 @@ exactly the tokens and amounts the body claims, matched by address and order-ind
 `claimed` is set by `claim` and by `reclaim` alike. Which one it was is decided by who is
 asking — the recipient records a claim, the giver records a reclaim.
 
+The public preview has two front doors over one reader, `loadGiftPreview` in
+`web/src/lib/server/giftPreview.ts`. A server component imports it directly, which beats
+fetching our own route handler: no absolute-URL guessing and a null it can turn into
+`notFound()`. The route handler is the same thing over HTTP for client-side callers. Both
+go through the reader, so they cannot disagree about what is safe to show.
+
+Encoding the on-chain calls is not the UI's job either. `web/src/lib/gifts.ts` exports
+`giftCreateCalls`, `giftClaimCall` and `giftReclaimCall`, which return the exact batches to
+hand `sendSponsoredCalls`. The ABI, the argument order and the bigint conversions have one
+home.
+
 ---
 
 ## The security model
