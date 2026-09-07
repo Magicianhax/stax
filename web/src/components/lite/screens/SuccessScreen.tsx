@@ -35,7 +35,7 @@ export function SuccessScreen({
   }, []);
 
   return (
-    <div className="screen screen-pad-top" style={{ paddingBottom: 0, position: "relative" }}>
+    <div className="screen screen-pad-top" style={{ paddingBottom: 0 }}>
       <Burst />
 
       <div style={{ padding: "30px 22px 0", textAlign: "center" }}>
