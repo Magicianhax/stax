@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { splitByWeight } from "@/lib/legBuilder";
+import { aaveMinOut, splitByWeight } from "@/lib/legBuilder";
 import type { Asset } from "@/lib/chains/types";
 
 // `splitByWeight` divides the USDC a user is spending across the legs of their allocation.
@@ -175,5 +175,30 @@ describe("splitByWeight", () => {
     const cents = splitByWeight(entries([40, 20, 20, 20]), usdc(0.07));
     expect(sum(cents)).toBe(usdc(0.07));
     expect(cents.every((l) => l.usdcIn > BigInt(0))).toBe(true);
+  });
+});
+
+describe("aaveMinOut", () => {
+  // A real plan reverted with SlippageExceeded(aBasUSDC, 4987242, 4987243): the
+  // supply landed a millionth of a dollar under a minOut that allowed exactly
+  // one unit of rounding. An aToken balance is a scaled number times the pool's
+  // liquidity index, rounded down, so "one unit" was never enough.
+  it("absorbs the rounding that reverted a real plan", () => {
+    expect(aaveMinOut(BigInt(4_987_244))).toBeLessThanOrEqual(BigInt(4_987_242));
+  });
+
+  it("stays tight enough to catch a supply that did not land", () => {
+    const inAmount = BigInt(5_000_000); // $5
+    expect(inAmount - aaveMinOut(inAmount)).toBeLessThanOrEqual(BigInt(10));
+  });
+
+  it("scales its slack on very large supplies", () => {
+    const big = BigInt(1_000_000_000_000); // $1,000,000
+    expect(big - aaveMinOut(big)).toBe(BigInt(1_000_000));
+  });
+
+  it("never returns a negative floor on dust", () => {
+    expect(aaveMinOut(BigInt(3))).toBe(BigInt(0));
+    expect(aaveMinOut(BigInt(0))).toBe(BigInt(0));
   });
 });

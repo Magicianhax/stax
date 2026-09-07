@@ -42,6 +42,8 @@ const Q96 = BigInt(2) ** BigInt(96);
 const Q192 = Q96 * Q96;
 const BPS = BigInt(10000);
 const DEFAULT_SLIPPAGE_BPS = 100; // 1% buffer on the quote -> minOut
+/** Units of USDC an aToken balance may round away (see aaveMinOut). */
+const AAVE_ROUNDING_UNITS = BigInt(5);
 const DEADLINE_SECONDS = 15 * 60;
 
 export interface Leg {
@@ -318,7 +320,25 @@ async function buildRouteLeg(
   return { router: route.router, tokenOut, usdcIn, minOut, swapData };
 }
 
-/** Aave v3 supply leg: USDC -> aToken 1:1 (recipient = executor, which forwards the aToken). */
+/**
+ * Aave v3 supply leg: USDC -> aToken 1:1 (recipient = executor, which forwards the aToken).
+ *
+ * The tolerance is not slippage — there is no market here, a supply either
+ * happens or it does not. It exists because an aToken balance is a scaled number
+ * multiplied by the pool's liquidity index and rounded down, so the balance the
+ * executor reads back can be a unit or two under what went in. A plan of ours
+ * reverted on exactly that: `SlippageExceeded(aBasUSDC, 4987242, 4987243)`,
+ * one millionth of a dollar short, losing the whole invest and its gas.
+ *
+ * A few units is generous enough to absorb the rounding and still small enough
+ * to catch a supply that genuinely did not land.
+ */
+export function aaveMinOut(usdcIn: bigint): bigint {
+  const rounding = usdcIn / BigInt(1_000_000); // 1 ppm, for very large supplies
+  const slack = rounding > AAVE_ROUNDING_UNITS ? rounding : AAVE_ROUNDING_UNITS;
+  return usdcIn > slack ? usdcIn - slack : ZERO;
+}
+
 function buildAaveLeg(chain: StaxChain, asset: Asset, usdcIn: bigint): Leg {
   const pool = chain.routers.aavePool!;
   const swapData = encodeFunctionData({
@@ -326,7 +346,7 @@ function buildAaveLeg(chain: StaxChain, asset: Asset, usdcIn: bigint): Leg {
     functionName: "supply",
     args: [chain.usdc.address, usdcIn, chain.contracts.executor, 0],
   });
-  return { router: pool, tokenOut: asset.address!, usdcIn, minOut: usdcIn - ONE, swapData };
+  return { router: pool, tokenOut: asset.address!, usdcIn, minOut: aaveMinOut(usdcIn), swapData };
 }
 
 /**
