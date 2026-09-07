@@ -22,13 +22,13 @@ import { iconBtn, sectionLabel } from "./primitives";
 import { useChainReady } from "../useChainReady";
 
 // ── Toggle ────────────────────────────────────────────────────────────────────
-function Toggle({ on, onChange, label }: { on: boolean; onChange: () => void; label: string }) {
+function Toggle({ on }: { on: boolean }) {
+  // Presentational only: the whole Row is the switch (see Row's `switchOn`), so
+  // the label and the track are one 44px target instead of a 50px sliver, and
+  // nothing nests a button inside a button.
   return (
-    <button
-      role="switch"
-      aria-checked={on}
-      aria-label={label}
-      onClick={onChange}
+    <span
+      aria-hidden
       style={{
         width: 50,
         height: 30,
@@ -53,7 +53,7 @@ function Toggle({ on, onChange, label }: { on: boolean; onChange: () => void; la
           transition: "transform .26s var(--ease-soft)",
         }}
       />
-    </button>
+    </span>
   );
 }
 
@@ -64,6 +64,7 @@ function Row({
   sub,
   right,
   onClick,
+  switchOn,
   borderTop,
 }: {
   icon: IconName;
@@ -71,16 +72,20 @@ function Row({
   sub?: string;
   right?: ReactNode;
   onClick?: () => void;
+  /** Renders the row AS a switch: the whole row toggles, not just the track. */
+  switchOn?: boolean;
   borderTop?: boolean;
 }) {
-  // Rows that *are* a control render a <button>. Rows that only host a control
-  // (e.g. the Appearance toggle) must NOT be a button — a <button> inside a
-  // <button> is invalid HTML and triggers a hydration error. Render a <div>.
+  // A row that does something is a <button>; a row that only displays is a <div>.
+  // Switch rows are buttons too — their track is a plain span, so nothing nests.
+  const isSwitch = switchOn !== undefined;
   const Tag = onClick ? "button" : "div";
   return (
     <Tag
       onClick={onClick}
       className={onClick ? "row" : undefined}
+      role={isSwitch ? "switch" : undefined}
+      aria-checked={isSwitch ? switchOn : undefined}
       style={{
         width: "100%",
         display: "flex",
@@ -321,23 +326,21 @@ export function SettingsScreen({
             icon={darkOn ? "moon" : "sun"}
             title="Appearance"
             sub={darkOn ? "Dark" : "Light"}
-            right={
-              <Toggle
-                on={darkOn}
-                onChange={() => {
-                  haptic.select();
-                  toggle();
-                }}
-                label="Dark appearance"
-              />
-            }
+            switchOn={darkOn}
+            onClick={() => {
+              haptic.select();
+              toggle();
+            }}
+            right={<Toggle on={darkOn} />}
           />
           {hapticsSupported && (
             <Row
               icon="vibrate"
               title="Haptics"
               sub={hapticsOn ? "On" : "Off"}
-              right={<Toggle on={hapticsOn} onChange={toggleHaptics} label="Haptic feedback" />}
+              switchOn={hapticsOn}
+              onClick={toggleHaptics}
+              right={<Toggle on={hapticsOn} />}
               borderTop
             />
           )}
