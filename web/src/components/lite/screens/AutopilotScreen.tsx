@@ -168,6 +168,7 @@ export function AutopilotScreen({
   const [risk, setRisk] = useState(1); // index into RISK_TIERS
   const [activeTemplate, setActiveTemplate] = useState<string | null>(null);
   const [runs, setRuns] = useState<RunRow[]>([]);
+  const [runPage, setRunPage] = useState(0);
   const [detailRun, setDetailRun] = useState<RunRow | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -218,6 +219,13 @@ export function AutopilotScreen({
   const active = Boolean(config?.active);
   // The autopilot runs on the network it was saved on, not the one the UI is
   // showing. Receipts link to that chain's explorer.
+  // Five at a time. The whole history in one column pushed everything below it
+  // off the screen, and nobody scrolls a hundred identical skipped runs.
+  const RUNS_PER_PAGE = 5;
+  const runPages = Math.max(1, Math.ceil(runs.length / RUNS_PER_PAGE));
+  const page = Math.min(runPage, runPages - 1);
+  const pageRuns = runs.slice(page * RUNS_PER_PAGE, page * RUNS_PER_PAGE + RUNS_PER_PAGE);
+
   const apChain = getChain(config?.chain ?? chain.key);
   const elsewhere = active && apChain.key !== chain.key;
 
@@ -250,7 +258,10 @@ export function AutopilotScreen({
       try {
         const r = await authedFetch("/api/autopilot/runs");
         const j = await r.json();
-        if (!cancelled && Array.isArray(j?.runs)) setRuns(j.runs as RunRow[]);
+        if (!cancelled && Array.isArray(j?.runs)) {
+          setRuns(j.runs as RunRow[]);
+          setRunPage(0);
+        }
       } catch {
         /* activity is best-effort */
       }
@@ -258,7 +269,8 @@ export function AutopilotScreen({
     return () => {
       cancelled = true;
     };
-  }, [active]);
+    // The history is per network, so switching chains asks for a different list.
+  }, [active, chain.key]);
 
   const authorize = async () => {
     if (!ownerAddress) return;
@@ -508,7 +520,7 @@ export function AutopilotScreen({
                   </div>
                 ) : (
                   <div className="card" style={{ padding: "4px 16px" }}>
-                    {runs.map((r, i) => {
+                    {pageRuns.map((r, i) => {
                       const okRun = r.status === "success";
                       const skipped = r.status === "skipped";
                       const when = new Date(r.ranAt * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -529,7 +541,7 @@ export function AutopilotScreen({
                           key={`${r.ranAt}-${i}`}
                           onClick={() => setDetailRun(r)}
                           className="row tap"
-                          style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "12px 0", textAlign: "left", borderBottom: i < runs.length - 1 ? "1px solid var(--line-2)" : "none" }}
+                          style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "12px 0", textAlign: "left", borderBottom: i < pageRuns.length - 1 ? "1px solid var(--line-2)" : "none" }}
                         >
                           <span
                             style={{ width: 32, height: 32, borderRadius: 10, flex: "none", display: "grid", placeItems: "center", background: okRun ? "var(--primary-soft)" : skipped ? "var(--surface-2)" : "color-mix(in srgb, var(--neg) 16%, transparent)", color: okRun ? "var(--primary)" : skipped ? "var(--ink-3)" : "var(--neg)" }}
@@ -552,6 +564,45 @@ export function AutopilotScreen({
                         </button>
                       );
                     })}
+                  </div>
+                )}
+                {runPages > 1 && (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 14,
+                      marginTop: 10,
+                    }}
+                  >
+                    <button
+                      className="btn btn-glass tap"
+                      onClick={() => {
+                        haptic.light();
+                        setRunPage(Math.max(0, page - 1));
+                      }}
+                      disabled={page === 0}
+                      aria-label="Newer runs"
+                      style={{ width: 38, height: 34, padding: 0, opacity: page === 0 ? 0.4 : 1 }}
+                    >
+                      <Icon name="chevL" size={16} />
+                    </button>
+                    <span className="tnum" style={{ fontSize: 12.5, color: "var(--ink-2)", fontWeight: 600 }}>
+                      {page + 1} of {runPages}
+                    </span>
+                    <button
+                      className="btn btn-glass tap"
+                      onClick={() => {
+                        haptic.light();
+                        setRunPage(Math.min(runPages - 1, page + 1));
+                      }}
+                      disabled={page >= runPages - 1}
+                      aria-label="Older runs"
+                      style={{ width: 38, height: 34, padding: 0, opacity: page >= runPages - 1 ? 0.4 : 1 }}
+                    >
+                      <Icon name="chevR" size={16} />
+                    </button>
                   </div>
                 )}
               </div>

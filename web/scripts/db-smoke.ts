@@ -250,7 +250,7 @@ async function main() {
     txHash: "0xsmoke",
     holdings: [{ symbol: "AAPLx", weightPct: 100, amountUsd: 25 }],
   });
-  const runs = await listRuns(USER);
+  const runs = await listRuns(USER, "base");
   expect(runs.length === 1 && runs[0].txHash === "0xsmoke" && runs[0].holdings?.[0].symbol === "AAPLx", "run log");
   const [runRow] = await db.select().from(autopilotRuns).where(eq(autopilotRuns.userId, USER));
   expect(runRow.autopilotId === cfg.id, "run linked to autopilot");

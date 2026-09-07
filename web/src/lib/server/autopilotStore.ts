@@ -211,12 +211,18 @@ function decodeReason(raw: string | null): Pick<RunLog, "reason" | "basketId" | 
   return { reason: raw };
 }
 
-/** Recent runs for a user, newest first (the audit trail shown in the app). */
-export async function listRuns(userId: string, limit = 20): Promise<RunLog[]> {
+/**
+ * Recent runs for a user on one network, newest first (the audit trail shown in
+ * the app).
+ *
+ * Scoped by chain because an autopilot is per network: showing Mantle runs under
+ * a Base autopilot puts actions in the history that its schedule never took.
+ */
+export async function listRuns(userId: string, chain: ChainKey, limit = 20): Promise<RunLog[]> {
   const rows = await db
     .select()
     .from(autopilotRuns)
-    .where(eq(autopilotRuns.userId, userId))
+    .where(and(eq(autopilotRuns.userId, userId), eq(autopilotRuns.chain, chain)))
     .orderBy(desc(autopilotRuns.ranAt))
     .limit(limit);
   return rows.map((r) => ({
