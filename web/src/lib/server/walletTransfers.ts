@@ -44,7 +44,7 @@ function knownTokens(chain: StaxChain) {
   return m;
 }
 
-function dedupeSort(txs: WalletTx[]): WalletTx[] {
+function dedupeSort(txs: WalletTx[], max = MAX): WalletTx[] {
   const seen = new Set<string>();
   const unique = txs.filter((t) => {
     const key = `${t.hash}:${t.direction}:${t.tokenAddress}:${t.counterparty}`;
@@ -53,7 +53,7 @@ function dedupeSort(txs: WalletTx[]): WalletTx[] {
     return true;
   });
   unique.sort((a, b) => b.blockNumber - a.blockNumber);
-  return unique.slice(0, MAX);
+  return unique.slice(0, max);
 }
 
 // ── 1) Etherscan V2 (recommended) ─────────────────────────────────────────────
@@ -69,21 +69,21 @@ interface EsTransfer {
   timeStamp: string;
 }
 
-async function viaEtherscan(chain: StaxChain, address: string): Promise<WalletTx[]> {
+async function viaEtherscan(chain: StaxChain, address: string, max: number): Promise<WalletTx[]> {
   const url =
     `https://api.etherscan.io/v2/api?chainid=${chain.etherscanChainId}&module=account&action=tokentx` +
-    `&address=${address}&page=1&offset=${MAX}&sort=desc&apikey=${ETHERSCAN_KEY}`;
-  return viaEtherscanCompatible(chain, url);
+    `&address=${address}&page=1&offset=${max}&sort=desc&apikey=${ETHERSCAN_KEY}`;
+  return viaEtherscanCompatible(chain, url, max);
 }
 
 /** Blockscout speaks the same `account/tokentx` dialect, no key needed. */
-async function viaBlockscout(chain: StaxChain, address: string): Promise<WalletTx[]> {
+async function viaBlockscout(chain: StaxChain, address: string, max: number): Promise<WalletTx[]> {
   if (!chain.blockscoutUrl) throw new Error("no blockscout for chain");
-  const url = `${chain.blockscoutUrl}/api?module=account&action=tokentx&address=${address}&page=1&offset=${MAX}&sort=desc`;
-  return viaEtherscanCompatible(chain, url);
+  const url = `${chain.blockscoutUrl}/api?module=account&action=tokentx&address=${address}&page=1&offset=${max}&sort=desc`;
+  return viaEtherscanCompatible(chain, url, max);
 }
 
-async function viaEtherscanCompatible(chain: StaxChain, url: string): Promise<WalletTx[]> {
+async function viaEtherscanCompatible(chain: StaxChain, url: string, max: number): Promise<WalletTx[]> {
   const address = new URL(url).searchParams.get("address") ?? "";
   const tokens = knownTokens(chain);
   const res = await fetch(url, { signal: AbortSignal.timeout(12_000) });
@@ -120,7 +120,7 @@ async function viaEtherscanCompatible(chain: StaxChain, url: string): Promise<Wa
       timestamp: Number.isFinite(ts) && ts > 0 ? ts : undefined,
     };
   });
-  return dedupeSort(txs);
+  return dedupeSort(txs, max);
 }
 
 // ── 2) Alchemy eth_getLogs (PAYG plans only — free tier caps at 10 blocks) ─────
@@ -135,7 +135,7 @@ function alchemyClient(chain: StaxChain, rpc: string): PublicClient {
   return c;
 }
 
-async function viaLogs(chain: StaxChain, rpc: string, address: string): Promise<WalletTx[]> {
+async function viaLogs(chain: StaxChain, rpc: string, address: string, max: number): Promise<WalletTx[]> {
   const client = alchemyClient(chain, rpc);
   const tokens = knownTokens(chain);
   const owner = getAddress(address);
@@ -158,7 +158,7 @@ async function viaLogs(chain: StaxChain, rpc: string, address: string): Promise<
       blockNumber: Number(l.blockNumber ?? BigInt(0)),
     };
   };
-  const txs = dedupeSort([...outLogs.map((l) => mapLog(l, "out")), ...inLogs.map((l) => mapLog(l, "in"))]);
+  const txs = dedupeSort([...outLogs.map((l) => mapLog(l, "out")), ...inLogs.map((l) => mapLog(l, "in"))], max);
 
   const blocks = [...new Set(txs.map((t) => t.blockNumber))].slice(0, 40);
   const tsByBlock = new Map<number, number>();
@@ -175,19 +175,22 @@ async function viaLogs(chain: StaxChain, rpc: string, address: string): Promise<
   return txs.map((t) => ({ ...t, timestamp: tsByBlock.get(t.blockNumber) }));
 }
 
-/** Incoming + outgoing transfers for `address` on `chain`, newest first. */
-export async function getWalletTransfers(chain: StaxChain, address: string): Promise<WalletTx[]> {
+/**
+ * Incoming + outgoing transfers for `address` on `chain`, newest first.
+ * `max` caps the rows (50 for the wallet screen; cost basis asks for the lot).
+ */
+export async function getWalletTransfers(chain: StaxChain, address: string, max = MAX): Promise<WalletTx[]> {
   if (!isAddress(address)) return [];
   if (ETHERSCAN_KEY) {
     try {
-      return await viaEtherscan(chain, address);
+      return await viaEtherscan(chain, address, max);
     } catch {
       /* fall through: Etherscan's free tier refuses some chains (Base) */
     }
   }
   if (chain.blockscoutUrl) {
     try {
-      return await viaBlockscout(chain, address);
+      return await viaBlockscout(chain, address, max);
     } catch {
       /* fall through */
     }
@@ -195,7 +198,7 @@ export async function getWalletTransfers(chain: StaxChain, address: string): Pro
   const rpc = alchemyRpc(chain);
   if (rpc) {
     try {
-      return await viaLogs(chain, rpc, address);
+      return await viaLogs(chain, rpc, address, max);
     } catch {
       /* free-tier 10-block cap / unsupported — give up gracefully */
     }

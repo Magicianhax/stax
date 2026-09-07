@@ -12,6 +12,7 @@ import { useState } from "react";
 import type { Asset } from "@/lib/chains";
 import { useChain } from "@/lib/chains/active";
 import { usePortfolio } from "@/hooks/useBalances";
+import { usePortfolioHistory } from "@/hooks/usePortfolioHistory";
 import { useAssetPrice } from "@/hooks/usePrices";
 import { useMarketHistory, type MarketRange } from "@/hooks/useMarket";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
@@ -22,6 +23,7 @@ import { Icon, AssetTile, PriceChart, SectionTitle, Stat, MarketStatus, type Pri
 import { Money, Reveal, Tick, useFlashRow } from "@/components/motion";
 import { usd, tokenQty, timeAgo } from "@/lib/format";
 import { priceSeries } from "@/lib/demoSeries";
+import type { Lot } from "@/lib/positions";
 import { iconBtn } from "./primitives";
 import { ComingTag, yieldLine } from "./MarketScreen";
 import { BasketRailTile } from "./basketPrimitives";
@@ -29,6 +31,24 @@ import { readoutDate, timeSeries } from "./useRangeSeries";
 import type { LoopParams } from "../LiteApp";
 
 const RANGES = ["1D", "1W", "1M", "1Y", "5Y"] as const;
+/** Lots shown before "Show all". */
+const LOTS_PREVIEW = 3;
+
+/** "Sep 6" / "Sep 6, 2025" for a lot's date. */
+function lotDate(at: number, nowMs: number): string {
+  const d = new Date(at * 1000);
+  const sameYear = d.getFullYear() === new Date(nowMs).getFullYear();
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }) });
+}
+
+/** Units for a lot row — same trimming as the position card. */
+function lotQty(qty: number, decimals: number): string {
+  try {
+    return tokenQty(BigInt(Math.round(qty * 10 ** decimals)), decimals);
+  } catch {
+    return qty.toFixed(4);
+  }
+}
 
 /** One key-fact row; `wide` stacks label over value for sentence-length facts. */
 interface Fact {
@@ -54,6 +74,11 @@ export function AssetDetailScreen({
   const { address } = useSmartAccount();
   const { data: port } = usePortfolio(address ?? undefined);
   const holding = port?.holdings.find((h) => h.asset.symbol === asset.symbol);
+  // Cost basis + lots (same query Owned uses at its default range, so it's warm).
+  const { data: hist } = usePortfolioHistory(address ?? undefined, "1M");
+  const position = hist?.positions.find((p) => p.symbol === asset.symbol);
+  const lots: Lot[] = position ? [...position.lots].reverse() : [];
+  const [allLots, setAllLots] = useState(false);
   const { price: live } = useAssetPrice(asset.symbol);
   const livePrice = live?.priceUsd;
   const liveApy = live?.apy;
@@ -228,11 +253,16 @@ export function AssetDetailScreen({
         </div>
       </div>
 
-      {/* your position — value is shares × the price shown above, always */}
+      {/* your position — value is shares × the price shown above, always;
+          avg cost + gain from the lots when we know them */}
       {holding && (
         <div style={{ padding: "18px 22px 0" }}>
           <SectionTitle>Your position</SectionTitle>
-          <div ref={posRef} className={`card ${posFlash}`.trim()} style={{ padding: 18, display: "flex", gap: 16 }}>
+          <div
+            ref={posRef}
+            className={`card ${posFlash}`.trim()}
+            style={{ padding: 18, display: "grid", gridTemplateColumns: "repeat(3, 1fr)", columnGap: 16, rowGap: 16 }}
+          >
             <Stat
               label="Value"
               value={
@@ -252,7 +282,80 @@ export function AssetDetailScreen({
             {shownPrice !== undefined && (
               <Stat label="Price" value={usd(shownPrice)} />
             )}
+            {position && position.costBasisUsd > 0 && (
+              <>
+                <Stat label="Avg cost" value={usd(position.avgCostPerUnit)} />
+                {position.unrealizedUsd !== null && position.unrealizedPct !== null && (
+                  <Stat
+                    label="Gain"
+                    accent={position.unrealizedUsd >= 0 ? "var(--pos)" : "var(--neg)"}
+                    value={
+                      <>
+                        {position.unrealizedUsd >= 0 ? "+" : "-"}
+                        {usd(Math.abs(position.unrealizedUsd))}
+                        <span style={{ fontSize: 13, fontWeight: 600, marginLeft: 5 }}>
+                          {position.unrealizedPct >= 0 ? "+" : ""}
+                          {position.unrealizedPct.toFixed(2)}%
+                        </span>
+                      </>
+                    }
+                  />
+                )}
+              </>
+            )}
           </div>
+
+          {/* your buys — every lot, newest first; sells show as "Sold" */}
+          {lots.length > 0 && (
+            <Reveal key={`${asset.symbol}:${lots.length}`} style={{ marginTop: 14 }}>
+              <SectionTitle>{lots.some((l) => l.side === "sell") ? "Your trades" : "Your buys"}</SectionTitle>
+              <div className="card" style={{ padding: "4px 16px" }}>
+                {(allLots ? lots : lots.slice(0, LOTS_PREVIEW)).map((l, i) => (
+                  <div
+                    key={`${l.txHash}:${l.side}:${i}`}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: "11px 0",
+                      borderTop: i ? "1px solid var(--line-2)" : "none",
+                      fontSize: 14,
+                    }}
+                  >
+                    <span style={{ color: "var(--ink-2)", flex: "none", minWidth: 58 }}>{lotDate(l.at, now)}</span>
+                    <span className="tnum" style={{ flex: 1, minWidth: 0, color: l.side === "sell" ? "var(--ink-2)" : "var(--ink)" }}>
+                      {l.side === "sell" ? "Sold " : ""}
+                      {lotQty(l.qty, asset.decimals ?? 18)}
+                    </span>
+                    <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--ink-3)", letterSpacing: ".04em", textTransform: "uppercase" }}>
+                      {l.kind === "vera" ? "Vera" : "You"}
+                    </span>
+                    <span className="tnum" style={{ fontWeight: 600, minWidth: 64, textAlign: "right" }}>
+                      {usd(l.usdc)}
+                    </span>
+                  </div>
+                ))}
+                {lots.length > LOTS_PREVIEW && (
+                  <button
+                    className="tap"
+                    onClick={() => setAllLots((v) => !v)}
+                    style={{
+                      width: "100%",
+                      padding: "11px 0 9px",
+                      borderTop: "1px solid var(--line-2)",
+                      background: "none",
+                      color: "var(--primary)",
+                      fontSize: 13.5,
+                      fontWeight: 600,
+                      textAlign: "center",
+                    }}
+                  >
+                    {allLots ? "Show less" : `Show all ${lots.length}`}
+                  </button>
+                )}
+              </div>
+            </Reveal>
+          )}
         </div>
       )}
 
