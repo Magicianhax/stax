@@ -13,6 +13,7 @@
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { basketToAllocation } from "@/lib/baskets";
+import { getChain } from "@/lib/chains";
 import {
   GIFT_MAX_USD,
   GIFT_MAX_UNLOCK_YEARS,
@@ -26,6 +27,7 @@ import {
   type GiftSummary,
 } from "@/lib/gifts";
 import { chainKeyFromRequest } from "@/lib/server/chain";
+import { assertSignerMatchesContract, GIFT_SIGNER_CONFIGURED } from "@/lib/server/giftSigner";
 import {
   createGift,
   emailsFor,
@@ -83,6 +85,17 @@ export async function POST(req: NextRequest) {
   const chain = chainKeyFromRequest(req);
   const giftContract = giftContractFor(chain);
   if (!giftContract) return jsonError(503, "Gifting isn't switched on for this network yet.");
+
+  // A signer mismatch would fund the gift and then make it unclaimable forever, so it
+  // has to fail here, before any money moves, not at claim time years later.
+  if (!GIFT_SIGNER_CONFIGURED) return jsonError(503, "Gifting isn't switched on yet.");
+  const signerOk = await assertSignerMatchesContract(getChain(chain), giftContract);
+  if (!signerOk.ok) {
+    console.error(
+      `[gifts] signer mismatch on ${chain}: contract expects ${signerOk.expected}, server signs with ${signerOk.configured}`,
+    );
+    return jsonError(503, "Gifting is misconfigured right now. Nothing was charged.");
+  }
 
   let body: z.infer<typeof Body>;
   try {
