@@ -69,8 +69,7 @@ export function chainTransport(chain: StaxChain): Transport {
   // Server-only keyed endpoint (BASE_RPC_URL / MANTLE_RPC_URL) goes first: it
   // never ships to the browser, so a CDP/Alchemy token can't be lifted from the
   // bundle. The client keeps the public NEXT_PUBLIC_* / fallback order.
-  const keyed = serverRpcUrl(chain);
-  const urls = [...(keyed ? [keyed] : []), chain.rpcUrl, ...chain.rpcFallbacks].filter((u, i, a) => a.indexOf(u) === i);
+  const urls = [...serverRpcUrls(chain), chain.rpcUrl, ...chain.rpcFallbacks].filter((u, i, a) => a.indexOf(u) === i);
   return fallback(
     urls.map((u) => http(u, { timeout: 12_000, retryCount: 1 })),
     { rank: false, retryCount: 0 },
@@ -79,9 +78,25 @@ export function chainTransport(chain: StaxChain): Transport {
 
 /** The keyed, server-only RPC for `chain`, if configured. Undefined in the browser. */
 export function serverRpcUrl(chain: StaxChain): string | undefined {
-  if (typeof window !== "undefined") return undefined;
-  const v = chain.key === "base" ? process.env.BASE_RPC_URL : process.env.MANTLE_RPC_URL;
-  return v?.trim() || undefined;
+  return serverRpcUrls(chain)[0];
+}
+
+/**
+ * Every keyed, server-only endpoint for `chain`, best first. These never reach
+ * the browser, so the tokens in them cannot be lifted from the bundle.
+ *
+ * Dwellir sits behind the primary as a second keyed node: its free plan answers
+ * ordinary reads but refuses `eth_getLogs`, so it is a fallback for balances and
+ * prices, never for history.
+ */
+export function serverRpcUrls(chain: StaxChain): string[] {
+  if (typeof window !== "undefined") return [];
+  const primary = (chain.key === "base" ? process.env.BASE_RPC_URL : process.env.MANTLE_RPC_URL)?.trim();
+  // Accept either spelling: the dashboard hands the key over in lower case.
+  const dwellir = (process.env.DWELLIR_API_KEY || process.env.dwellir_API_KEY)?.trim();
+  const dwellirUrl =
+    dwellir && chain.key === "base" ? `https://api-base-mainnet-archive.n.dwellir.com/${dwellir}` : undefined;
+  return [primary, dwellirUrl].filter((u): u is string => Boolean(u));
 }
 
 export { BASE, MANTLE };
