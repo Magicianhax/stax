@@ -99,10 +99,14 @@ const hx = (tag: string): `0x${string}` => ("0x" + tag.repeat(32).slice(0, 64)) 
 // "now" (Mon 7 Sep 2026 14:00 UTC) so Activity groups and Wallet dates are stable.
 const PLAN_A = ["NVDA", "AAPL", "GOOGL", "aUSDC"];
 const PLAN_B = ["AAPL", "GOOGL", "aUSDC"];
+// Fills per demo plan (dollars in → units out at the reference prices), so the
+// receipt can show exactly what was bought.
+const legsFor = (split: [string, number][]) =>
+  split.map(([symbol, usdcIn]) => ({ symbol, usdcIn, qty: Number((usdcIn / (displayFor(symbol).price || 1)).toFixed(symbol === "aUSDC" ? 2 : 4)) }));
 export const DEMO_ACTIVITY: ActivityRow[] = [
-  { kind: "invest", usdc: 300, legCount: 4, txHash: hx("7b41a9c0"), blockNumber: BigInt(0), timestamp: ago(0, 9, 12), symbols: PLAN_A },
-  { kind: "invest", usdc: 150, legCount: 3, txHash: hx("910e7f22"), blockNumber: BigInt(0), timestamp: ago(24, 16, 40), symbols: PLAN_B },
-  { kind: "invest", usdc: 500, legCount: 4, txHash: hx("a27c1043"), blockNumber: BigInt(0), timestamp: ago(48, 11, 5), symbols: PLAN_A },
+  { kind: "invest", usdc: 300, legCount: 4, txHash: hx("7b41a9c0"), blockNumber: BigInt(0), timestamp: ago(0, 9, 12), symbols: PLAN_A, legs: legsFor([["NVDA", 90], ["AAPL", 75], ["GOOGL", 75], ["aUSDC", 60]]) },
+  { kind: "invest", usdc: 150, legCount: 3, txHash: hx("910e7f22"), blockNumber: BigInt(0), timestamp: ago(24, 16, 40), symbols: PLAN_B, legs: legsFor([["AAPL", 60], ["GOOGL", 60], ["aUSDC", 30]]) },
+  { kind: "invest", usdc: 500, legCount: 4, txHash: hx("a27c1043"), blockNumber: BigInt(0), timestamp: ago(48, 11, 5), symbols: PLAN_A, legs: legsFor([["NVDA", 150], ["AAPL", 125], ["GOOGL", 125], ["aUSDC", 100]]) },
 ];
 
 // Wallet transfers that mirror the activity above: every plan is USDC leaving

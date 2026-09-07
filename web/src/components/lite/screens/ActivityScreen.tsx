@@ -92,7 +92,9 @@ export function ActivityScreen({
       title: a.status === "failed" ? "Plan didn't go through" : "Invested in a plan",
       amount: a.usdc,
       txHash: a.txHash,
-      date: a.timestamp ? new Date(a.timestamp * 1000).toISOString() : undefined,
+      at: a.timestamp ? a.timestamp * 1000 : undefined,
+      legs: a.legs,
+      failed: a.status === "failed",
     });
 
   return (

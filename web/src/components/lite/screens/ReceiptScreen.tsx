@@ -8,7 +8,7 @@
 //     no order — Close simply goes back.
 // For real trades we link to the chain's explorer; Vera's sample recorded
 // recommendations only carry an illustrative reference.
-import { AssetTile, Icon, Seal, useToast } from "@/components/design";
+import { AssetTile, Icon, LogoCluster, Seal, useToast } from "@/components/design";
 import { DrawCheck, Money, Reveal } from "@/components/motion";
 import { toTile } from "@/lib/displayAssets";
 import { usd, txUrl } from "@/lib/format";
@@ -16,6 +16,7 @@ import { useChain } from "@/lib/chains/active";
 import { haptic } from "@/lib/haptics";
 import { iconBtn } from "./primitives";
 import type { TradeOrder } from "../LiteApp";
+import type { ActivityLeg } from "@/lib/onchainHistory";
 
 /** "Sep 7, 2026 · 14:02" */
 function exactTime(ms: number): string {
@@ -34,6 +35,8 @@ export function ReceiptScreen({
   date,
   order,
   at,
+  legs,
+  failed,
   onClose,
 }: {
   go: (target: string | number, params?: Record<string, unknown>) => void;
@@ -46,6 +49,10 @@ export function ReceiptScreen({
   order?: TradeOrder;
   /** When it filled (ms epoch) — shown as an exact time. */
   at?: number;
+  /** History receipts: the plan's fills (what was bought, for how much). */
+  legs?: ActivityLeg[];
+  /** History receipts: the plan reverted on-chain. */
+  failed?: boolean;
   /** Closing-the-loop handler from LiteApp; falls back to go(-1). */
   onClose?: () => void;
 }) {
@@ -53,7 +60,14 @@ export function ReceiptScreen({
   const { notify } = useToast();
   const explorerHref = txHash ? txUrl(txHash, chain) : undefined;
   const isSell = order?.side === "sell";
-  const heading = order ? `${isSell ? "Sold" : "Bought"} ${order.name}` : (title ?? "Invested with Vera");
+  // A one-holding plan reads like a buy; a multi-holding plan lists its fills below.
+  const fills = (legs ?? []).filter((l) => l.usdcIn > 0 || l.qty > 0);
+  const single = !order && fills.length === 1 ? fills[0] : undefined;
+  const heading = order
+    ? `${isSell ? "Sold" : "Bought"} ${order.name}`
+    : single
+      ? `Bought ${toTile(single.symbol).name}`
+      : (title ?? "Invested with Vera");
   const shownAmount = order ? order.amountUsd : amount;
   const when = at ? exactTime(at) : (date ?? "Today, just now");
   const close = onClose ?? (() => go(-1));
@@ -79,10 +93,14 @@ export function ReceiptScreen({
   };
 
   const status = (
-    <span key="s" style={{ color: "var(--pos)" }}>
-      Completed
+    <span key="s" style={{ color: failed ? "var(--neg)" : "var(--pos)" }}>
+      {failed ? "Didn't go through" : "Completed"}
     </span>
   );
+  const fmtQty = (q: number, symbol: string) => {
+    const dp = symbol === "aUSDC" || symbol === "USDC" ? 2 : q >= 100 ? 2 : 4;
+    return `${q.toLocaleString("en-US", { maximumFractionDigits: dp })} ${toTile(symbol).name === symbol ? symbol : symbol}`;
+  };
   const rows: [string, React.ReactNode][] = order
     ? isSell
       ? [
@@ -101,13 +119,24 @@ export function ReceiptScreen({
           ["Network", chain.name],
           ["Time", when],
         ]
-    : [
-        ["Status", status],
-        ["Network cost", "Free"],
-        ["Paid from", "Your cash balance"],
-        ["Network", chain.name],
-        ["Time", when],
-      ];
+    : single
+      ? [
+          ["Shares", fmtQty(single.qty, single.symbol)],
+          ["Status", status],
+          ["Network cost", "Free"],
+          ["Paid from", "Your cash balance"],
+          ["Ownership", "Real shares, held by you"],
+          ["Network", chain.name],
+          ["Time", when],
+        ]
+      : [
+          ["Holdings", fills.length ? String(fills.length) : "—"],
+          ["Status", status],
+          ["Network cost", "Free"],
+          ["Paid from", "Your cash balance"],
+          ["Network", chain.name],
+          ["Time", when],
+        ];
 
   return (
     <div className="screen screen-pad-top" style={{ paddingBottom: 30 }}>
@@ -142,6 +171,22 @@ export function ReceiptScreen({
                 <DrawCheck size={26} delay={0.25} />
               </span>
             </>
+          ) : single ? (
+            <>
+              <AssetTile asset={toTile(single.symbol)} size={64} />
+              <span className="receipt-hero" style={{ position: "absolute", right: -8, bottom: -6, padding: 2, borderRadius: "50%", display: "grid" }}>
+                <DrawCheck size={26} delay={0.25} />
+              </span>
+            </>
+          ) : fills.length > 1 ? (
+            <>
+              <div style={{ display: "grid", placeItems: "center", height: 64 }}>
+                <LogoCluster assets={fills.map((l) => ({ symbol: l.symbol }))} size={34} max={4} />
+              </div>
+              <span className="receipt-hero" style={{ position: "absolute", right: -8, bottom: -6, padding: 2, borderRadius: "50%", display: "grid" }}>
+                <DrawCheck size={26} delay={0.25} />
+              </span>
+            </>
           ) : (
             <DrawCheck size={64} delay={0.1} />
           )}
@@ -153,12 +198,36 @@ export function ReceiptScreen({
           </div>
         )}
         <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 4 }}>
-          {order ? (isSell ? "Paid into your cash balance" : "Held in your account") : when}
+          {order ? (isSell ? "Paid into your cash balance" : "Held in your account") : fills.length ? "Held in your account" : when}
         </div>
       </Reveal>
 
+      {/* what you got — one row per holding the plan bought */}
+      {fills.length > 1 && (
+        <div style={{ padding: "22px 22px 0" }}>
+          <Reveal delay={0.12} className="card" style={{ padding: "4px 14px" }}>
+            {fills.map((l, i) => {
+              const t = toTile(l.symbol);
+              return (
+                <div
+                  key={`${l.symbol}-${i}`}
+                  style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 0", borderBottom: i < fills.length - 1 ? "1px solid var(--line-2)" : "none" }}
+                >
+                  <AssetTile asset={t} size={38} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 15 }}>{t.name}</div>
+                    <div className="tnum" style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 1 }}>{fmtQty(l.qty, l.symbol)}</div>
+                  </div>
+                  <div className="tnum" style={{ fontWeight: 700, fontSize: 15 }}>{usd(l.usdcIn)}</div>
+                </div>
+              );
+            })}
+          </Reveal>
+        </div>
+      )}
+
       {/* details */}
-      <div style={{ padding: "22px 22px 0" }}>
+      <div style={{ padding: `${fills.length > 1 ? 12 : 22}px 22px 0` }}>
         <Reveal delay={0.15} className="card" style={{ padding: "4px 18px" }}>
           {rows.map(([k, v], i) => (
             <div

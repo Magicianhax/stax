@@ -1,4 +1,5 @@
 "use client";
+import type { ActivityLeg } from "@/lib/onchainHistory";
 
 // Stax app shell — a small screen router that mirrors the design's go(screen,
 // params) orchestrator (app.jsx) while wiring the REAL hooks end to end.
@@ -675,6 +676,8 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
         order?: TradeOrder;
         at?: number;
         loop?: LoopParams;
+        legs?: ActivityLeg[];
+        failed?: boolean;
       };
       const { order, loop, ref: refCode, ...rest } = rp;
       view = (
@@ -687,6 +690,8 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
           date={rest.date}
           order={order}
           at={rest.at}
+          legs={rest.legs}
+          failed={rest.failed}
           onClose={order ? () => closeTrade(order, loop) : undefined}
         />
       );

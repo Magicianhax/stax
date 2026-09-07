@@ -14,7 +14,7 @@ import "server-only";
 //             then through the unchanged aggregateVeraRecord / toActivityRows.
 //
 // An undeployed executor (Base before launch) yields empty results, never errors.
-import { createPublicClient, decodeEventLog, encodeEventTopics, fallback, http, parseAbiItem, type AbiEvent, type PublicClient } from "viem";
+import { createPublicClient, decodeEventLog, encodeEventTopics, fallback, formatUnits, http, parseAbiItem, type AbiEvent, type PublicClient } from "viem";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import type { ChainKey, StaxChain } from "@/lib/chains/types";
 import { serverRpcUrl } from "@/lib/chains";
@@ -24,6 +24,7 @@ import {
   RECOMMENDATION_COMMITTED,
   ALLOCATION_EXECUTED,
   aggregateVeraRecord,
+  type ActivityLeg,
   toActivityRows,
   type RecommendationRow,
   type ExecutionRow,
@@ -329,15 +330,16 @@ async function readRecommendationRows(chain: StaxChain, user?: `0x${string}`): P
 }
 
 /**
- * Holdings bought per tx, from the LegFilled events indexed for the same
- * transactions (LegFilled carries tokenOut but no user, so we key by txHash).
- * Unknown tokens are skipped; a tx with no legs maps to no entry.
+ * Fills per tx, from the LegFilled events indexed for the same transactions
+ * (LegFilled carries tokenOut/usdcIn/received but no user, so we key by txHash).
+ * Unknown tokens are skipped; a tx with no legs maps to no entry. Exported so the
+ * positions/cost-basis code can reuse it.
  */
-async function symbolsByTx(chain: StaxChain, txHashes: string[]): Promise<Map<string, string[]>> {
-  const out = new Map<string, string[]>();
+export async function legsByTx(chain: StaxChain, txHashes: string[]): Promise<Map<string, ActivityLeg[]>> {
+  const out = new Map<string, ActivityLeg[]>();
   if (!txHashes.length) return out;
-  const bySymbolAddr = new Map<string, string>(
-    chain.assets.all.filter((a) => !!a.address).map((a) => [a.address!.toLowerCase(), a.symbol]),
+  const byAddr = new Map<string, { symbol: string; decimals: number }>(
+    chain.assets.all.filter((a) => !!a.address).map((a) => [a.address!.toLowerCase(), { symbol: a.symbol, decimals: a.decimals ?? 18 }]),
   );
   const legs = await db
     .select()
@@ -345,18 +347,31 @@ async function symbolsByTx(chain: StaxChain, txHashes: string[]): Promise<Map<st
     .where(and(eq(executorEvents.chain, chain.key), eq(executorEvents.event, "LegFilled"), inArray(executorEvents.txHash, txHashes)))
     .orderBy(executorEvents.logIndex);
   for (const l of legs) {
-    const symbol = bySymbolAddr.get(String(dataOf(l).tokenOut ?? "").toLowerCase());
-    if (!symbol) continue;
+    const d = dataOf(l);
+    const asset = byAddr.get(String(d.tokenOut ?? "").toLowerCase());
+    if (!asset) continue;
     const list = out.get(l.txHash) ?? [];
-    if (!list.includes(symbol)) list.push(symbol);
+    list.push({
+      symbol: asset.symbol,
+      usdcIn: usdcToNumber(d.usdcIn),
+      qty: unitsToNumber(d.received, asset.decimals),
+    });
     out.set(l.txHash, list);
   }
   return out;
 }
 
+function unitsToNumber(raw: unknown, decimals: number): number {
+  try {
+    return Number(formatUnits(BigInt(String(raw ?? "0")), decimals));
+  } catch {
+    return 0;
+  }
+}
+
 async function readExecutionRows(chain: StaxChain, user?: `0x${string}`): Promise<ExecutionRow[]> {
   const rows = await eventRows(chain, "AllocationExecuted", user);
-  const symbols = await symbolsByTx(chain, rows.map((r) => r.txHash));
+  const legs = await legsByTx(chain, rows.map((r) => r.txHash));
   return rows.map((r) => ({
     planId: (r.planId ?? "0x") as `0x${string}`,
     user: (r.user ?? "0x") as `0x${string}`,
@@ -365,7 +380,8 @@ async function readExecutionRows(chain: StaxChain, user?: `0x${string}`): Promis
     txHash: r.txHash as `0x${string}`,
     blockNumber: BigInt(r.blockNumber),
     timestamp: unixSeconds(r.timestamp),
-    symbols: symbols.get(r.txHash),
+    symbols: legs.get(r.txHash)?.map((l) => l.symbol).filter((v, i, a) => a.indexOf(v) === i),
+    legs: legs.get(r.txHash),
   }));
 }
 

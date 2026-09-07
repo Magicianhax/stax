@@ -42,6 +42,17 @@ export interface ExecutionRow {
   timestamp?: number;
   /** Holdings the plan bought, from LegFilled (absent when not indexed). */
   symbols?: string[];
+  /** Per-holding fills: dollars in and units received (absent when not indexed). */
+  legs?: ActivityLeg[];
+}
+
+/** One filled leg of a plan: what was bought, for how much. */
+export interface ActivityLeg {
+  symbol: string;
+  /** USDC spent on this leg, dollars. */
+  usdcIn: number;
+  /** Units received, in the asset's own decimals (shares for stocks). */
+  qty: number;
 }
 
 export interface VeraRecord {
@@ -75,6 +86,8 @@ export interface ActivityRow {
   symbols?: string[];
   /** On-chain state; confirmed when absent. */
   status?: "confirmed" | "pending" | "failed";
+  /** Per-holding fills (dollars in, units out); absent when not indexed. */
+  legs?: ActivityLeg[];
 }
 
 function usdcToNumber(raw: bigint): number {
@@ -175,6 +188,7 @@ export function toActivityRows(execs: ExecutionRow[]): ActivityRow[] {
       blockNumber: e.blockNumber,
       timestamp: e.timestamp,
       symbols: e.symbols,
+      legs: e.legs,
     }));
 }
 
