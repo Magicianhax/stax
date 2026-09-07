@@ -127,10 +127,24 @@ export function GiftScreen({
   const split = splitGiftBasket(chain.key, basket?.items ?? [], amountOk ? amount : 0);
   const items = split.holdings;
   const hasCashSlice = items.some((i) => i.heldAsCash);
+
+  // The four money lines, in whole cents.
+  //
   // The platform fee is skimmed on the invest leg only, so a basket with a safe
-  // slice pays it on part of the gift, not all of it.
-  const fee = feeUsd(split.investUsd);
-  const invested = Math.round((split.investUsd - fee) * 100) / 100;
+  // slice pays it on part of the gift, not all of it. Cash and fee are exact by
+  // construction, so ONE line has to absorb the rounding remainder rather than
+  // being computed independently — three separately rounded values need not sum
+  // to the rounded total. Invested is that line: at $33.33 with a 20% safe slice,
+  // deriving it from `investUsd - fee` gave $26.60 and the card added up to
+  // $33.34 against a "You pay" of $33.33. Integers throughout, because `0.01` as
+  // a float is not exactly a cent and a one-cent drift reads as 0.010000000000005.
+  const cents = (v: number) => Math.round(v * 100);
+  const cashCents = cents(split.cashUsd);
+  const feeCents = cents(feeUsd(split.investUsd));
+  const investedCents = cents(amountOk ? amount : 0) - cashCents - feeCents;
+  const fee = feeCents / 100;
+  const invested = investedCents / 100;
+  const cash = cashCents / 100;
 
   const overBalance = amountOk && amount > balance;
   const canSend = Boolean(basket) && amountOk && emailOk && unlockOk && ready && giftsOn && !overBalance;
@@ -468,7 +482,7 @@ export function GiftScreen({
           <div className="card" style={{ padding: 18 }}>
             <GiftBasketHead name={basket.name} items={items} />
             <div style={{ marginTop: 14, paddingTop: 4, borderTop: "1px solid var(--line-2)" }}>
-              <SplitList rows={reviewRows(items, split.investUsd, split.cashUsd, fee)} />
+              <SplitList rows={reviewRows(items, invested, cash)} />
             </div>
             {hasCashSlice && <CashSliceNote style={{ marginTop: 12 }} />}
             <div style={{ marginTop: 4 }}>
@@ -492,7 +506,7 @@ export function GiftScreen({
               {/* The split above adds up to what actually goes in, so the money
                   lines have to agree with it: invested + fee = what you pay. */}
               <DetailRow label="Invested for them" value={usd(invested)} />
-              {hasCashSlice && <DetailRow label="Set aside as dollars" value={usd(split.cashUsd)} />}
+              {hasCashSlice && <DetailRow label="Set aside as dollars" value={usd(cash)} />}
               <DetailRow label="Fee" value={`${usd(fee)} · gas on us`} />
               <DetailRow label="You pay" value={usd(amount)} />
             </div>

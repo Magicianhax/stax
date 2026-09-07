@@ -107,22 +107,20 @@ export function splitOf<T extends GiftItem>(items: T[], amountUsd: number): (T &
  * The review card's rows for a gift being composed.
  *
  * The fee is skimmed on the invest leg ONLY, so it cannot be spread evenly over
- * every row: the safe slice is parked whole. Splitting the two groups against
- * their own totals is what makes each row agree with the "Invested for them" and
- * "Set aside as dollars" lines underneath, instead of quietly understating the
- * cash row by the fee's share of it.
+ * every row: the safe slice is parked whole. Each group is split against its own
+ * summary line, so a row can never disagree with the total printed underneath it.
+ * Both totals are passed in already rounded, so the caller owns which line
+ * absorbs the rounding remainder and this cannot reintroduce drift.
  */
 export function reviewRows(
   holdings: (GiftItem & { heldAsCash?: boolean })[],
-  investUsd: number,
+  /** The "Invested for them" line, already net of the fee and already absorbing the cent. */
+  investedUsd: number,
+  /** The "Set aside as dollars" line. */
   cashUsd: number,
-  fee: number,
 ): (GiftItem & { heldAsCash?: boolean; amountUsd: number })[] {
   const cash = splitOf(holdings.filter((h) => h.heldAsCash), cashUsd);
-  const bought = splitOf(
-    holdings.filter((h) => !h.heldAsCash),
-    Math.round((investUsd - fee) * 100) / 100,
-  );
+  const bought = splitOf(holdings.filter((h) => !h.heldAsCash), investedUsd);
   return [...cash, ...bought].sort((a, b) => b.weightPct - a.weightPct);
 }
 
