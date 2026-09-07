@@ -29,10 +29,10 @@ const RANGE_SHAPE: Record<MarketRange, { n: number; step: number }> = {
   "1W": { n: 56, step: 3 * 3600e3 },
   "1M": { n: 30, step: DAY },
   "1Y": { n: 52, step: 7 * DAY },
-  All: { n: 60, step: 30 * DAY },
+  "5Y": { n: 60, step: 30 * DAY },
 };
 // Range change as a multiple of the asset's daily move (matches demoHistory).
-const RANGE_SCALE: Record<MarketRange, number> = { "1D": 1, "1W": 2.4, "1M": 4.1, "1Y": 13, All: 22 };
+const RANGE_SCALE: Record<MarketRange, number> = { "1D": 1, "1W": 2.4, "1M": 4.1, "1Y": 13, "5Y": 22 };
 
 function hash(s: string): number {
   let h = 2166136261;
@@ -166,7 +166,7 @@ function rangeCovering(ageMs: number): MarketRange {
   if (ageMs <= 7 * DAY) return "1W";
   if (ageMs <= 31 * DAY) return "1M";
   if (ageMs <= 366 * DAY) return "1Y";
-  return "All";
+  return "5Y";
 }
 
 /**

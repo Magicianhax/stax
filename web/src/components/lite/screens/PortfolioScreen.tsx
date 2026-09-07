@@ -31,13 +31,13 @@ import { rampColor } from "./basketPrimitives";
 import { blendSeries, changeOf, readoutDate, useSymbolSeries, type MarketRange } from "./useRangeSeries";
 import type { LoopParams } from "../LiteApp";
 
-const RANGES = ["1D", "1W", "1M", "1Y", "All"] as const;
+const RANGES = ["1D", "1W", "1M", "1Y", "5Y"] as const;
 const RANGE_WORD: Record<MarketRange, string> = {
   "1D": "today",
   "1W": "past week",
   "1M": "past month",
   "1Y": "past year",
-  All: "all time",
+  "5Y": "past 5 years",
 };
 
 export function PortfolioScreen({

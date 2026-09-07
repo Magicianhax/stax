@@ -11,8 +11,8 @@
 // of clients costs at most one upstream call per symbol per TTL window.
 import type { StaxChain } from "@/lib/chains/types";
 
-export type MarketRange = "1D" | "1W" | "1M" | "1Y" | "All";
-export const MARKET_RANGES: MarketRange[] = ["1D", "1W", "1M", "1Y", "All"];
+export type MarketRange = "1D" | "1W" | "1M" | "1Y" | "5Y";
+export const MARKET_RANGES: MarketRange[] = ["1D", "1W", "1M", "1Y", "5Y"];
 
 export interface MarketHistory {
   /** Closing prices, oldest -> newest (USD). */
@@ -66,7 +66,7 @@ const YAHOO_RANGES: Record<MarketRange, { range: string; interval: string }> = {
   "1W": { range: "5d", interval: "30m" },
   "1M": { range: "1mo", interval: "1d" },
   "1Y": { range: "1y", interval: "1d" },
-  All: { range: "max", interval: "1mo" },
+  "5Y": { range: "5y", interval: "1wk" },
 };
 
 interface YahooChart {
@@ -110,7 +110,7 @@ const COINGECKO_DAYS: Record<MarketRange, string> = {
   "1W": "7",
   "1M": "30",
   "1Y": "365",
-  All: "max",
+  "5Y": "1825",
 };
 
 async function coingeckoHistory(id: string, range: MarketRange): Promise<MarketHistory | null> {
@@ -146,7 +146,7 @@ const HISTORY_TTL: Record<MarketRange, number> = {
   "1W": 15 * 60_000,
   "1M": 60 * 60_000,
   "1Y": 6 * 60 * 60_000,
-  All: 6 * 60 * 60_000,
+  "5Y": 6 * 60 * 60_000,
 };
 
 /** Real price history for one asset on `chain`, or null when no source exists / upstream fails. */

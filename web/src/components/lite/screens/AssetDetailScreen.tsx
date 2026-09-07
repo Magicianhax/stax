@@ -28,7 +28,7 @@ import { BasketRailTile } from "./basketPrimitives";
 import { readoutDate, timeSeries } from "./useRangeSeries";
 import type { LoopParams } from "../LiteApp";
 
-const RANGES = ["1D", "1W", "1M", "1Y", "All"] as const;
+const RANGES = ["1D", "1W", "1M", "1Y", "5Y"] as const;
 
 /** One key-fact row; `wide` stacks label over value for sentence-length facts. */
 interface Fact {
@@ -93,7 +93,7 @@ export function AssetDetailScreen({
     if (market?.series && market.series.length > 1) {
       return timeSeries(market.series, range, Date.parse(market.asOf) || now);
     }
-    const RANGE_FRAC: Record<MarketRange, number> = { "1D": 0.18, "1W": 0.38, "1M": 0.6, "1Y": 0.82, All: 1 };
+    const RANGE_FRAC: Record<MarketRange, number> = { "1D": 0.18, "1W": 0.38, "1M": 0.6, "1Y": 0.82, "5Y": 1 };
     const s = d.spark ?? [];
     const n = Math.max(2, Math.round(s.length * RANGE_FRAC[range]));
     return timeSeries(s.slice(s.length - n), range, now);

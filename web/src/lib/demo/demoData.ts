@@ -211,7 +211,7 @@ export function demoSeedBaskets(chain: "base" | "mantle"): Basket[] {
   ];
 }
 
-const DEMO_RANGE_SCALE: Record<MarketRange, number> = { "1D": 1, "1W": 2.4, "1M": 4.1, "1Y": 13, All: 22 };
+const DEMO_RANGE_SCALE: Record<MarketRange, number> = { "1D": 1, "1W": 2.4, "1M": 4.1, "1Y": 13, "5Y": 22 };
 
 /** Demo price history for one symbol + range, shaped from its display sparkline. */
 export function demoHistory(symbol: string, range: MarketRange): MarketHistoryResponse {

@@ -38,7 +38,7 @@ const RANGE_SECONDS: Record<MarketRange, number> = {
   "1W": 7 * 86_400,
   "1M": 30 * 86_400,
   "1Y": 365 * 86_400,
-  All: 5 * 365 * 86_400,
+  "5Y": 5 * 365 * 86_400,
 };
 
 async function fetchHistory(symbol: string, range: MarketRange): Promise<MarketHistoryResponse> {
@@ -95,7 +95,7 @@ function rangeCovering(ageSeconds: number): MarketRange {
   if (ageSeconds <= RANGE_SECONDS["1W"]) return "1W";
   if (ageSeconds <= RANGE_SECONDS["1M"]) return "1M";
   if (ageSeconds <= RANGE_SECONDS["1Y"]) return "1Y";
-  return "All";
+  return "5Y";
 }
 
 export function useBasketPerformance(basket: Basket | undefined): BasketPerformance {

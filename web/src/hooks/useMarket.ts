@@ -15,7 +15,7 @@ import { authedFetch } from "@/lib/authedFetch";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { DEMO_MARKET_SUMMARY } from "@/lib/demo/demoData";
 
-export type MarketRange = "1D" | "1W" | "1M" | "1Y" | "All";
+export type MarketRange = "1D" | "1W" | "1M" | "1Y" | "5Y";
 
 export interface MarketHistoryResponse {
   series: number[] | null;

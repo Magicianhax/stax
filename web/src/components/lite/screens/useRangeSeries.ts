@@ -26,7 +26,7 @@ const RANGE_SPAN: Record<MarketRange, number> = {
   "1W": 7 * DAY,
   "1M": 30 * DAY,
   "1Y": 365 * DAY,
-  All: 5 * 365 * DAY,
+  "5Y": 5 * 365 * DAY,
 };
 
 async function fetchHistory(symbol: string, range: MarketRange): Promise<MarketHistoryResponse> {
@@ -147,6 +147,6 @@ export function readoutDate(t: number | string, range: MarketRange): string {
   const d = new Date(t < 1e12 ? t * 1000 : t);
   const day = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   if (range === "1D") return `${day} · ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
-  if (range === "All" || range === "1Y") return d.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+  if (range === "5Y" || range === "1Y") return d.toLocaleDateString("en-US", { month: "short", year: "numeric" });
   return day;
 }
