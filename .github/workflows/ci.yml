@@ -1,0 +1,55 @@
+name: CI
+
+# Typecheck, lint and migration-drift check for the web app, plus a compile of
+# the contracts, on every push and pull request. Vercel builds independently
+# (its build runs the same `verify` + migrate gate before `next build`), so a red
+# check here is an early warning; the build gate is what actually blocks a deploy.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: web · typecheck, lint, migrations
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    env:
+      # drizzle.config.ts requires a URL to load; `check` never connects.
+      DATABASE_URL_UNPOOLED: postgres://ci:ci@localhost:5432/ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit -p tsconfig.json
+      - name: Lint
+        run: npx eslint src --max-warnings=1000
+      - name: Migration drift (schema ↔ drizzle/ folder)
+        run: node node_modules/drizzle-kit/bin.cjs check
+
+  contracts:
+    name: contracts · compile
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: contracts/package-lock.json
+      - run: npm ci
+      - run: npx hardhat compile

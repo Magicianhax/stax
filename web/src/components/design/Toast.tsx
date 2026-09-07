@@ -52,15 +52,10 @@ export function Toast({
 
   // entrance
   useEffect(() => {
-    if (!toast) {
-      setShown(false);
-      return;
-    }
-    if (firstShow) {
-      const r = requestAnimationFrame(() => setShown(true));
-      return () => cancelAnimationFrame(r);
-    }
-    setShown(true);
+    // Always one frame later: the entrance transition needs a frame to start
+    // from, and deferring keeps the effect free of synchronous state writes.
+    const r = requestAnimationFrame(() => setShown(Boolean(toast)));
+    return () => cancelAnimationFrame(r);
   }, [toast, firstShow]);
 
   // auto-dismiss with pause-when-hidden

@@ -5,7 +5,7 @@
 // iOS Safari doesn't implement it, so every call no-ops gracefully there.
 // Gated on a user preference (Settings -> Haptics) and kept deliberately sparse —
 // short buzzes on key moments only, never on every tap (haptic fatigue is real).
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
 const KEY = "stax:haptics";
 
@@ -48,25 +48,33 @@ export function setHaptics(on: boolean) {
   }
 }
 
-// Hook for the Settings toggle.
+// Hook for the Settings toggle. The preference lives in localStorage and is
+// read through useSyncExternalStore so the first client render already matches
+// it (the server snapshot is the default "on"); the toggle notifies listeners.
+const EVENT = "stax:haptics-change";
+function subscribe(cb: () => void) {
+  window.addEventListener("storage", cb);
+  window.addEventListener(EVENT, cb);
+  return () => {
+    window.removeEventListener("storage", cb);
+    window.removeEventListener(EVENT, cb);
+  };
+}
+function readOn(): boolean {
+  try {
+    return localStorage.getItem(KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
 export function useHaptics() {
-  const [on, setOn] = useState(true);
-  const [supported, setSupported] = useState(false);
-  useEffect(() => {
-    setSupported(hapticsSupported());
-    try {
-      setOn(localStorage.getItem(KEY) !== "off");
-    } catch {
-      /* default on */
-    }
-  }, []);
+  const on = useSyncExternalStore(subscribe, readOn, () => true);
+  const supported = useSyncExternalStore(subscribe, hapticsSupported, () => false);
   const toggle = () => {
-    setOn((prev) => {
-      const next = !prev;
-      setHaptics(next);
-      if (next) haptic.select(); // confirm the new "on" state with a tick
-      return next;
-    });
+    const next = !on;
+    setHaptics(next);
+    window.dispatchEvent(new Event(EVENT));
+    if (next) haptic.select(); // confirm the new "on" state with a tick
   };
   return { on, supported, toggle };
 }

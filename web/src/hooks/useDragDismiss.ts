@@ -16,7 +16,7 @@
 //  • Fully interruptible — grabbing mid-animation cancels the transition and resumes
 //    from the current position.
 
-import { useCallback, useRef } from "react";
+import { useCallback, useLayoutEffect, useRef } from "react";
 
 export interface UseDragDismissOptions {
   /** Called once the sheet has animated off-screen. Parent should set open=false. */
@@ -125,14 +125,19 @@ export function useDragDismiss<T extends HTMLElement = HTMLDivElement>(
     }
   }, [distanceFraction, onDismiss, setTransform, snapMs, velocityDismiss]);
 
+  // The up handler unregisters itself. `registered` holds exactly the function
+  // that pointerdown added to window, so add/remove always match even if the
+  // callback identity changes mid-gesture.
+  const registered = useRef<(e: PointerEvent) => void>(() => {});
+  const upRef = useRef<(e: PointerEvent) => void>(() => {});
   const onPointerUp = useCallback(
     (e: PointerEvent) => {
       if (activePointer.current !== e.pointerId) return;
       const el = ref.current;
       activePointer.current = null;
       window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-      window.removeEventListener("pointercancel", onPointerUp);
+      window.removeEventListener("pointerup", registered.current);
+      window.removeEventListener("pointercancel", registered.current);
       try {
         el?.releasePointerCapture?.(e.pointerId);
       } catch {
@@ -142,6 +147,9 @@ export function useDragDismiss<T extends HTMLElement = HTMLDivElement>(
     },
     [endGesture, onPointerMove],
   );
+  useLayoutEffect(() => {
+    upRef.current = onPointerUp;
+  }, [onPointerUp]);
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent<T>) => {
@@ -168,11 +176,13 @@ export function useDragDismiss<T extends HTMLElement = HTMLDivElement>(
         /* capture is best-effort */
       }
 
+      const up = upRef.current;
+      registered.current = up;
       window.addEventListener("pointermove", onPointerMove);
-      window.addEventListener("pointerup", onPointerUp);
-      window.addEventListener("pointercancel", onPointerUp);
+      window.addEventListener("pointerup", up);
+      window.addEventListener("pointercancel", up);
     },
-    [onPointerMove, onPointerUp],
+    [onPointerMove],
   );
 
   return { ref, handlers: { onPointerDown } };
