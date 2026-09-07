@@ -7,6 +7,9 @@
 import type { ErrorEvent } from "@sentry/nextjs";
 
 const SECRET_ENV = [
+  // The gift claim signer: this key alone can release every parked gift.
+  "GIFT_SIGNER_PRIVATE_KEY",
+  "GIFT_EMAIL_PEPPER",
   "BASE_RPC_URL",
   "MANTLE_RPC_URL",
   "NEXT_PUBLIC_BASE_RPC_URL",

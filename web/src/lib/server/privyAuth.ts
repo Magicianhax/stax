@@ -73,9 +73,26 @@ export async function verifyRequest(req: Request): Promise<AuthedUser | null> {
 }
 
 /**
- * The email Privy knows for a user (email login, or the address an OAuth
- * provider reported), lowercased. Null when there is none or the lookup fails —
- * callers treat email as best-effort. Used by the waitlist + admin allowlist.
+ * Providers whose reported email address is verified BY THE PROVIDER before it
+ * reaches us. Google and Apple both refuse to hand over an address the account
+ * holder has not proven they control.
+ *
+ * Everything else is deliberately excluded. Discord, Spotify, TikTok, GitHub,
+ * LinkedIn and friends expose a profile `email` that the user can often set
+ * without confirming, so trusting it would let someone type a stranger's address
+ * into a throwaway profile and become that person here: claiming a gift meant for
+ * them, or matching ADMIN_EMAILS and walking into the admin console. This
+ * function is the only thing standing between an OAuth profile field and both of
+ * those doors.
+ */
+const EMAIL_TRUSTED_PROVIDERS = new Set(["google_oauth", "apple_oauth"]);
+
+/**
+ * The email Privy knows for a user, lowercased, from a source we can trust:
+ * an `email` account (Privy only creates one after its own OTP check) or a
+ * provider in EMAIL_TRUSTED_PROVIDERS that also carries a verification time.
+ * Null when there is none or the lookup fails — callers treat email as
+ * best-effort. Used by the waitlist, the admin allowlist and gift claims.
  */
 export async function fetchPrivyEmail(userId: string): Promise<string | null> {
   try {
@@ -84,7 +101,12 @@ export async function fetchPrivyEmail(userId: string): Promise<string | null> {
       if (acct.type === "email" && acct.address) return acct.address.trim().toLowerCase();
     }
     for (const acct of user.linked_accounts) {
-      if ("email" in acct && typeof acct.email === "string" && acct.email) return acct.email.trim().toLowerCase();
+      if (!EMAIL_TRUSTED_PROVIDERS.has(acct.type)) continue;
+      const withEmail = acct as { email?: unknown; verified_at?: unknown; latest_verified_at?: unknown };
+      const email = typeof withEmail.email === "string" ? withEmail.email.trim() : "";
+      const verified =
+        typeof withEmail.verified_at === "number" || typeof withEmail.latest_verified_at === "number";
+      if (email && verified) return email.toLowerCase();
     }
     return null;
   } catch (e) {
