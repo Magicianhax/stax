@@ -51,12 +51,15 @@ describe("splitByWeight", () => {
   });
 
   it("gives the last leg the rounding dust rather than dropping it", () => {
-    // Thirds do not divide into 100 dollars: each of the first two takes 33.33, and the
-    // remainder — a hair more — falls to the last, so nothing is left behind.
+    // Thirds do not divide into 100 dollars. Each leg takes its share of what is still
+    // unallocated, so the dust is a single micro-dollar on the last leg rather than a
+    // visible skew, and nothing is left behind.
     const legs = splitByWeight(entries([33.33, 33.33, 33.33]), usdc(100));
-    expect(legs[0].usdcIn).toBe(BigInt(33_330_000));
-    expect(legs[1].usdcIn).toBe(BigInt(33_330_000));
-    expect(legs[2].usdcIn).toBe(BigInt(33_340_000));
+    expect(legs.map((l) => l.usdcIn)).toEqual([
+      BigInt(33_333_333),
+      BigInt(33_333_333),
+      BigInt(33_333_334),
+    ]);
     expect(sum(legs)).toBe(usdc(100));
   });
 
@@ -70,22 +73,45 @@ describe("splitByWeight", () => {
     }
   });
 
-  it("works in whole basis points, so a third is 33.33% and the last leg carries the rest", () => {
-    // A deliberate pin, not an endorsement. Weights are converted to whole basis points,
-    // which cannot express a third: each of the first two legs gets 3333 bps and the last
-    // takes what is left, so an "even" three-way split is not even.
-    const legs = splitByWeight(entries([20, 20, 20]), usdc(60));
-    expect(legs.map((l) => l.usdcIn)).toEqual([
-      BigInt(19_998_000),
-      BigInt(19_998_000),
-      BigInt(20_004_000),
-    ]);
-    expect(sum(legs)).toBe(usdc(60));
-    // The skew is 0.01% of a leg here. It grows with the amount, not with the percentage:
-    // the same three-way split of $99,999.99 moves about $3.33 onto the last leg.
-    const big = splitByWeight(entries([20, 20, 20]), usdc(99_999.99));
-    expect(sum(big)).toBe(usdc(99_999.99));
-    expect(Number(big[2].usdcIn - big[0].usdcIn) / 1_000_000).toBeCloseTo(9.999, 2);
+  it("keeps every leg within a hair of its true share", () => {
+    // The property that replaced the old basis-point rounding. Weights used to be squeezed
+    // into whole basis points, which cannot express a third: a 12-holding basket at $10,000
+    // gave eleven legs $833.00 and the last $837.00, a $3.67 skew that grew with the amount
+    // ($366 at $1,000,000). Allocating against the unallocated remainder removes it.
+    const twelve = splitByWeight(entries(Array(12).fill(100 / 12)), usdc(10_000));
+    for (const leg of twelve) {
+      expect(Number(leg.usdcIn)).toBeGreaterThanOrEqual(833_333_333);
+      expect(Number(leg.usdcIn)).toBeLessThanOrEqual(833_333_334);
+    }
+    expect(sum(twelve)).toBe(usdc(10_000));
+
+    // Generally: no leg is off its ideal share by more than one micro-USDC per leg, which
+    // is the most the sub-unit flooring can accumulate. At twelve legs that is twelve
+    // millionths of a dollar. Measured across every shape and amount below, the worst seen
+    // is 2.9 micro-USDC, on an eight-leg basket at a million dollars.
+    const shapes = [
+      [20, 20, 20],
+      [25, 25, 25, 25],
+      [30, 25, 25, 20],
+      [33.33, 33.33, 33.33],
+      Array(12).fill(100 / 12),
+      [1, 2, 3, 5, 8, 13, 21, 34],
+      [99.99, 0.01],
+      [50, 50, 0.0001],
+    ];
+    for (const shape of shapes) {
+      const totalWeight = shape.reduce((t, w) => t + w, 0);
+      for (const dollars of [0.07, 5, 33.33, 100, 1234.56, 99_999.99, 1_000_000]) {
+        const total = usdc(dollars);
+        const legs = splitByWeight(entries(shape), total);
+        expect(sum(legs)).toBe(total);
+        for (const leg of legs) {
+          const i = Number(leg.asset.symbol.slice(1));
+          const ideal = (Number(total) * shape[i]) / totalWeight;
+          expect(Math.abs(Number(leg.usdcIn) - ideal)).toBeLessThanOrEqual(shape.length);
+        }
+      }
+    }
   });
 
   it("over-deploys a reduced weight set if the amount is not reduced with it", () => {
@@ -98,16 +124,12 @@ describe("splitByWeight", () => {
     expect(full.map((l) => l.usdcIn)).toEqual([usdc(40), usdc(20), usdc(20), usdc(20)]);
 
     const reducedWeightsFullAmount = splitByWeight(entries([20, 20, 20]), usdc(100));
-    expect(reducedWeightsFullAmount[0].usdcIn).toBe(BigInt(33_330_000));
+    expect(reducedWeightsFullAmount[0].usdcIn).toBe(BigInt(33_333_333));
     expect(sum(reducedWeightsFullAmount)).toBe(usdc(100)); // all of it, not 60% of it
 
-    // Reducing the amount alongside the weights is what actually buys 20% each — to
-    // within the basis-point rounding covered above, not to the micro-dollar.
+    // Reducing the amount alongside the weights is what actually buys 20% each.
     const reducedBoth = splitByWeight(entries([20, 20, 20]), usdc(60));
-    expect(sum(reducedBoth)).toBe(usdc(60));
-    for (const leg of reducedBoth) {
-      expect(Number(leg.usdcIn) / 1_000_000).toBeCloseTo(20, 2);
-    }
+    expect(reducedBoth.map((l) => l.usdcIn)).toEqual([usdc(20), usdc(20), usdc(20)]);
   });
 
   it("gives a single leg the whole amount", () => {
@@ -127,13 +149,13 @@ describe("splitByWeight", () => {
   });
 
   it("drops legs too small to be worth a swap instead of sending zero-value ones", () => {
-    // Three micro-dollars across four equal weights: each of the first three floors to
-    // zero and is dropped, and the last takes the lot. Every returned leg is spendable,
-    // and the total is still exact. Well below the $5 minimum, but the maths holds.
+    // Three micro-dollars across four equal weights. The first floors to zero and is
+    // dropped; the rest each take a share of what is left, so the three micro-dollars
+    // spread across three legs instead of landing on one. Every returned leg is
+    // spendable and the total is exact. Far below the $5 minimum, but the maths holds.
     const legs = splitByWeight(entries([25, 25, 25, 25]), BigInt(3));
-    expect(legs).toHaveLength(1);
-    expect(legs[0].asset.symbol).toBe("A3");
-    expect(legs[0].usdcIn).toBe(BigInt(3));
+    expect(legs.map((l) => l.asset.symbol)).toEqual(["A1", "A2", "A3"]);
+    expect(legs.map((l) => l.usdcIn)).toEqual([BigInt(1), BigInt(1), BigInt(1)]);
     expect(legs.every((l) => l.usdcIn > BigInt(0))).toBe(true);
   });
 

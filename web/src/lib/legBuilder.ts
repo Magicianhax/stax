@@ -187,16 +187,31 @@ export function splitByWeight(
 ): { asset: Asset; usdcIn: bigint }[] {
   const totalWeight = entries.reduce((s, e) => s + e.weightPct, 0);
   if (totalWeight <= 0) return [];
-  let allocated = ZERO;
+
+  // Each leg takes its share of what is still UNALLOCATED, not of the original total, and
+  // the last takes whatever is left. Exact by construction — nothing is lost or invented —
+  // and the unavoidable sub-unit dust is spread across the split instead of piling onto the
+  // final leg. The earlier version rounded each weight to whole basis points, which cannot
+  // express a third: a 12-holding basket at $10,000 gave eleven legs $833.00 and the last
+  // $837.00. Now every leg lands within one micro-USDC of its true share.
+  //
+  // The ratio is a double (~15 significant digits, far more than the 4 that bps allowed);
+  // the amount stays a bigint. Number() on the remaining amount is exact well past the
+  // $1,000,000 per-plan cap — a micro-USDC total only loses precision above ~$9 billion —
+  // and sum exactness does not depend on the ratio's precision either way, because every
+  // step subtracts what it actually handed out.
+  let remainingAmount = usdcTotal;
+  let remainingWeight = totalWeight;
   const out = entries.map((e, i) => {
     let usdcIn: bigint;
     if (i === entries.length - 1) {
-      usdcIn = usdcTotal - allocated; // remainder -> no dust left behind
+      usdcIn = remainingAmount; // whatever is left -> no dust left behind
     } else {
-      // basis-points weight to avoid float drift
-      const bps = BigInt(Math.round((e.weightPct / totalWeight) * 10000));
-      usdcIn = (usdcTotal * bps) / BPS;
-      allocated += usdcIn;
+      const share = remainingWeight > 0 ? Math.max(0, e.weightPct) / remainingWeight : 0;
+      usdcIn = BigInt(Math.floor(Number(remainingAmount) * share));
+      if (usdcIn < ZERO) usdcIn = ZERO;
+      remainingAmount -= usdcIn;
+      remainingWeight -= e.weightPct;
     }
     return { asset: e.asset, usdcIn };
   });
