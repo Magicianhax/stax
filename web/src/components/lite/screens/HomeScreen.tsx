@@ -226,7 +226,7 @@ export function HomeScreen({
               )}
               {spark.length > 1 && (
                 <div style={{ marginTop: 10, opacity: hideBalance ? 0.35 : 1, transition: "opacity .2s var(--ease-out)" }}>
-                  <Sparkline data={spark} w={346} h={60} fill color={up ? "var(--pos)" : "var(--neg)"} />
+                  <Sparkline data={spark} w={346} h={60} fill stretch color={up ? "var(--pos)" : "var(--neg)"} />
                 </div>
               )}
             </button>

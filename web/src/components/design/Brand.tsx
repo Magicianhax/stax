@@ -176,9 +176,11 @@ export interface LogoClusterProps {
   max?: number;
   /** Ring colour between tiles (default var(--surface)). */
   ring?: string;
+  /** Show the "+N" disc for hidden assets (default true). */
+  showRest?: boolean;
 }
 
-export function LogoCluster({ assets, size = 24, max = 4, ring = "var(--surface)" }: LogoClusterProps) {
+export function LogoCluster({ assets, size = 24, max = 4, ring = "var(--surface)", showRest = true }: LogoClusterProps) {
   const shown = assets.length > max ? assets.slice(0, max) : assets;
   const rest = assets.length - shown.length;
   const radius = Math.round(size * 0.295);
@@ -205,7 +207,7 @@ export function LogoCluster({ assets, size = 24, max = 4, ring = "var(--surface)
           <AssetTile asset={toTile(a.symbol, a.name)} size={size} radius={radius} />
         </span>
       ))}
-      {rest > 0 && (
+      {showRest && rest > 0 && (
         <span
           className="tnum"
           style={{

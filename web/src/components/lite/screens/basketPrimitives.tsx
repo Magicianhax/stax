@@ -108,11 +108,14 @@ export function ReturnChip({
   loading,
   label,
   size = "sm",
+  compact = false,
 }: {
   value: number | null;
   loading?: boolean;
   label: string;
   size?: "sm" | "md";
+  /** Hide the range label (the chip still announces it) — for narrow tiles. */
+  compact?: boolean;
 }) {
   const md = size === "md";
   const base: CSSProperties = {
@@ -133,7 +136,7 @@ export function ReturnChip({
   if (value === null) {
     return (
       <span style={{ ...base, background: "var(--surface-2)", color: "var(--ink-2)", fontWeight: 600 }}>
-        {label} · not enough history yet
+        {compact ? "New" : `${label} · not enough history yet`}
       </span>
     );
   }
@@ -142,15 +145,17 @@ export function ReturnChip({
   return (
     <span
       className="tnum"
+      aria-label={`${fmtPct(value)} ${label}`}
       style={{
         ...base,
+        padding: compact ? "0 8px" : base.padding,
         background: `color-mix(in srgb, ${tone} 13%, var(--surface))`,
         color: "var(--ink)",
         boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${tone} 28%, transparent)`,
       }}
     >
       <span style={{ color: tone }}>{fmtPct(value)}</span>
-      <span style={{ fontSize: md ? 12 : 11, fontWeight: 600, color: "var(--ink-2)" }}>{label}</span>
+      {!compact && <span style={{ fontSize: md ? 12 : 11, fontWeight: 600, color: "var(--ink-2)" }}>{label}</span>}
     </span>
   );
 }
@@ -199,9 +204,10 @@ export function BasketRailTile({ basket, onClick }: { basket: Basket; onClick: (
       aria-label={`${basket.name}, ${riskWord(basket.riskScore)}`}
       style={{ width: 164, flex: "none", textAlign: "left", padding: 14, display: "block", scrollSnapAlign: "start" }}
     >
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-        <LogoCluster assets={clusterOf(basket)} size={26} max={3} />
-        <ReturnChip value={perf.returns["1M"]} loading={perf.loading} label="1M" />
+      {/* 136px inside the padding: three 22px tiles (~56px) + a compact chip. */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, minWidth: 0 }}>
+        <LogoCluster assets={clusterOf(basket)} size={22} max={3} showRest={false} />
+        <ReturnChip value={perf.returns["1M"]} loading={perf.loading} label="1M" compact />
       </div>
       <div style={{ fontWeight: 700, fontSize: 15, letterSpacing: "-.01em", marginTop: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
         {basket.name}

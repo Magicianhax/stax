@@ -11,12 +11,16 @@ import { usd } from "@/lib/format";
 import { iconBtn, VeraTag } from "./primitives";
 import { useChainReady } from "../useChainReady";
 
-const SUGGESTIONS = [
-  "Grow $300, mostly big tech, keep a little safe",
-  "Play it safe and still earn a bit",
-  "A little of everything to start",
-  "Go big on AI companies",
-];
+// Suggestions follow the amount typed above, so a chip never names a figure
+// the person can't invest. Small amounts get starter-sized wording.
+function suggestionsFor(amount: number): string[] {
+  const has = Number.isFinite(amount) && amount > 0;
+  const grow = has ? `Grow $${Math.round(amount).toLocaleString("en-US")}, mostly big tech, keep a little safe` : "Grow it, mostly big tech, keep a little safe";
+  if (has && amount < 50) {
+    return [grow, "Play it safe and still earn a bit", "Start small with a bit of everything", "A small bet on AI companies"];
+  }
+  return [grow, "Play it safe and still earn a bit", "A little of everything to start", "Go big on AI companies"];
+}
 
 export function GoalScreen({
   go,
@@ -131,7 +135,7 @@ export function GoalScreen({
 
         {/* suggestions */}
         <div style={{ marginTop: 16, display: "flex", flexWrap: "wrap", gap: 8 }}>
-          {SUGGESTIONS.map((s) => (
+          {suggestionsFor(amount).map((s) => (
             <button
               key={s}
               className={`chip tap ${goal === s ? "is-on" : ""}`}

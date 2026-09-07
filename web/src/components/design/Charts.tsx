@@ -82,6 +82,8 @@ export interface SparklineProps {
   strong?: boolean;
   /** Soft area under the line (lighter than `strong`). */
   fill?: boolean;
+  /** Fill the container's width (viewBox stays `w`×`h`; stroke stays crisp). */
+  stretch?: boolean;
 }
 
 // Draws its line on mount (stroke-dash, 0.7 s); the area fades in behind it.
@@ -92,6 +94,7 @@ export function Sparkline({
   color = "var(--pos)",
   strong = false,
   fill = false,
+  stretch = false,
 }: SparklineProps) {
   const id = useId().replace(/:/g, "");
   const drawn = useDrawn();
@@ -111,15 +114,16 @@ export function Sparkline({
   const showArea = strong || fill;
   return (
     <svg
-      width={w}
+      width={stretch ? undefined : w}
       height={h}
       viewBox={`0 0 ${w} ${h}`}
-      style={{ display: "block", overflow: "visible" }}
+      preserveAspectRatio={stretch ? "none" : undefined}
+      style={{ display: "block", overflow: "visible", width: stretch ? "100%" : undefined }}
     >
       <defs>
         <linearGradient id={`sp${id}`} x1="0" y1="0" x2="0" y2="1">
           {/* CSS vars don't resolve in SVG presentation attributes; set stop-color via style. */}
-          <stop offset="0%" style={{ stopColor: color, stopOpacity: strong ? 0.22 : 0.14 }} />
+          <stop offset="0%" style={{ stopColor: color, stopOpacity: strong ? 0.22 : 0.18 }} />
           <stop offset="100%" style={{ stopColor: color, stopOpacity: 0 }} />
         </linearGradient>
       </defs>
@@ -137,6 +141,7 @@ export function Sparkline({
         strokeWidth={strong ? 2 : 1.6}
         strokeLinecap="round"
         strokeLinejoin="round"
+        vectorEffect="non-scaling-stroke"
         pathLength={1}
         style={{
           strokeDasharray: 1,
@@ -582,7 +587,7 @@ export function PriceChart({
 // The one segmented range picker every chart uses: pill track, sliding thumb,
 // arrow-key navigation (radiogroup semantics).
 //
-//   <RangeChips values={["1D", "1W", "1M", "1Y", "All"]} value={r} onChange={setR} />
+//   <RangeChips values={["1D", "1W", "1M", "1Y", "5Y"]} value={r} onChange={setR} />
 export interface RangeChipsProps {
   values: readonly string[];
   value: string;
