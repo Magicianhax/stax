@@ -57,6 +57,15 @@ const COINGECKO_IDS: Record<string, string> = {
   USDY: "ondo-us-dollar-yield",
 };
 
+// CoinGecko's public tier stops at 365 days, so the 5Y range for the majors
+// comes from Yahoo's crypto tickers instead (same 5y/1wk request as stocks).
+const YAHOO_CRYPTO: Record<string, string> = {
+  BTC: "BTC-USD",
+  FBTC: "BTC-USD",
+  ETH: "ETH-USD",
+  mETH: "ETH-USD",
+};
+
 // Flat dollar pegs — a real fetch would just draw the same line.
 const FLAT_DOLLAR = new Set(["USDC", "aUSDC", "mUSD"]);
 
@@ -110,7 +119,7 @@ const COINGECKO_DAYS: Record<MarketRange, string> = {
   "1W": "7",
   "1M": "30",
   "1Y": "365",
-  "5Y": "1825",
+  "5Y": "365", // unreachable: 5Y crypto goes through YAHOO_CRYPTO (public CG caps at 365 days)
 };
 
 async function coingeckoHistory(id: string, range: MarketRange): Promise<MarketHistory | null> {
@@ -158,7 +167,13 @@ export function getHistory(chain: StaxChain, symbol: string, range: MarketRange)
     if (FLAT_DOLLAR.has(symbol)) return { series: Array(20).fill(1), changePct: 0 };
     if (isStock(chain, symbol)) return yahooHistory(symbol, range);
     const cgId = COINGECKO_IDS[symbol];
-    if (cgId) return coingeckoHistory(cgId, range);
+    if (cgId) {
+      if (range === "5Y") {
+        const ticker = YAHOO_CRYPTO[symbol];
+        return ticker ? yahooHistory(ticker, range) : null;
+      }
+      return coingeckoHistory(cgId, range);
+    }
     return null;
   });
 }
