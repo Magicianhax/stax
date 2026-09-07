@@ -163,26 +163,49 @@ describe("mergeGiftTokens", () => {
   });
 });
 
-// The four money lines the review card shows. `reviewRows` mirrors how the card must derive
-// them: cash rows priced against the cash total, bought rows against the invested total less
-// the fee. Pricing everything against one blended figure is the bug this suite exists for.
+// The four money lines the review card shows. `reviewRows` mirrors how the card derives
+// them: cash rows priced against the cash total, bought rows against the invested total.
+// Pricing everything against one blended figure is the bug this suite exists for.
+//
+// Everything is worked out in whole cents, and `invested` takes the remainder rather than
+// being computed on its own — cash and fee are exact by construction, and three values
+// rounded independently need not sum to the rounded total. That is what makes the four
+// lines always add up to what the giver pays.
+const asCents = (n: number) => Math.round(n * 100);
+
 function reviewRows(items: BasketItem[], amountUsd: number) {
   const s = splitGiftBasket("base", items, amountUsd);
-  const fee = feeUsd(s.investUsd);
-  const investedNet = s.investUsd - fee;
+  const cashCents = asCents(s.cashUsd);
+  const feeCents = asCents(feeUsd(s.investUsd));
+  const investedCents = asCents(amountUsd) - cashCents - feeCents;
+  const investedNet = investedCents / 100;
+  // Per-holding rows, with the heaviest absorbing the rounding so they always add back to
+  // the line printed underneath them. This mirrors `splitOf` in components/lite/gift/
+  // giftFormat.ts, which is what the card actually calls; the assertions below pin the
+  // contract it has to meet rather than re-testing its internals.
+  const boughtWeight = s.invested.reduce((sum, i) => sum + i.weightPct, 0) || 1;
+  const ordered = [...s.invested].sort((a, b) => b.weightPct - a.weightPct);
+  const boughtCents = ordered.map((i) => asCents((investedNet * i.weightPct) / boughtWeight));
+  if (boughtCents.length > 0) {
+    boughtCents[0] += investedCents - boughtCents.reduce((a, c) => a + c, 0);
+  }
   return {
-    boughtRows: s.invested.map((i) => cents((investedNet * i.weightPct) / 100)),
-    cashRow: cents(s.cashUsd),
-    invested: cents(investedNet),
-    setAside: cents(s.cashUsd),
-    fee: cents(fee),
-    youPay: cents(investedNet + s.cashUsd + fee),
+    boughtCents,
+    investedCents,
+    boughtRows: boughtCents.map((c) => c / 100),
+    cashRow: cashCents / 100,
+    invested: investedNet,
+    setAside: cashCents / 100,
+    fee: feeCents / 100,
+    youPay: amountUsd,
   };
 }
 
 describe("review card money lines", () => {
   it("prices a $100 Safe Growth gift the way the screen renders it", () => {
-    expect(reviewRows(SAFE_GROWTH(), 100)).toEqual({
+    // toMatchObject, not toEqual: the helper also exposes the cent-level figures the
+    // per-row test needs, and this assertion is about the money lines the screen shows.
+    expect(reviewRows(SAFE_GROWTH(), 100)).toMatchObject({
       boughtRows: [19.95, 19.95, 19.95],
       cashRow: 40,
       invested: 59.85,
@@ -193,7 +216,7 @@ describe("review card money lines", () => {
   });
 
   it("prices a 20% safe slice the way the demo basket renders it", () => {
-    expect(reviewRows(TWENTY_PCT_SAFE, 100)).toEqual({
+    expect(reviewRows(TWENTY_PCT_SAFE, 100)).toMatchObject({
       boughtRows: [79.8],
       cashRow: 20,
       invested: 79.8,
@@ -232,25 +255,40 @@ describe("review card money lines", () => {
     }
   });
 
-  it("keeps the displayed lines within a cent of what the giver pays", () => {
-    // Three lines each rounded to cents on their own do not always sum to the rounded
-    // total: a 20% safe slice at $33.33 renders 26.60 + 6.67 + 0.07 = 33.34 against a
-    // "You pay" of 33.33. One cent, and only on amounts that do not divide cleanly.
-    //
-    // The fix belongs in the card, not here — one line has to absorb the remainder, the
-    // way splitByWeight lets the last leg take the dust. Until it does, this bounds the
-    // drift so a real distribution bug (the $39.94 one was six cents out, and wrong in
-    // shape) still fails, while the known rounding cent does not produce a red suite.
-    for (const amount of [5, 33.33, 100, 250, 1234.56, 999.99]) {
+  it("makes the per-holding rows sum to the line printed under them", () => {
+    // Not implied by the four lines reconciling: the invested line absorbs its remainder
+    // against the TOTAL, which says nothing about whether the individual holdings add up
+    // to it. `splitOf` gives the heaviest holding the dust for exactly this reason.
+    for (const amount of [5, 7.77, 33.33, 99.99, 100, 123.45, 250, 999.99, 1234.56]) {
+      for (const items of [SAFE_GROWTH(), NO_SAFE(), TWENTY_PCT_SAFE]) {
+        const rows = reviewRows(items, amount);
+        expect(rows.boughtCents.reduce((a, c) => a + c, 0)).toBe(rows.investedCents);
+      }
+    }
+  });
+
+  it("sums to the cent on the $33.33 case that used to render $33.34", () => {
+    const rows = reviewRows(TWENTY_PCT_SAFE, 33.33);
+    expect(rows.invested).toBe(26.59);
+    expect(rows.setAside).toBe(6.67);
+    expect(rows.fee).toBe(0.07);
+    expect(asCents(rows.invested) + asCents(rows.setAside) + asCents(rows.fee)).toBe(3333);
+  });
+
+  it("makes the displayed lines sum to exactly what the giver pays", () => {
+    // The card derives `invested` as amount minus cash minus fee, in whole cents, so one
+    // line absorbs the rounding remainder the way splitByWeight lets the last leg take the
+    // dust. Three values each rounded on their own would not always sum: a 20% safe slice
+    // at $33.33 used to render 26.60 + 6.67 + 0.07 = 33.34 against a "You pay" of 33.33.
+    // Exact, not bounded — a screen about money whose lines do not add up is not passing.
+    for (const amount of [5, 7.77, 33.33, 99.99, 100, 123.45, 250, 999.99, 1234.56]) {
       for (const items of [SAFE_GROWTH(), NO_SAFE(), TWENTY_PCT_SAFE]) {
         const rows = reviewRows(items, amount);
         // Compared in whole cents: `0.01` as a float is not exactly a cent, so a drift of
-        // exactly one cent reads as 0.010000000000005 and would fail a decimal comparison.
-        const asCents = (n: number) => Math.round(n * 100);
-        const drift = Math.abs(
-          asCents(rows.invested) + asCents(rows.setAside) + asCents(rows.fee) - asCents(amount),
+        // exactly one cent reads as 0.010000000000005 and would slip past a decimal check.
+        expect(asCents(rows.invested) + asCents(rows.setAside) + asCents(rows.fee)).toBe(
+          asCents(amount),
         );
-        expect(drift).toBeLessThanOrEqual(1);
       }
     }
   });
