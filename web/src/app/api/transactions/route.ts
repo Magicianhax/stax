@@ -1,11 +1,13 @@
 // GET /api/transactions?address=0x… — a wallet's incoming + outgoing transfers
-// on the request chain, newest first. Etherscan V2 (indexed) when
-// ETHERSCAN_API_KEY is set, with an Alchemy log-scan fallback. Public chain
-// data, so no auth — but rate limited per IP since it can drive RPC cost.
+// on the request chain, newest first. Zerion when ZERION_API_KEY is set (Base),
+// then Etherscan V2 (Mantle), Blockscout and an on-chain log scan. The answer is
+// cached for 60 s per wallet, so a provider blip or a burst of page views does
+// not reach them. `source` names the provider that actually answered.
+// Public chain data, so no auth — but rate limited per IP since it can drive cost.
 import type { NextRequest } from "next/server";
 import { isAddress } from "viem";
 import { chainFromRequest } from "@/lib/server/chain";
-import { getWalletTransfers, TXN_SOURCE } from "@/lib/server/walletTransfers";
+import { getWalletHistory } from "@/lib/server/walletTransfers";
 import { rateLimit, clientIp } from "@/lib/server/rateLimit";
 import { badRequest, tooManyRequests, serverError } from "@/lib/server/respond";
 
@@ -21,9 +23,9 @@ export async function GET(req: NextRequest) {
   const chain = chainFromRequest(req);
 
   try {
-    const transactions = await getWalletTransfers(chain, address);
+    const { transactions, source } = await getWalletHistory(chain, address);
     return Response.json(
-      { chain: chain.key, explorer: chain.explorer.url, transactions, source: TXN_SOURCE },
+      { chain: chain.key, explorer: chain.explorer.url, transactions, source },
       { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30" } },
     );
   } catch (err) {

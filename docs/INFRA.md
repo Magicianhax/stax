@@ -107,6 +107,66 @@ a key is in place. USD amounts come from `data.metadata.currencyIn.amountUsd`.
 `npm run db:smoke` covers find-or-create idempotency, the own-address path, refund validation, and
 the ownership check with Relay mocked.
 
+## Wallet history (Wallet screen + cost basis)
+
+The Wallet screen reads a wallet's incoming and outgoing token transfers from
+`lib/server/walletTransfers.ts`; `lib/server/positions.ts` reads the same list for manual
+cost-basis lots. Stax keeps no copy of this: Zerion already indexes it, so a second index here
+would be duplicated work. Instead the answer is cached for 60 s per `(chain, address, max)`
+through the shared Redis layer (`lib/server/cache.ts`), which absorbs a provider blip, a burst
+of page views and the providers' rate limits. A failure is never cached, so the next request
+retries rather than serving an empty list for a minute.
+
+Sources, in order — the first that `supports()` the chain and answers wins:
+
+1. **zerion** — `ZERION_API_KEY`, **Base only**. `GET /v1/wallets/<addr>/transactions/`, auth
+   `Authorization: Basic base64("<key>:")`. Zerion returns operations already broken into
+   fungible transfers, and one transfer becomes one `WalletTx`, so a trade yields several rows.
+   Not used on Mantle: Etherscan V2 is the source of record there and works.
+2. **etherscan** — `ETHERSCAN_API_KEY`, Etherscan V2 `account/tokentx`. Serves Mantle. The free
+   tier refuses Base, so on Base it falls through.
+3. **blockscout** — no key, the same `account/tokentx` dialect.
+4. **alchemy-logs** — `ALCHEMY_API_KEY`, a raw `Transfer` log scan. Last resort: the free tier
+   caps `eth_getLogs` at a 10-block range, so it needs a PAYG plan.
+
+A source error falls through to the next; when every one fails the result is an empty list with
+the failure logged, and `getWalletTransfers` never throws. `/api/transactions` reports `source`,
+the provider that actually answered — it used to be a constant computed at module load that
+claimed `"etherscan"` even when Blockscout had served the request.
+
+**Adding a provider.** Implement `TransferSource` — `{ name, supports(chain), fetch(chain,
+address, max) }` — returning `WalletTx[]` newest first and throwing on failure (an empty array
+means "this wallet has no history", not "I am broken"). Add it to `sourcesFor()` in the order
+you want it tried, and keep the response mapping in a pure exported function so it can be unit
+tested without the network.
+
+**Two things about the Zerion payload that the documentation does not tell you**, both confirmed
+against live Base responses on 2026-09-07/08 rather than read from the schema:
+
+- `fungible_info.implementations[]` lists the **same asset on every chain Zerion knows** — USDC
+  carries about 45 entries. Taking `[0]` stores an Ethereum address against a Base transfer, so
+  the mapping selects by `chain_id` and skips a transfer whose asset is not on this chain.
+- **Do not send `filter[operation_types]`.** Filtering to `trade,send,receive` silently drops
+  every `execute` operation, and on Base that is where the Aave supply and several buys live —
+  the wallet's aBasUSDC position and its platform-fee transfers vanish from cost basis. The
+  client sends `filter[chain_ids]` and `page[size]` only, and follows `links.next` (capped at 5
+  pages) because Zerion returns far fewer transactions per page than `page[size]` asks for.
+
+`transfers[].value` is null for an aToken, so nothing depends on it. `quantity` is an object
+(`{int, decimals, float, numeric}`), and the mapping prefers `int` + `decimals` over the
+pre-rounded float. Every field is treated as optional: an unmappable transfer is skipped, and no
+parse throws whatever the payload looks like.
+
+**Verified 2026-09-08** against the running app, with `base.blockscout.com` answering 503
+throughout:
+
+- Base: `source: "zerion"`, real rows including a multi-transfer trade and the Aave supply.
+- Mantle: `source: "etherscan"`, still working; Zerion correctly declines the chain.
+- Cost basis resolves on both chains from the same list.
+- `src/lib/server/walletTransfers.test.ts` covers both mappings against fixtures cut from live
+  responses, including the multi-transfer trade, the `value: null` aToken, the approval with no
+  transfers, and the malformed-payload cases. `npm test` → 97 passing.
+
 ## Upstash Redis — rate limits + response cache
 
 Env: `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` (Vercel → Storage → Upstash Redis, or the
