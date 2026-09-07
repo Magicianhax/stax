@@ -2,8 +2,10 @@ import "server-only";
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 import { waitUntil } from "@vercel/functions";
+import { redisCredentials } from "@/lib/server/cache";
 
-// Rate limiter. With UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN set it is a
+// Rate limiter. With Redis credentials set (UPSTASH_REDIS_REST_* or Vercel's
+// KV_REST_API_*, the same Upstash database) it is a
 // sliding window shared across every instance and region (Upstash Redis via
 // @upstash/ratelimit). Without them it falls back to the per-process fixed
 // window below, which protects a single instance only. Redis errors fail OPEN:
@@ -51,8 +53,9 @@ function memoryRateLimit(key: string, limit: number, windowMs: number): RateResu
 let redis: Redis | null | undefined; // undefined = not yet resolved, null = env unset
 function getRedis(): Redis | null {
   if (redis !== undefined) return redis;
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  const creds = redisCredentials();
+  const url = creds?.url;
+  const token = creds?.token;
   redis = url && token ? new Redis({ url, token }) : null;
   return redis;
 }

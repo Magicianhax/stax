@@ -1,8 +1,22 @@
 import "server-only";
 import { Redis } from "@upstash/redis";
 
+/**
+ * Redis REST credentials, under either name. Upstash's own dashboard sets
+ * `UPSTASH_REDIS_REST_*`; the Vercel Marketplace integration provisions the same
+ * Upstash database but exports it as `KV_REST_API_*`. Accepting both means
+ * connecting the database through Vercel needs no extra variables.
+ */
+export function redisCredentials(): { url: string; token: string } | null {
+  const url = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
+  return url && token ? { url, token } : null;
+}
+
+
 // Small response cache for public, non-user-specific data (prices, market
-// history). With UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN set, entries
+// history). With Redis credentials set (UPSTASH_REDIS_REST_* or Vercel's
+// KV_REST_API_* — same Upstash database, different variable names), entries
 // live in Upstash Redis (`stax:cache:<key>`, EX = ttl) and are shared across
 // every instance; without them they live in a per-process Map with the same
 // expiry. Either way one in-flight loader per key per process (single-flight),
@@ -21,8 +35,9 @@ const DEBUG = process.env.CACHE_DEBUG === "1";
 let redis: Redis | null | undefined; // undefined = not yet resolved, null = env unset
 function getRedis(): Redis | null {
   if (redis !== undefined) return redis;
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  const creds = redisCredentials();
+  const url = creds?.url;
+  const token = creds?.token;
   // We do our own JSON so a cached `null` ("null") stays distinct from a miss (nil).
   redis = url && token ? new Redis({ url, token, automaticDeserialization: false }) : null;
   return redis;

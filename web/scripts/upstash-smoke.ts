@@ -1,6 +1,7 @@
 // Upstash smoke test — exercises rateLimit() and cached() against the REAL Redis.
 //   npm run upstash:smoke   (= tsx --conditions=react-server --env-file=.env.local scripts/upstash-smoke.ts)
-// Needs UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN in .env.local (or the shell).
+// Needs Redis credentials in .env.local (or the shell): UPSTASH_REDIS_REST_URL +
+// UPSTASH_REDIS_REST_TOKEN, or Vercel's KV_REST_API_URL + KV_REST_API_TOKEN.
 // `--conditions=react-server` makes the `server-only` guard a no-op so the app's own
 // modules can run outside Next. Keys it creates are deleted / expire within a minute.
 import { Redis } from "@upstash/redis";
@@ -12,9 +13,9 @@ function assert(cond: unknown, msg: string): asserts cond {
 }
 
 async function main() {
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  assert(url && token, "UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN are not set");
+  const url = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
+  assert(url && token, "No Redis credentials: set UPSTASH_REDIS_REST_URL/TOKEN or KV_REST_API_URL/TOKEN");
   const redis = new Redis({ url, token, automaticDeserialization: false });
   const ping = await redis.ping();
   console.log("ping:", ping);
