@@ -13,7 +13,10 @@ import type { ActivityLeg } from "@/lib/onchainHistory";
 //   • success                 -> confetti + holdings + on-chain receipt (chain explorer)
 //
 // Browse / own / trade (Pro depth, always available here):
-//   portfolio · market → asset → trade → receipt · activity · vera
+//   portfolio · market → asset → trade → receipt · activity · wallet
+//
+// Tabs: home · market · [invest → hub] · portfolio · wallet. The centre button
+// opens `hub`, a short menu of everything Vera can do; each item is its own screen.
 //
 // Navigation keeps a small history stack so go(-1) returns to the prior screen.
 // The bottom TabBar lives here (the design owns its own chrome).
@@ -40,7 +43,7 @@ import { MarketScreen } from "./screens/MarketScreen";
 import { AssetDetailScreen } from "./screens/AssetDetailScreen";
 import { TradeScreen } from "./screens/TradeScreen";
 import { ReceiptScreen } from "./screens/ReceiptScreen";
-import { VeraScreen } from "./screens/VeraScreen";
+import { HubScreen } from "./screens/HubScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { ActivityScreen } from "./screens/ActivityScreen";
 import { HelpScreen } from "./screens/HelpScreen";
@@ -60,6 +63,8 @@ import { usd as formatUsd } from "@/lib/format";
 
 type Screen =
   | "home"
+  // The centre tab: a short menu of everything Vera can do, each on its own screen.
+  | "hub"
   | "baskets"
   | "basket"
   // ── gift-ui: give a basket ("gift") and your gifts ("gifts") ──────────────
@@ -79,7 +84,6 @@ type Screen =
   | "asset"
   | "trade"
   | "receipt"
-  | "vera"
   | "settings"
   | "activity"
   | "help";
@@ -158,7 +162,8 @@ const TONE_HINT: Record<Tone, string> = {
 function tabFor(screen: Screen): TabId {
   if (screen === "portfolio" || screen === "asset") return "portfolio";
   if (screen === "market") return "market";
-  if (screen === "vera") return "vera";
+  if (screen === "hub") return "invest";
+  if (screen === "wallet") return "wallet";
   return "home";
 }
 
@@ -324,9 +329,11 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
         return;
       }
 
-      // Tab roots / home reset the stack to a single route.
-      const ROOTS: Screen[] = ["home", "portfolio", "market", "vera"];
-      if (ROOTS.includes(next)) {
+      // Tab roots / home reset the stack to a single route. Wallet is both a tab
+      // root and a pushed screen, so the tab bar asks for the root with
+      // `{ root: true }` — anywhere else it pushes and keeps its back arrow.
+      const ROOTS: Screen[] = ["home", "portfolio", "market", "hub"];
+      if (ROOTS.includes(next) || p.root === true) {
         setDir("fade");
         if (next === "home") {
           invest.reset();
@@ -478,13 +485,15 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
           goRef.current("home");
           await wait(2600);
         } else {
-          goRef.current("vera");
+          // The "vera" play now opens the hub — her menu — instead of the retired
+          // Vera page, then builds a plan and returns.
+          goRef.current("hub");
           await wait(4200);
           if (cancelled) break;
           goRef.current("thinking", { goal: "Put $250 into AI companies", amt: 250 });
           await wait(3600); // watch Vera build + sign the plan
           if (cancelled) break;
-          goRef.current("vera");
+          goRef.current("hub");
           await wait(3800);
         }
       }
@@ -536,6 +545,7 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
     if (demo) return;
     const NAMES: Record<Screen, string> = {
       home: "Your money",
+      hub: "Invest",
       baskets: "Baskets",
       basket: "Basket",
       // gift-ui
@@ -554,7 +564,6 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
       asset: "Asset",
       trade: "Trade",
       receipt: "Receipt",
-      vera: "Vera",
       settings: "Settings",
       activity: "Activity",
       help: "Help",
@@ -564,8 +573,10 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
 
   const onTab = (id: TabId) => {
     haptic.select();
-    if (id === "invest") go("goal");
-    else go(id === "market" ? "market" : id === "portfolio" ? "portfolio" : id === "vera" ? "vera" : "home");
+    // The centre button opens the hub (every Vera feature, one row each), not the
+    // goal flow. Wallet is a tab root here, so it arrives without a back arrow.
+    if (id === "wallet") go("wallet", { root: true });
+    else go(id === "invest" ? "hub" : id === "market" ? "market" : id === "portfolio" ? "portfolio" : "home");
   };
 
   // Left-edge swipe-to-go-back (iOS-style). Active only when there's a screen to
@@ -613,14 +624,18 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
     }
   }
 
-  // Tabs visible only on the root browse screens.
+  // Tabs visible only on the root browse screens (Wallet only when it *is* a root).
+  const walletIsRoot = screen === "wallet" && params.root === true;
   const showTabs =
-    screen === "home" || screen === "portfolio" || screen === "market" || screen === "vera";
+    screen === "home" || screen === "portfolio" || screen === "market" || screen === "hub" || walletIsRoot;
 
   let view: React.ReactNode;
   switch (screen) {
     case "wallet":
-      view = <WalletScreen go={go} />;
+      view = <WalletScreen go={go} root={params.root === true} />;
+      break;
+    case "hub":
+      view = <HubScreen go={go} />;
       break;
     case "send":
       view = <SendScreen go={go} symbol={params.symbol as string | undefined} />;
@@ -740,9 +755,6 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
       );
       break;
     }
-    case "vera":
-      view = <VeraScreen go={go} />;
-      break;
     case "settings":
       view = <SettingsScreen go={go} />;
       break;

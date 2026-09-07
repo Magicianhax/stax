@@ -4,15 +4,22 @@
 // newest first, grouped by day, each row opening its on-chain receipt. Rows
 // show the plan's holdings as a logo cluster; pending and failed plans are
 // stated plainly. Reached from Home's header and from Settings.
-import { useState } from "react";
+//
+// Below your own history sits Vera's public record, which used to be a screen of
+// its own: what $100 following every plan would be worth, and the plans she has
+// recorded for everyone. Both are history, so they belong on the history screen —
+// and both are labelled as hers, not yours.
+import { useMemo, useState } from "react";
 import { useActivity, type ActivityRow } from "@/hooks/useActivity";
+import { useVeraRecord } from "@/hooks/useVeraRecord";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { useDemo } from "@/components/demo/DemoProvider";
-import { Icon, LogoCluster, VerifiedBadge } from "@/components/design";
+import { Icon, LogoCluster, PriceChart, SectionTitle, Sparkline, VerifiedBadge, type PricePoint } from "@/components/design";
 import { Reveal } from "@/components/motion";
-import { usd } from "@/lib/format";
-import { DEMO_NOW } from "@/lib/demoSeries";
+import { riskLabel, usd } from "@/lib/format";
+import { DEMO_NOW, planSeriesSince, trackRecordSeries } from "@/lib/demoSeries";
 import { iconBtn, Pager } from "./primitives";
+import { useChainReady } from "../useChainReady";
 
 const PER_PAGE = 10;
 const DAY = 86_400e3;
@@ -35,6 +42,14 @@ function dayLabel(ms: number, nowMs: number): string {
 
 function timeOf(sec: number): string {
   return new Date(sec * 1000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+}
+
+function shortDate(sec: number): string {
+  return new Date(sec * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function fmtPct(v: number): string {
+  return `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}%`;
 }
 
 interface Group {
@@ -75,8 +90,18 @@ export function ActivityScreen({
 }) {
   const { address } = useSmartAccount();
   const demo = useDemo();
+  const { ready } = useChainReady();
   const { data: activity, isLoading } = useActivity(address ?? undefined);
+  const { data: record, isLoading: recordLoading } = useVeraRecord();
   const rows = activity ?? [];
+  const recents = record?.recentRecommendations ?? [];
+
+  // Track record: $100 following every recorded plan. Only the demo has a series
+  // today — the real record has no cost basis yet, so the card is hidden there
+  // rather than drawn from nothing.
+  const track = useMemo<PricePoint[]>(() => (demo ? trackRecordSeries() : []), [demo]);
+  const trackChange = track.length > 1 ? ((track[track.length - 1].v - track[0].v) / track[0].v) * 100 : 0;
+  const [hover, setHover] = useState<(PricePoint & { index: number }) | null>(null);
   // "Now" is fixed for the life of the screen (a day label never flips
   // mid-visit); demo timestamps count back from a fixed anchor so "Today" is stable.
   const [nowMs] = useState(() => (demo ? DEMO_NOW : Date.now()));
@@ -164,8 +189,165 @@ export function ActivityScreen({
         {rows.length > PER_PAGE && <Pager page={safePage} pageCount={pageCount} onPage={setPage} />}
       </div>
 
-      <div style={{ padding: "18px 22px 0", display: "flex", justifyContent: "center" }}>
-        <VerifiedBadge label="Every plan signed & recorded by Vera" onClick={() => go("vera")} />
+      {/* Vera's track record — what $100 following every recorded plan is worth */}
+      {ready && track.length > 1 && (
+        <div style={{ padding: "26px 22px 0" }}>
+          <SectionTitle>Vera&apos;s track record</SectionTitle>
+          <div className="card" style={{ padding: "14px 16px 12px" }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, minHeight: 22 }}>
+              <span style={{ fontSize: 13, color: "var(--ink-2)", fontWeight: 600 }}>
+                {hover ? usd(hover.v) : "$100 following every plan"}
+              </span>
+              <span
+                className="tnum"
+                style={{
+                  fontSize: 14,
+                  fontWeight: 700,
+                  flex: "none",
+                  color: hover ? "var(--ink-2)" : trackChange >= 0 ? "var(--pos)" : "var(--neg)",
+                }}
+              >
+                {hover
+                  ? new Date(hover.t as number).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+                  : `${fmtPct(trackChange)} · 6M`}
+              </span>
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <PriceChart
+                points={track}
+                up={trackChange >= 0}
+                area
+                height={120}
+                onScrub={setHover}
+                formatValue={(v) => usd(v)}
+                label={`$100 following every recorded plan, ${trackChange >= 0 ? "up" : "down"} ${Math.abs(trackChange).toFixed(1)}% over six months`}
+              />
+            </div>
+            <p style={{ fontSize: 12, color: "var(--ink-3)", margin: "16px 0 0", lineHeight: 1.5 }}>
+              Past results don&apos;t promise future ones.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Vera's recorded plans — REAL, from the on-chain log, and public: these
+          are every plan she has signed, not only yours */}
+      {ready && (
+        <div style={{ padding: "26px 22px 0" }}>
+          <SectionTitle>Vera&apos;s recorded plans</SectionTitle>
+          <p style={{ margin: "-4px 0 10px", fontSize: 13, color: "var(--ink-2)", lineHeight: 1.45 }}>
+            Every plan she has signed, for everyone.
+          </p>
+          {recordLoading && recents.length === 0 ? (
+            <div className="card" style={{ padding: "4px 16px" }}>
+              {[0, 1, 2].map((i) => (
+                <div
+                  key={i}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 13,
+                    padding: "13px 0",
+                    borderBottom: i < 2 ? "1px solid var(--line-2)" : "none",
+                  }}
+                >
+                  <div className="skeleton" style={{ width: 38, height: 38, borderRadius: 11, flex: "none" }} />
+                  <div style={{ flex: 1 }}>
+                    <div className="skeleton" style={{ width: "55%", height: 13, borderRadius: 6 }} />
+                    <div className="skeleton" style={{ width: "35%", height: 11, borderRadius: 6, marginTop: 7 }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : recents.length === 0 ? (
+            <div className="card" style={{ padding: "26px 18px", textAlign: "center", color: "var(--ink-2)" }}>
+              <div style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)" }}>No plans recorded yet</div>
+              <div style={{ fontSize: 13.5, marginTop: 4, lineHeight: 1.5 }}>
+                Every plan Vera builds is signed and written on-chain. The first one will appear here,
+                permanently.
+              </div>
+            </div>
+          ) : (
+            <Reveal className="card" style={{ padding: "4px 16px" }}>
+              {recents.map((r, i) => {
+                const placed = r.usdcSpent !== undefined;
+                const risk = riskLabel(r.riskScore);
+                const symbols = r.symbols ?? [];
+                const spark = symbols.length && r.timestamp ? planSeriesSince(symbols, r.timestamp * 1000) : [];
+                const sparkUp = spark.length > 1 ? spark[spark.length - 1] >= spark[0] : true;
+                const when = r.timestamp ? shortDate(r.timestamp) : undefined;
+                return (
+                  <button
+                    key={r.txHash + i}
+                    className="row"
+                    onClick={() =>
+                      go("receipt", {
+                        title: placed ? "Invested in a plan" : "Plan recommended",
+                        amount: placed ? r.usdcSpent : undefined,
+                        txHash: r.txHash,
+                      })
+                    }
+                    style={{
+                      padding: "13px 0",
+                      minHeight: 64,
+                      borderBottom: i < recents.length - 1 ? "1px solid var(--line-2)" : "none",
+                    }}
+                  >
+                    {symbols.length > 0 ? (
+                      <span style={{ display: "inline-flex", minWidth: 38, flex: "none" }}>
+                        <LogoCluster assets={symbols.map((s) => ({ symbol: s }))} size={24} max={3} />
+                      </span>
+                    ) : (
+                      <span
+                        style={{
+                          width: 38,
+                          height: 38,
+                          borderRadius: 11,
+                          flex: "none",
+                          display: "grid",
+                          placeItems: "center",
+                          background: "var(--primary-soft)",
+                          color: "var(--primary)",
+                        }}
+                      >
+                        <Icon name={placed ? "check" : "shield"} size={18} stroke={2.2} />
+                      </span>
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontWeight: 600,
+                          fontSize: 14.5,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {risk.label} plan
+                      </div>
+                      <div className="tnum" style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 2 }}>
+                        {placed
+                          ? `${usd(r.usdcSpent as number)} · ${when ? `Placed ${when}` : "Placed on-chain"}`
+                          : when
+                            ? `Recommended ${when}`
+                            : "Recommended on-chain"}
+                      </div>
+                    </div>
+                    {spark.length > 1 && (
+                      <Sparkline data={spark} w={60} h={22} color={sparkUp ? "var(--pos)" : "var(--neg)"} />
+                    )}
+                    {/* the sparkline is the row's affordance; the chevron only fills in without one */}
+                    {spark.length < 2 && <Icon name="chevR" size={16} style={{ color: "var(--ink-3)", flex: "none" }} />}
+                  </button>
+                );
+              })}
+            </Reveal>
+          )}
+        </div>
+      )}
+
+      <div style={{ padding: "22px 22px 0", display: "flex", justifyContent: "center" }}>
+        <VerifiedBadge label="Every plan signed & recorded by Vera" onClick={() => go("settings")} />
       </div>
     </div>
   );

@@ -2,7 +2,7 @@
 
 // Your gifts — two short lists: the ones you sent and the ones waiting for you.
 // A row opens the gift in a sheet, where the note, the split, and the single
-// available action live. Reached from Vera; `focus` opens one straight away
+// available action live. Reached from the Invest hub; `focus` opens one straight away
 // (that's how a `?gift=<id>` link lands).
 import { useState } from "react";
 import { Icon, SectionTitle } from "@/components/design";

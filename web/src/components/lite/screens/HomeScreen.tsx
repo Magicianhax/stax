@@ -484,7 +484,7 @@ export function HomeScreen({
 
         {/* trust footer */}
         <div style={{ padding: "18px 22px 0", display: "flex", justifyContent: "center" }}>
-          <VerifiedBadge label="Every plan signed & recorded by Vera" onClick={() => go("vera")} />
+          <VerifiedBadge label="Every plan signed & recorded by Vera" onClick={() => go("settings")} />
         </div>
       </Reveal>
     </div>

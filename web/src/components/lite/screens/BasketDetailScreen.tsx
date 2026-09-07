@@ -366,7 +366,7 @@ export function BasketDetailScreen({
       </div>
 
       <div style={{ padding: "14px 22px 0", display: "flex", justifyContent: "center" }}>
-        <VerifiedBadge label="Vera signs the risk before each invest" onClick={() => go("vera")} />
+        <VerifiedBadge label="Vera signs the risk before each invest" onClick={() => go("settings")} />
       </div>
 
       {/* Pinned invest bar — sticky, like PlanScreen. */}

@@ -84,8 +84,11 @@ function Action({ icon, label, onClick }: { icon: IconName; label: string; onCli
 
 export function WalletScreen({
   go,
+  root = false,
 }: {
   go: (target: string | number, params?: Record<string, unknown>) => void;
+  /** Reached from the tab bar: no back arrow, and room for the tab bar below. */
+  root?: boolean;
 }) {
   const { address, loading: addrLoading } = useSmartAccount();
   const chain = useChain();
@@ -173,13 +176,16 @@ export function WalletScreen({
   };
 
   return (
-    <div className="screen screen-pad-top" style={{ paddingBottom: 48 }}>
-      {/* header */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 22px 0" }}>
-        <button onClick={() => go(-1)} style={iconBtn} className="tap" aria-label="Back">
-          <Icon name="back" size={20} />
-        </button>
-        <h1 className="serif" style={{ margin: 0, fontSize: 27, letterSpacing: "-.01em" }}>Wallet</h1>
+    <div className="screen screen-pad-top" style={{ paddingBottom: root ? 110 : 48 }}>
+      {/* header — a back arrow only when Wallet was pushed; as a tab root it reads
+          like Home, with the title flush to the screen's padding */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: root ? "10px 22px 0" : "8px 22px 0" }}>
+        {!root && (
+          <button onClick={() => go(-1)} style={iconBtn} className="tap" aria-label="Back">
+            <Icon name="back" size={20} />
+          </button>
+        )}
+        <h1 className="serif" style={{ margin: 0, fontSize: root ? 26 : 27, letterSpacing: "-.01em" }}>Wallet</h1>
         <button
           onClick={() => setHide((v) => !v)}
           className="tap"

@@ -4,7 +4,7 @@
 // Frosted bar with a raised center "Invest" action. Tab set depends on `pro`.
 import { Icon, type IconName } from "./Icon";
 
-export type TabId = "home" | "portfolio" | "market" | "invest" | "vera";
+export type TabId = "home" | "portfolio" | "market" | "invest" | "wallet";
 
 interface Tab {
   id: TabId;
@@ -26,13 +26,13 @@ export function TabBar({ active, onNav, pro = false }: TabBarProps) {
         { id: "market", icon: "grid", label: "Market" },
         { id: "invest", icon: "spark", label: "Invest", center: true },
         { id: "portfolio", icon: "trend", label: "Owned" },
-        { id: "vera", icon: "orbit", label: "Vera" },
+        { id: "wallet", icon: "wallet", label: "Wallet" },
       ]
     : [
         { id: "home", icon: "home", label: "Home" },
         { id: "portfolio", icon: "trend", label: "Owned" },
         { id: "invest", icon: "spark", label: "Invest", center: true },
-        { id: "vera", icon: "orbit", label: "Vera" },
+        { id: "wallet", icon: "wallet", label: "Wallet" },
       ];
 
   return (

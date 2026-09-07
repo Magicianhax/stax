@@ -3,13 +3,20 @@
 // Settings — faithful re-skin of the design's Settings screen, wired to REAL
 // state: profile identity from Privy + the smart-account address, Appearance from
 // useTheme, and a real sign-out via useLogout.
+//
+// It also holds the "Vera" section that used to be a whole screen: who she is
+// (her on-chain identity, linked to the IdentityRegistry) and her three headline
+// numbers. Kept to one row plus one stat line — Settings is a list, not a landing
+// page. What she has actually done lives on Activity.
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { usePrivy, useLogout } from "@privy-io/react-auth";
-import { Icon, NetworkSwitch, StaxMark, type IconName } from "@/components/design";
+import { Icon, NetworkSwitch, Seal, StaxMark, VeraOrb, type IconName } from "@/components/design";
 import { useTheme, type ColorMode } from "@/hooks/useTheme";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
+import { useAgentIdentity } from "@/hooks/useAgentIdentity";
+import { useVeraRecord } from "@/hooks/useVeraRecord";
 import { useHaptics, haptic } from "@/lib/haptics";
-import { shortAddress } from "@/lib/format";
+import { addressUrl, shortAddress, usd } from "@/lib/format";
 import { siteUrl } from "@/lib/urls";
 import { iconBtn, sectionLabel } from "./primitives";
 import { useChainReady } from "../useChainReady";
@@ -118,6 +125,16 @@ export function SettingsScreen({
   const { colorMode, toggle } = useTheme();
   const { chain, ready } = useChainReady();
   const { on: hapticsOn, supported: hapticsSupported, toggle: toggleHaptics } = useHaptics();
+  // Vera's identity + headline numbers (both REAL, from the chain).
+  const { data: veraIdentity } = useAgentIdentity();
+  const { data: veraRecord, isLoading: veraLoading } = useVeraRecord();
+  const registryUrl =
+    veraIdentity && chain.contracts.deployed ? addressUrl(veraIdentity.registry, chain) : undefined;
+  const veraStats: { label: string; value: string; accent?: string }[] = [
+    { label: "Plans built", value: (veraRecord?.totalRecommendations ?? 0).toLocaleString("en-US") },
+    { label: "Invested", value: usd(veraRecord?.totalExecutedUsd ?? 0), accent: "var(--pos)" },
+    { label: "Placed", value: (veraRecord?.executedCount ?? 0).toLocaleString("en-US") },
+  ];
 
   // Identity — prefer a human handle, fall back to the smart-account address.
   const identity =
@@ -193,6 +210,89 @@ export function SettingsScreen({
         </div>
       </div>
 
+      {/* Vera — who she is and her three numbers. One row, one stat line, one
+          sentence; her full history lives on Activity. */}
+      <div style={{ padding: "24px 22px 0" }}>
+        <div style={sectionLabel}>Vera</div>
+        <div className="card" style={{ padding: "6px 16px" }}>
+          {/* identity — links to the IdentityRegistry entry when the chain has one */}
+          {(() => {
+            const inner = (
+              <>
+                <VeraOrb size={38} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                    <Seal size={18} />
+                    <span style={{ fontWeight: 600, fontSize: 15.5, letterSpacing: "-.01em" }}>
+                      Verified agent
+                    </span>
+                    <span
+                      className="serif tnum"
+                      style={{ fontSize: 17, fontWeight: 600, color: "var(--primary)", lineHeight: 1 }}
+                    >
+                      №{veraIdentity ? veraIdentity.agentId.toString() : "1"}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 3 }}>
+                    {veraIdentity && registryUrl ? (
+                      <>
+                        IdentityRegistry <span className="mono">{shortAddress(veraIdentity.registry)}</span>
+                      </>
+                    ) : (
+                      "Registered on-chain"
+                    )}
+                  </div>
+                </div>
+                {registryUrl && <Icon name="arrowUR" size={16} style={{ color: "var(--ink-3)", flex: "none" }} />}
+              </>
+            );
+            const style = {
+              width: "100%",
+              display: "flex",
+              alignItems: "center",
+              gap: 13,
+              padding: "13px 2px",
+              minHeight: 64,
+              textAlign: "left" as const,
+            };
+            return registryUrl ? (
+              <a
+                href={registryUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="row"
+                style={style}
+              >
+                {inner}
+              </a>
+            ) : (
+              <div style={style}>{inner}</div>
+            );
+          })()}
+
+          {/* the three numbers, on one line */}
+          <div style={{ display: "flex", textAlign: "center", padding: "12px 0", borderTop: "1px solid var(--line-2)" }}>
+            {veraStats.map((s, i) => (
+              <div key={s.label} style={{ flex: 1, borderRight: i < veraStats.length - 1 ? "1px solid var(--line-2)" : "none" }}>
+                <div className="tnum" style={{ fontSize: 18, fontWeight: 700, color: s.accent ?? "var(--ink)" }}>
+                  {!ready ? (
+                    "—"
+                  ) : veraLoading ? (
+                    <span className="skeleton" style={{ display: "inline-block", width: 40, height: 18, borderRadius: 6 }} />
+                  ) : (
+                    s.value
+                  )}
+                </div>
+                <div className="label-eyebrow" style={{ marginTop: 4 }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <p style={{ margin: "10px 4px 0", fontSize: 12.5, lineHeight: 1.5, color: "var(--ink-3)" }}>
+          Every plan is signed and recorded on-chain, so this record can&apos;t be edited afterwards.
+        </p>
+      </div>
+
       {/* Network — Base is the default; Mantle keeps earlier investments. One
           segmented control, one sentence, no chain-picker jargon. */}
       <div style={{ padding: "24px 22px 0" }}>
@@ -266,15 +366,9 @@ export function SettingsScreen({
             borderTop
           />
           <Row
-            icon="shield"
-            title="Vera's track record"
-            onClick={() => go("vera")}
-            right={<Icon name="chevR" size={18} style={{ color: "var(--ink-3)" }} />}
-            borderTop
-          />
-          <Row
             icon="receipt"
             title="Activity & receipts"
+            sub="Your history and Vera's record"
             onClick={() => go("activity")}
             right={<Icon name="chevR" size={18} style={{ color: "var(--ink-3)" }} />}
             borderTop

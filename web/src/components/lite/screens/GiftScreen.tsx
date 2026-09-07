@@ -2,7 +2,7 @@
 
 // Give a basket — one screen that asks five short questions and reveals the next
 // only once the last is answered, then a review card and a hold-to-confirm.
-// Reached from a basket ("Gift this basket", basket pre-filled) or from Vera
+// Reached from a basket ("Gift this basket", basket pre-filled) or from the Invest hub
 // ("Gift a basket", basket picked from a rail here).
 //
 // The screen owns the whole moment: form → sending → sent. Nothing routes away

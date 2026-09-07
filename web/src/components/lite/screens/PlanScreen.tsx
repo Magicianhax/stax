@@ -260,7 +260,7 @@ export function PlanScreen({
 
       {/* trust line */}
       <div style={{ padding: "14px 22px 0", display: "flex", justifyContent: "center" }}>
-        <VerifiedBadge label="Vera will sign & record this plan" onClick={() => go("vera")} />
+        <VerifiedBadge label="Vera will sign & record this plan" onClick={() => go("settings")} />
       </div>
 
       {/* quiet text actions — keep this mix, or hand it to a friend */}
