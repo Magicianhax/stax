@@ -30,8 +30,8 @@ import { GiftSent } from "../gift/GiftSent";
 import {
   addYears,
   earliestUnlock,
-  fromDateInput,
-  fromDateTimeInput,
+  resolveUnlock,
+  type UnlockPreset,
   reviewRows,
   todayAnchor,
   toDateInput,
@@ -52,7 +52,7 @@ import {
   type GiftRecipientKind,
 } from "../gift/types";
 
-type Preset = "1y" | "5y" | "18th" | "custom";
+type Preset = UnlockPreset;
 
 /** The two ways to address a gift, in the order the segmented control shows them. */
 const RECIPIENT_KINDS: { id: GiftRecipientKind; label: string }[] = [
@@ -61,23 +61,12 @@ const RECIPIENT_KINDS: { id: GiftRecipientKind; label: string }[] = [
 ];
 
 const PRESETS: { id: Preset; label: string }[] = [
+  { id: "days", label: "In N days" },
   { id: "1y", label: "In a year" },
   { id: "5y", label: "In 5 years" },
   { id: "18th", label: "Their 18th" },
   { id: "custom", label: "Pick a date and time" },
 ];
-
-/** The unlock day the chosen preset works out to, in unix seconds, or null. */
-function resolveUnlock(preset: Preset | null, today: number, dob: string, custom: string): number | null {
-  if (preset === "1y") return addYears(today, 1);
-  if (preset === "5y") return addYears(today, 5);
-  if (preset === "18th") {
-    const born = fromDateInput(dob);
-    return born ? addYears(born, 18) : null;
-  }
-  if (preset === "custom") return fromDateTimeInput(custom);
-  return null;
-}
 
 export function GiftScreen({
   go,
@@ -135,13 +124,15 @@ export function GiftScreen({
   const [preset, setPreset] = useState<Preset | null>(null);
   const [dob, setDob] = useState("");
   const [custom, setCustom] = useState("");
+  const [days, setDays] = useState("");
   const today = todayAnchor();
   const latest = addYears(today, GIFT_MAX_UNLOCK_YEARS);
 
   // Plain arithmetic over four bits of state — no memo. `today` is recomputed
   // each render (it is a clock read), which is exactly the kind of dependency a
   // useMemo here could not honestly hold on to.
-  const unlockAt = resolveUnlock(preset, today, dob, custom);
+  const nowSec = earliestUnlock(0);
+  const unlockAt = resolveUnlock(preset, today, dob, custom, days, nowSec);
   // Far enough ahead for the two transactions to land, and inside the cap.
   const earliest = earliestUnlock(GIFT_MIN_UNLOCK_MINUTES);
   const unlockOk = unlockAt !== null && unlockAt >= earliest && unlockAt <= latest;
@@ -534,6 +525,27 @@ export function GiftScreen({
               ))}
             </div>
 
+            {preset === "days" && (
+              <label style={{ display: "block", marginTop: 14 }}>
+                <span className="label-eyebrow">How many days from now</span>
+                <div className="field" style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "12px 14px", marginTop: 7 }}>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={days}
+                    onChange={(e) => setDays(e.target.value.replace(/[^0-9]/g, "").slice(0, 5))}
+                    placeholder="30"
+                    className="tnum"
+                    aria-label="How many days from now"
+                    style={{ fontSize: 17, fontWeight: 600, width: "100%", minHeight: 24 }}
+                  />
+                  <span style={{ fontSize: 14, color: "var(--ink-2)", flex: "none" }}>
+                    {days === "1" ? "day" : "days"}
+                  </span>
+                </div>
+              </label>
+            )}
+
             {preset === "18th" && (
               <label style={{ display: "block", marginTop: 14 }}>
                 <span className="label-eyebrow">Their date of birth</span>
@@ -583,7 +595,9 @@ export function GiftScreen({
                 </button>
               </>
             )}
-            {preset !== null && !unlockOk && (preset === "18th" ? dob : preset === "custom" ? custom : "") !== "" && (
+            {preset !== null &&
+              !unlockOk &&
+              (preset === "18th" ? dob : preset === "custom" ? custom : preset === "days" ? days : "") !== "" && (
               <p role="status" style={{ margin: "12px 0 0", fontSize: 13, color: "var(--ink-2)", lineHeight: 1.45 }}>
                 {unlockAt !== null && unlockAt > latest
                   ? `The furthest out a gift can go is ${GIFT_MAX_UNLOCK_YEARS} years.`

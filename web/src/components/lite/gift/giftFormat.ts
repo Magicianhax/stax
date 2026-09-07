@@ -170,3 +170,34 @@ export function reviewRows(
 export function giftShareUrl(id: string): string {
   return absoluteSiteUrl(`/gift/${id}`);
 }
+
+/** The four ways to answer "when does it open", in the order the chips show them. */
+export type UnlockPreset = "days" | "1y" | "5y" | "18th" | "custom";
+
+/**
+ * The instant the chosen preset works out to, in unix seconds, or null when the
+ * answer is not usable yet. Days count from `now`, not from midnight, so "in 1
+ * day" is this time tomorrow rather than a moment that may already have passed.
+ */
+export function resolveUnlock(
+  preset: UnlockPreset | null,
+  today: number,
+  dob: string,
+  custom: string,
+  days: string,
+  now: number,
+): number | null {
+  if (preset === "days") {
+    const n = Number(days);
+    if (!Number.isInteger(n) || n < 1) return null;
+    return now + n * 86_400;
+  }
+  if (preset === "1y") return addYears(today, 1);
+  if (preset === "5y") return addYears(today, 5);
+  if (preset === "18th") {
+    const born = fromDateInput(dob);
+    return born ? addYears(born, 18) : null;
+  }
+  if (preset === "custom") return fromDateTimeInput(custom);
+  return null;
+}

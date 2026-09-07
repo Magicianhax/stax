@@ -1,7 +1,7 @@
 // Gift timing: a gift may open the same day, so these read and print instants in
 // the reader's own zone rather than in UTC.
 import { describe, expect, it } from "vitest";
-import { earliestUnlock, fromDateTimeInput, toDateTimeInput, unlockWhenFromSeconds } from "./giftFormat";
+import { earliestUnlock, fromDateTimeInput, resolveUnlock, toDateTimeInput, todayAnchor, unlockWhenFromSeconds } from "./giftFormat";
 
 describe("gift unlock timing", () => {
   it("earliest unlock is minutes ahead, not a day", () => {
@@ -28,5 +28,28 @@ describe("gift unlock timing", () => {
     const far = Math.floor(now / 1000) + 400 * 86_400;
     expect(unlockWhenFromSeconds(soon, now)).toMatch(/\d{1,2}:\d{2}/);
     expect(unlockWhenFromSeconds(far, now)).not.toMatch(/\d{1,2}:\d{2}/);
+  });
+});
+
+describe("resolveUnlock", () => {
+  const now = Math.floor(Date.UTC(2026, 8, 8, 9, 30) / 1000);
+  const today = todayAnchor(now * 1000);
+
+  it("counts days from now, not from midnight", () => {
+    expect(resolveUnlock("days", today, "", "", "45", now)).toBe(now + 45 * 86_400);
+    expect(resolveUnlock("days", today, "", "", "1", now)).toBe(now + 86_400);
+  });
+
+  it("refuses a days value that is not a whole number of days ahead", () => {
+    for (const bad of ["", "0", "-3", "2.5", "abc"]) {
+      expect(resolveUnlock("days", today, "", "", bad, now), bad).toBeNull();
+    }
+  });
+
+  it("still resolves the other presets", () => {
+    expect(resolveUnlock("1y", today, "", "", "", now)).toBeGreaterThan(now);
+    expect(resolveUnlock("18th", today, "2020-05-01", "", "", now)).toBeGreaterThan(now);
+    expect(resolveUnlock("18th", today, "", "", "", now)).toBeNull();
+    expect(resolveUnlock(null, today, "", "", "", now)).toBeNull();
   });
 });
