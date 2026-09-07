@@ -8,6 +8,8 @@
     "deploy:base": "hardhat run scripts/deploy-base.js --network base",
     "deploy:base-sepolia": "hardhat run scripts/deploy-base.js --network baseSepolia",
     "enable:base": "hardhat run scripts/enable-assets-base.js --network base",
+    "deploy:gift-base": "hardhat run scripts/deploy-gift-base.js --network base",
+    "deploy:gift-base-sepolia": "hardhat run scripts/deploy-gift-base.js --network baseSepolia",
     "deploy:mantle": "hardhat run scripts/deploy.js --network mantle",
     "deploy:sepolia": "hardhat run scripts/deploy.js --network mantleSepolia",
     "enable:mantle": "hardhat run scripts/enable-assets.js --network mantle"
