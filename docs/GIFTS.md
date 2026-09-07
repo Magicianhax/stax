@@ -118,8 +118,12 @@ The split lives in `splitGiftBasket` in `web/src/lib/gifts.ts`, and it is arithm
 6-decimal USDC so `investUsd + cashUsd` always equals the gift amount exactly.
 `POST /api/gifts` returns `investUsd` (pass that to `/api/invest-plan`, not the gift's full
 amount), `cashToken` (the USDC to park, already in raw units), and `holdings` with the cash
-slices marked `heldAsCash`. `giftCreateCalls` folds `cashToken` into its token list itself,
-so a caller cannot forget it and park a gift missing its safe slice.
+slices marked `heldAsCash`. `mergeGiftTokens` folds the bought tokens and the
+cash slice into one entry per address. Call it once and use the result everywhere: the
+approvals, `create`, and the `funded` body the server matches against the contract all need
+the same list, and a second implementation of that fold could drift, with the failure only
+surfacing after two on-chain transactions have already happened. It is idempotent, and
+`giftCreateCalls` runs it too, so passing an already-merged list is safe.
 
 The same rule covers fee-on-transfer tokens, which would pay out more than arrived. None is
 in the Stax asset set. Any future rebasing venue belongs in `isHeldAsCash`.
@@ -186,6 +190,12 @@ its body with Zod, and is rate limited. Types are exported from `@/lib/gifts`.
 | `POST /api/gifts/:id/claim-authorisation` | yes | Signs the EIP-712 claim attestation. |
 | `POST /api/gifts/:id/claimed` | yes | Records the settling transaction, claim or reclaim. |
 | `GET /api/gifts/preview?id=` | public | The share-link landing payload. |
+
+`POST /api/gifts/quote` is not on the give screen's path any more: `splitGiftBasket` is
+client-safe, so the review card runs the very function the server will, which means the
+preview cannot disagree with what `create` does and it works in demo with no round trip.
+The route stays for callers outside the browser and is the documented way to price a gift
+without an account.
 
 `POST /api/gifts` enforces the amount floor and ceiling, the caller's actual USDC balance,
 the unlock-date window, the email shape and the note cap. The note is capped at 200

@@ -180,7 +180,7 @@ export function SplitList({ items, amountUsd }: { items: (GiftItem & { heldAsCas
           <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500 }}>
             {toTile(l.symbol).name}
             {(l as GiftHolding).heldAsCash && (
-              <span style={{ color: "var(--ink-2)", fontWeight: 500 }}> · as dollars</span>
+              <span style={{ color: "var(--ink-2)", fontWeight: 500 }}> · held as cash</span>
             )}
           </span>
           <span className="tnum" style={{ fontSize: 12.5, color: "var(--ink-2)", flex: "none" }}>
@@ -196,6 +196,20 @@ export function SplitList({ items, amountUsd }: { items: (GiftItem & { heldAsCas
 }
 
 /**
+ * A parked token's decimals, by address first.
+ *
+ * The safe slice is parked as plain USDC, which is the chain's base currency and
+ * so is NOT in `assets.all` — looking it up by symbol alone fell through to a
+ * default of 18 and rendered 20 dollars as "2.00e-11".
+ */
+function decimalsOf(chain: StaxChain, token: GiftToken): number {
+  const address = token.address.toLowerCase();
+  if (address === chain.usdc.address.toLowerCase()) return chain.usdc.decimals;
+  const byAddress = chain.assets.all.find((a) => a.address?.toLowerCase() === address);
+  return byAddress?.decimals ?? assetBySymbol(chain, token.symbol)?.decimals ?? 18;
+}
+
+/**
  * What a gift actually holds: the real quantities parked in the contract. These
  * are the amounts the swaps returned, so they are shown as quantities and never
  * converted back into dollars — the dollars would be today's guess at a past
@@ -205,7 +219,7 @@ export function TokenList({ tokens, chain }: { tokens: GiftToken[]; chain: StaxC
   return (
     <div>
       {tokens.map((t, i) => {
-        const decimals = assetBySymbol(chain, t.symbol)?.decimals ?? 18;
+        const decimals = decimalsOf(chain, t);
         return (
           <div key={t.address} style={line(i)}>
             <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500 }}>{toTile(t.symbol).name}</span>

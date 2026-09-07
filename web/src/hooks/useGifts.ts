@@ -39,6 +39,7 @@ import {
   giftContractFor,
   giftCreateCalls,
   giftReclaimCall,
+  mergeGiftTokens,
   splitGiftBasket,
   type ClaimAuthorisationResponse,
   type CreateGiftRequest,
@@ -259,27 +260,6 @@ function tokensFromReceipt(logs: readonly Log[], chain: StaxChain): GiftToken[] 
   return tokens;
 }
 
-/**
- * Everything a gift parks: what the invest step bought, plus the safe slice held
- * as plain USDC. Folded by address so a duplicate can never be approved twice or
- * paid out twice.
- *
- * This mirrors the fold inside `giftCreateCalls`, and exists because the same
- * list has to reach two places — the contract call and the `funded` report the
- * server matches against it. Building it once and passing it to both is what
- * stops them disagreeing, so `cashToken` is folded in HERE and must not be
- * handed to `giftCreateCalls` as well.
- */
-function mergeGiftTokens(tokens: GiftToken[], cashToken: GiftToken | null): GiftToken[] {
-  const merged: GiftToken[] = [];
-  for (const token of cashToken ? [...tokens, cashToken] : tokens) {
-    const seen = merged.find((m) => m.address.toLowerCase() === token.address.toLowerCase());
-    if (seen) seen.amount = (BigInt(seen.amount) + BigInt(token.amount)).toString();
-    else merged.push({ ...token });
-  }
-  return merged;
-}
-
 export function useSendGift(): UseSendGift {
   const demo = useDemo();
   const chain = useChain();
@@ -451,9 +431,10 @@ export function useSendGift(): UseSendGift {
         }
         }
 
-        // 4. Everything that gets parked: what was bought, plus the cash slice.
-        //    Merged once here and used for BOTH the contract call and the report
-        //    to the server, so the two can never disagree about what was parked.
+        // 4. Everything that gets parked: what was bought, plus the safe slice
+        //    held as plain USDC. Merged ONCE, with the shared fold, and the same
+        //    array feeds the approvals, `create`, the report the server matches
+        //    against the contract, and the success screen — so nothing can drift.
         const parked = mergeGiftTokens(tokens, reserved.cashToken);
         if (parked.length === 0) {
           throw new Error("There was nothing to put aside. Nothing has been taken — please try again.");
@@ -469,8 +450,8 @@ export function useSendGift(): UseSendGift {
             recipientHash: reserved.recipientHash,
             unlockAt: reserved.unlockAt,
             reclaimAfter: reserved.reclaimAfter,
-            // Already merged above, so the cash slice must NOT be passed again
-            // here — giftCreateCalls would fold it in a second time.
+            // Already merged above. giftCreateCalls folds with the same exported
+            // function, so passing the merged list is a no-op rather than a risk.
             tokens: parked,
             note: reserved.note,
           }),

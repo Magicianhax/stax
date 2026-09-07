@@ -333,13 +333,34 @@ export interface GiftCall {
 }
 
 /**
+ * Fold a token list (plus the cash slice, if any) into one entry per address, amounts summed.
+ * `create` would take duplicates, but they would need two approvals and pay out twice.
+ *
+ * Call this ONCE and use the result everywhere — the approvals, `create`, the `funded` body
+ * the server matches against the contract, and anything the success screen shows. A second
+ * implementation of the same fold could drift, and the failure would only surface after two
+ * on-chain transactions had already happened. Idempotent, so re-merging is harmless.
+ */
+export function mergeGiftTokens(tokens: GiftToken[], cashToken: GiftToken | null): GiftToken[] {
+  const merged: GiftToken[] = [];
+  for (const token of cashToken ? [...tokens, cashToken] : tokens) {
+    const seen = merged.find((m) => m.address.toLowerCase() === token.address.toLowerCase());
+    if (seen) seen.amount = (BigInt(seen.amount) + BigInt(token.amount)).toString();
+    else merged.push({ ...token });
+  }
+  return merged;
+}
+
+/**
  * Step 4 of giving: one approval per parked token, then `create`. Send this AFTER the
  * normal invest user op has landed, with `tokens` read from that receipt's `LegFilled`
  * events — the bought amounts are not knowable before execution.
  *
- * Pass `cashToken` straight from CreateGiftResponse. It is merged in here rather than left
- * to the caller, because forgetting it would park a gift missing its whole safe slice while
- * still charging the giver for it. A basket with no safe tier simply passes null.
+ * `cashToken` may be passed here, but prefer calling `mergeGiftTokens` yourself and handing
+ * the result in as `tokens`: the same list has to reach the `funded` report the server
+ * matches against the contract, and building it once is what stops the two disagreeing.
+ * Either way the fold below is the same function, and it is idempotent — a list that is
+ * already merged passes through unchanged, so it can never double-count.
  */
 export function giftCreateCalls(input: {
   giftContract: `0x${string}`;
@@ -354,14 +375,7 @@ export function giftCreateCalls(input: {
   cashToken?: GiftToken | null;
   note: string;
 }): GiftCall[] {
-  // One entry per token address: `create` rejects nothing here, but a duplicate address
-  // would need two approvals and pay out twice, so fold them into a single amount.
-  const merged: GiftToken[] = [];
-  for (const token of [...input.tokens, ...(input.cashToken ? [input.cashToken] : [])]) {
-    const seen = merged.find((m) => m.address.toLowerCase() === token.address.toLowerCase());
-    if (seen) seen.amount = (BigInt(seen.amount) + BigInt(token.amount)).toString();
-    else merged.push({ ...token });
-  }
+  const merged = mergeGiftTokens(input.tokens, input.cashToken ?? null);
 
   const approvals: GiftCall[] = merged.map((t) => ({
     to: t.address,
