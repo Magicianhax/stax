@@ -4,17 +4,31 @@
 // authorize. You delegate your embedded wallet once (Privy session signer), set a
 // recurring plan (amount · cadence · risk ceiling), and a server job runs it. The
 // delegation is revocable any time, and every run is gated by hard limits.
+//
+// Two targets: a plain-language GOAL (Vera re-allocates each run) or a BASKET (fixed
+// weights, no Vera call; the basket's own risk must sit under the ceiling or every run
+// would be refused — the form says so before you start).
 import { useEffect, useState, useCallback } from "react";
 import { useSessionSigners, usePrivy } from "@privy-io/react-auth";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { useUsdcBalance } from "@/hooks/useBalances";
-import { useToast, Icon, Seal, BottomSheet, ChainLaunching, ChainMark, ProjectionChart } from "@/components/design";
+import { useToast, Icon, Seal, BottomSheet, ChainLaunching, ChainMark, LogoCluster, ProjectionChart } from "@/components/design";
 import { Reveal } from "@/components/motion";
 import { TokenLogo } from "@/components/lite/TokenLogo";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { displayFor } from "@/lib/displayAssets";
 import { authedFetch } from "@/lib/authedFetch";
-import { CADENCE_LABEL, nextRunAfter, type Cadence, type AutopilotConfig } from "@/lib/autopilot";
+import {
+  CADENCE_LABEL,
+  checkBasketCeiling,
+  nextRunAfter,
+  type AutopilotBasketSummary,
+  type Cadence,
+  type AutopilotConfig,
+} from "@/lib/autopilot";
+import { riskWord, type Basket } from "@/lib/baskets";
+import { useBaskets } from "@/hooks/useBaskets";
+import { BasketRailTile, clusterOf } from "./basketPrimitives";
 import { getChain, explorerTx, type ChainKey } from "@/lib/chains";
 import { useChainKey } from "@/lib/chains/active";
 import { DEMO_NOW, projection } from "@/lib/demoSeries";
@@ -68,13 +82,28 @@ const RISK_TIERS: { label: string; bps: number }[] = [
 // Granting it as a session signer lets the backend sign for the user's TEE wallet.
 const PRIVY_SIGNER_ID = process.env.NEXT_PUBLIC_PRIVY_SIGNER_ID;
 
+type Mode = "goal" | "basket";
+
 // Quick-start presets — tap one to fill the plan below. risk = index into RISK_TIERS.
-const TEMPLATES: { name: string; goal: string; amount: string; cadence: Cadence; risk: number }[] = [
+// `basket` = a curated slug: the template switches to Basket mode and selects it.
+const TEMPLATES: { name: string; goal: string; amount: string; cadence: Cadence; risk: number; basket?: string }[] = [
   { name: "Steady saver", goal: "Grow my long-term plan", amount: "25", cadence: "weekly", risk: 1 },
   { name: "Play it safe", goal: "Safe, steady growth", amount: "20", cadence: "weekly", risk: 0 },
-  { name: "Big tech DCA", goal: "Weekly into big tech names", amount: "50", cadence: "weekly", risk: 2 },
+  { name: "Big Tech basket", goal: "Invest in Big Tech", amount: "50", cadence: "weekly", risk: 2, basket: "big-tech" },
   { name: "Daily dollars", goal: "A little into the market each day", amount: "5", cadence: "daily", risk: 1 },
 ];
+
+/** What the form needs from a picked basket — a local Basket, or the summary the API returned. */
+type BasketPick = Pick<Basket, "id" | "name" | "items" | "riskScore">;
+
+/** The short id minted by `publish()` — its URL is `/app?b=<id>`. */
+function shortIdFromUrl(url: string): string | null {
+  try {
+    return new URL(url, "https://stax.local").searchParams.get("b");
+  } catch {
+    return null;
+  }
+}
 
 type RunRow = {
   ranAt: number;
@@ -86,6 +115,9 @@ type RunRow = {
   holdings?: { symbol: string; weightPct: number; amountUsd: number }[];
   /** Network the run was placed on (older rows may lack it → the config's chain). */
   chain?: ChainKey;
+  /** Set when the run targeted a basket (bought it, or refused it). */
+  basketId?: string;
+  basketName?: string;
 };
 
 export function AutopilotScreen({
@@ -122,7 +154,14 @@ export function AutopilotScreen({
   const [config, setConfig] = useState<AutopilotConfig | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Baskets the user can point the autopilot at: theirs (localStorage) + Made by Stax.
+  const { mine: myBaskets, curated: curatedBaskets, byId, publish } = useBaskets();
+  // The basket the ACTIVE autopilot targets, as the API resolved it (may not be in localStorage).
+  const [apBasket, setApBasket] = useState<AutopilotBasketSummary | null>(null);
+
   // Form state.
+  const [mode, setMode] = useState<Mode>("goal");
+  const [basketId, setBasketId] = useState<string | null>(null);
   const [goal, setGoal] = useState("Grow my long-term plan");
   const [amount, setAmount] = useState("25");
   const [cadence, setCadence] = useState<Cadence>("weekly");
@@ -141,12 +180,18 @@ export function AutopilotScreen({
         const json = await res.json();
         if (cancelled) return;
         const ap = json?.autopilot as AutopilotConfig | null;
+        const summary = (json?.basket ?? null) as AutopilotBasketSummary | null;
         if (ap) {
           setConfig(ap);
           setGoal(ap.goal);
           setAmount(String(ap.amountUsd));
           setCadence(ap.cadence);
           setRisk(Math.max(0, RISK_TIERS.findIndex((t) => t.bps === ap.riskCeilingBps)) || 1);
+          setApBasket(summary);
+          if (ap.basketId) {
+            setMode("basket");
+            setBasketId(ap.basketId);
+          }
         }
       } catch {
         /* leave defaults */
@@ -161,6 +206,14 @@ export function AutopilotScreen({
 
   const amountNum = Number(amount) || 0;
   const riskBps = RISK_TIERS[risk].bps;
+  // The picked basket: a local one by id, else the API's summary of the saved target.
+  const pick: BasketPick | undefined = byId(basketId ?? undefined) ?? (apBasket && apBasket.id === basketId ? apBasket : undefined);
+  const basketMode = mode === "basket";
+  // Fixed weights = known risk: refuse up front instead of letting every run be skipped.
+  const ceiling = basketMode && pick ? checkBasketCeiling(pick.riskScore, riskBps) : { ok: true };
+  const basketBlocked = basketMode && (!pick || !ceiling.ok);
+  // Projection follows what will actually be bought: the basket's risk, else the ceiling.
+  const projectionBps = basketMode && pick ? pick.riskScore : riskBps;
   const nextRun = nextRunAfter(Math.floor(now / 1000), cadence) * 1000;
   const active = Boolean(config?.active);
   // The autopilot runs on the network it was saved on, not the one the UI is
@@ -169,6 +222,8 @@ export function AutopilotScreen({
   const elsewhere = active && apChain.key !== chain.key;
 
   const applyTemplate = (t: (typeof TEMPLATES)[number]) => {
+    setMode(t.basket ? "basket" : "goal");
+    setBasketId(t.basket ? `${chain.key}:${t.basket}` : null);
     setGoal(t.goal);
     setAmount(t.amount);
     setCadence(t.cadence);
@@ -234,8 +289,29 @@ export function AutopilotScreen({
       notify("Set an amount", "info");
       return;
     }
+    if (basketMode && !pick) {
+      notify("Pick a basket", "info");
+      return;
+    }
+    if (basketMode && !ceiling.ok) {
+      notify("Raise the ceiling or pick a steadier basket", "info");
+      return;
+    }
     setBusy(true);
     try {
+      // The server only knows curated ids and stored short ids. A personal basket
+      // (localStorage) is published first so the cron can load it by id.
+      let targetId: string | null = null;
+      if (basketMode && pick) {
+        const local = byId(pick.id);
+        const curated = local?.author === "stax" || pick.id.startsWith(`${chain.key}:`);
+        if (curated || apBasket?.id === pick.id) targetId = pick.id;
+        else if (local) {
+          const url = await publish(local);
+          targetId = url ? shortIdFromUrl(url) : null;
+          if (!targetId) throw new Error("Couldn't save your basket for autopilot. Try again.");
+        } else throw new Error("That basket isn't available anymore.");
+      }
       const res = await authedFetch("/api/autopilot", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -244,7 +320,8 @@ export function AutopilotScreen({
           walletId,
           owner: ownerAddress,
           smartAccount,
-          goal,
+          goal: basketMode && pick ? `Invest in ${pick.name}` : goal,
+          basketId: targetId,
           amountUsd: amountNum,
           cadence,
           riskCeilingBps: RISK_TIERS[risk].bps,
@@ -253,6 +330,9 @@ export function AutopilotScreen({
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error ?? "Couldn't save autopilot.");
       setConfig(json.autopilot as AutopilotConfig);
+      const savedBasket = (json.basket ?? null) as AutopilotBasketSummary | null;
+      setApBasket(savedBasket);
+      if (savedBasket) setBasketId(savedBasket.id);
       haptic.success();
       notify("Autopilot is on", "check");
     } catch (e) {
@@ -272,6 +352,7 @@ export function AutopilotScreen({
         /* revoking the session signer is best-effort */
       }
       setConfig(null);
+      setApBasket(null);
       haptic.medium();
       notify("Autopilot is off", "check");
     } finally {
@@ -390,6 +471,12 @@ export function AutopilotScreen({
                 <div style={sectionLabel}>Your plan</div>
                 <div className="card" style={{ padding: 18 }}>
                   <div style={{ fontWeight: 700, fontSize: 16.5, textAlign: "center", letterSpacing: "-.01em" }}>{config.goal}</div>
+                  {apBasket && (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 8, fontSize: 12.5, color: "var(--ink-2)" }}>
+                      <LogoCluster assets={clusterOf(apBasket)} size={20} max={4} />
+                      <span>{apBasket.name} · {riskWord(apBasket.riskScore)}</span>
+                    </div>
+                  )}
                   <div style={{ display: "flex", marginTop: 16, textAlign: "center" }}>
                     <div style={{ flex: 1, borderRight: "1px solid var(--line-2)" }}>
                       <div className="tnum" style={{ fontWeight: 700, fontSize: 17 }}>{usd(config.amountUsd)}</div>
@@ -409,7 +496,7 @@ export function AutopilotScreen({
                   </div>
                 </div>
                 <div style={{ marginTop: 10 }}>
-                  <Projection amount={config.amountUsd} cadence={config.cadence} riskBps={config.riskCeilingBps} />
+                  <Projection amount={config.amountUsd} cadence={config.cadence} riskBps={apBasket?.riskScore ?? config.riskCeilingBps} />
                 </div>
               </div>
 
@@ -426,11 +513,17 @@ export function AutopilotScreen({
                       const skipped = r.status === "skipped";
                       const when = new Date(r.ranAt * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
                       const bought = (r.holdings ?? []).map((h) => displayFor(h.symbol).name);
+                      // A basket run shows the basket (name + logos) instead of listing what it bought.
+                      const runBasket = r.basketId ? (byId(r.basketId) ?? (apBasket?.id === r.basketId ? apBasket : undefined)) : undefined;
+                      const basketItems = runBasket?.items ?? (r.basketId && r.holdings?.length ? r.holdings : undefined);
+                      const basketName = r.basketName ?? runBasket?.name;
                       const sub = okRun
-                        ? bought.length
-                          ? `${bought.slice(0, 2).join(", ")}${bought.length > 2 ? ` +${bought.length - 2}` : ""}`
-                          : `${Math.round((r.assessedRiskBps ?? 0) / 100)}% risk`
-                        : (r.reason ?? "");
+                        ? basketName
+                          ? basketName
+                          : bought.length
+                            ? `${bought.slice(0, 2).join(", ")}${bought.length > 2 ? ` +${bought.length - 2}` : ""}`
+                            : `${Math.round((r.assessedRiskBps ?? 0) / 100)}% risk`
+                        : [basketName, r.reason].filter(Boolean).join(" · ");
                       return (
                         <button
                           key={`${r.ranAt}-${i}`}
@@ -452,6 +545,9 @@ export function AutopilotScreen({
                               {sub ? ` · ${sub}` : ""}
                             </div>
                           </div>
+                          {basketItems && basketItems.length > 0 && (
+                            <LogoCluster assets={clusterOf({ items: basketItems })} size={20} max={3} showRest={false} />
+                          )}
                           <Icon name="chevR" size={16} style={{ color: "var(--ink-3)", flex: "none" }} />
                         </button>
                       );
@@ -508,15 +604,55 @@ export function AutopilotScreen({
           <div style={{ padding: "20px 22px 0" }}>
             <div style={sectionLabel}>Your plan</div>
             <div className="card" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 16 }}>
-              <label style={{ display: "block" }}>
-                <span style={{ fontSize: 13, color: "var(--ink-2)" }}>Goal</span>
-                <input
-                  value={goal}
-                  onChange={(e) => { setGoal(e.target.value); setActiveTemplate(null); }}
-                  maxLength={120}
-                  style={{ width: "100%", marginTop: 6, padding: "11px 12px", borderRadius: 12, border: "none", background: "var(--surface-2)", outline: "none", fontSize: 14.5, color: "var(--ink)" }}
+              {/* what each run buys: Vera's take on a goal, or a basket's fixed weights */}
+              <div className="seg" role="group" aria-label="What to invest in">
+                <span
+                  className="seg-thumb"
+                  style={{ width: "calc((100% - 8px) / 2)", left: 4, transform: `translateX(${basketMode ? "100%" : "0"})` }}
                 />
-              </label>
+                {(["goal", "basket"] as const).map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => { haptic.select(); setMode(m); setActiveTemplate(null); }}
+                    className={`seg-item ${mode === m ? "is-on" : ""}`}
+                    aria-pressed={mode === m}
+                  >
+                    {m === "goal" ? "Goal" : "Basket"}
+                  </button>
+                ))}
+              </div>
+
+              {basketMode ? (
+                <div>
+                  <span style={{ fontSize: 13, color: "var(--ink-2)" }}>Basket to buy each run</span>
+                  {/* rail bleeds to the card edges so tiles can scroll under the padding */}
+                  <div style={{ display: "flex", gap: 10, margin: "6px -16px -4px", padding: "2px 16px 6px", overflowX: "auto", scrollSnapType: "x proximity" }}>
+                    {myBaskets.map((b) => (
+                      <BasketRailTile key={b.id} basket={b} selected={basketId === b.id} onClick={() => { haptic.select(); setBasketId(b.id); setActiveTemplate(null); }} />
+                    ))}
+                    {myBaskets.length > 0 && curatedBaskets.length > 0 && (
+                      <span aria-hidden style={{ flex: "none", width: 1, alignSelf: "stretch", margin: "6px 2px", background: "var(--line-2)" }} />
+                    )}
+                    {curatedBaskets.map((b) => (
+                      <BasketRailTile key={b.id} basket={b} selected={basketId === b.id} onClick={() => { haptic.select(); setBasketId(b.id); setActiveTemplate(null); }} />
+                    ))}
+                    <span aria-hidden style={{ flex: "none", width: 6 }} />
+                  </div>
+                  <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 8 }}>
+                    {myBaskets.length > 0 ? "Yours first, then made by Stax." : "Made by Stax. Save a plan from Vera to see yours here."}
+                  </div>
+                </div>
+              ) : (
+                <label style={{ display: "block" }}>
+                  <span style={{ fontSize: 13, color: "var(--ink-2)" }}>Goal</span>
+                  <input
+                    value={goal}
+                    onChange={(e) => { setGoal(e.target.value); setActiveTemplate(null); }}
+                    maxLength={120}
+                    style={{ width: "100%", marginTop: 6, padding: "11px 12px", borderRadius: 12, border: "none", background: "var(--surface-2)", outline: "none", fontSize: 14.5, color: "var(--ink)" }}
+                  />
+                </label>
+              )}
 
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
@@ -557,6 +693,15 @@ export function AutopilotScreen({
                     </button>
                   ))}
                 </div>
+                {basketMode && pick && (
+                  <div aria-live="polite" style={{ marginTop: 8, fontSize: 12.5, lineHeight: 1.45, color: ceiling.ok ? "var(--ink-2)" : "var(--neg)" }}>
+                    <span style={{ fontWeight: 600, color: ceiling.ok ? "var(--ink)" : "var(--neg)" }}>
+                      {pick.name} is {riskWord(pick.riskScore)}
+                    </span>
+                    {" · "}ceiling {RISK_TIERS[risk].label}
+                    {!ceiling.ok && <div style={{ marginTop: 2 }}>Vera would refuse every run. Raise the ceiling or pick a steadier basket.</div>}
+                  </div>
+                )}
               </div>
             </div>
             {/* preview: what the first run will look like */}
@@ -566,17 +711,17 @@ export function AutopilotScreen({
             >
               <Icon name="clock" size={16} stroke={2} style={{ color: "var(--primary)", flex: "none" }} />
               <span className="tnum">
-                Next run {shortDay(nextRun)} · {wholeUsd(amountNum)} · {RISK_TIERS[risk].label}
+                Next run {shortDay(nextRun)} · {wholeUsd(amountNum)} · {basketMode ? (pick?.name ?? "pick a basket") : RISK_TIERS[risk].label}
               </span>
             </div>
 
             <Reveal style={{ marginTop: 14 }}>
-              <Projection amount={amountNum} cadence={cadence} riskBps={riskBps} />
+              <Projection amount={amountNum} cadence={cadence} riskBps={projectionBps} />
             </Reveal>
 
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 10, lineHeight: 1.5 }}>
-              Each run puts in {usd(amountNum)} ({usd(feeUsd(amountNum))} fee, no network cost) only if your balance covers it and Vera’s
-              risk stays at or under your ceiling. Capped at {usd(amountNum * 2)} per period.
+              Each run puts in {usd(amountNum)} ({usd(feeUsd(amountNum))} fee, no network cost) only if your balance covers it and{" "}
+              {basketMode ? "the basket’s risk" : "Vera’s risk"} stays at or under your ceiling. Capped at {usd(amountNum * 2)} per period.
             </div>
           </div>
           </>
@@ -586,7 +731,7 @@ export function AutopilotScreen({
           <div style={{ padding: "22px 22px 0" }}>
             {!active ? (
               // One CTA: it authorizes when that's the next step, and starts once it's done.
-              <button className="btn btn-primary btn-block btn-lg tap" disabled={busy} onClick={delegated ? save : authorize}>
+              <button className="btn btn-primary btn-block btn-lg tap" disabled={busy || (delegated && basketBlocked)} onClick={delegated ? save : authorize}>
                 {busy ? <Spinner small /> : delegated ? "Start autopilot" : "Authorize Vera"}
               </button>
             ) : (
@@ -628,6 +773,12 @@ export function AutopilotScreen({
                     {ok ? `Invested ${usd(r.amountUsd)}` : skipped ? "Run skipped" : "Run failed"}
                   </div>
                   <div style={{ fontSize: 12.5, color: "var(--ink-2)" }}>{when}</div>
+                  {r.basketName && (
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--ink-2)" }}>
+                      {hs.length > 0 && <LogoCluster assets={clusterOf({ items: hs })} size={18} max={4} showRest={false} />}
+                      <span>Basket · {r.basketName}</span>
+                    </div>
+                  )}
                 </div>
 
                 {!ok && r.reason && (

@@ -194,15 +194,24 @@ export function BasketTile({ basket, onClick }: { basket: Basket; onClick: () =>
   );
 }
 
-/** Compact tile for the Home rail (fixed width, scrolls horizontally). */
-export function BasketRailTile({ basket, onClick }: { basket: Basket; onClick: () => void }) {
+/** Compact tile for the Home rail (fixed width, scrolls horizontally). `selected` draws the primary ring (pickers). */
+export function BasketRailTile({ basket, onClick, selected }: { basket: Basket; onClick: () => void; selected?: boolean }) {
   const perf = useBasketPerformance(basket);
   return (
     <button
       onClick={onClick}
       className="card tap"
       aria-label={`${basket.name}, ${riskWord(basket.riskScore)}`}
-      style={{ width: 164, flex: "none", textAlign: "left", padding: 14, display: "block", scrollSnapAlign: "start" }}
+      aria-pressed={selected === undefined ? undefined : selected}
+      style={{
+        width: 164,
+        flex: "none",
+        textAlign: "left",
+        padding: 14,
+        display: "block",
+        scrollSnapAlign: "start",
+        ...(selected ? { boxShadow: "var(--glass-shadow), var(--glass-hi), inset 0 0 0 1.5px var(--primary)" } : {}),
+      }}
     >
       {/* 136px inside the padding: three 22px tiles (~56px) + a compact chip. */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, minWidth: 0 }}>

@@ -7,6 +7,7 @@ import "server-only";
 //   saveBasket(basket, ownerUserId)  → id   (retries on the astronomically rare id collision)
 //   getBasket(id)                    → the basket re-validated against today's registry
 //                                      (risk recomputed, author "shared"), or a reason
+//   getOwnedBasket(id, userId)       → same, but null unless `userId` saved it (autopilot targets)
 import { randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db, baskets } from "@/lib/db";
@@ -58,13 +59,22 @@ export async function saveBasket(basket: Basket, ownerUserId: string | null): Pr
   throw new Error("could not allocate a basket id");
 }
 
-/** Load a stored basket by short id, re-validated so risk/weights match today's registry. Null when unknown. */
-export async function getBasket(id: string): Promise<DecodeResult | null> {
-  const [row] = await db.select().from(baskets).where(eq(baskets.id, id)).limit(1);
-  if (!row) return null;
+function rowToResult(row: typeof baskets.$inferSelect): DecodeResult {
   const source = row.source && typeof row.source === "object" ? (row.source as { goal?: unknown }) : undefined;
   return sharedBasketFrom(
     { id: row.id, chain: row.chain, name: row.name, tagline: row.tagline, icon: row.icon, items: row.items, source },
     Math.floor(row.createdAt.getTime() / 1000),
   );
+}
+
+/** Load a stored basket by short id, re-validated so risk/weights match today's registry. Null when unknown. */
+export async function getBasket(id: string): Promise<DecodeResult | null> {
+  const [row] = await db.select().from(baskets).where(eq(baskets.id, id)).limit(1);
+  return row ? rowToResult(row) : null;
+}
+
+/** Like getBasket, but null unless `userId` is the row's owner — what an autopilot may target. */
+export async function getOwnedBasket(id: string, userId: string): Promise<DecodeResult | null> {
+  const [row] = await db.select().from(baskets).where(eq(baskets.id, id)).limit(1);
+  return row && row.ownerUserId === userId ? rowToResult(row) : null;
 }

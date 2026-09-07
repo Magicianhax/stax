@@ -277,6 +277,11 @@ export const CURATED_BASKETS: Record<ChainKey, Basket[]> = {
   mantle: curated("mantle", MANTLE_SEEDS),
 };
 
+/** A curated basket by its static id ("base:big-tech") on `chain`, unfiltered — check `isBasketInvestable` before buying. */
+export function curatedBasketById(chain: ChainKey, id: string): Basket | undefined {
+  return CURATED_BASKETS[chain].find((b) => b.id === id);
+}
+
 /** True when every holding is buyable on `chain` right now. */
 export function isBasketInvestable(chain: StaxChain, basket: { items: BasketItem[] }): boolean {
   return basket.items.length > 0 && basket.items.every((i) => isRoutable(chain, i.symbol));

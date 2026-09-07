@@ -74,3 +74,31 @@ Never show a number you cannot compute: fall back to "Not enough history yet".
 
 `assessedRisk = max(allocation.riskScore, riskScoreFor(chain, allocation.allocations))`, clamp
 to ceiling. Reject allocations containing non-routable symbols with a 400 that names them.
+
+## Autopilot into a basket — `autopilots.basket_id`
+
+An autopilot can target a basket instead of a plain-language goal. `autopilots.basket_id`
+(nullable text, migration `0004_awesome_molten_man`) holds a curated id (`"base:big-tech"`,
+`CURATED_BASKETS[chain]`) or a stored basket's 8-char short id; `goal` stays non-null and
+carries a display string ("Invest in Big Tech"). No FK: curated ids live in code, and a
+deleted stored basket is handled at run time.
+
+- **API** (`/api/autopilot`): `basketId?: string | null` on POST. It must resolve to a curated
+  basket on the autopilot's chain or a stored basket the caller saved (`baskets.owner_user_id`),
+  else 400. GET/POST return `basket: { id, chain, name, items, riskScore } | null` for display.
+  The app publishes a personal (localStorage) basket first (`useBaskets().publish`) so the cron
+  can load it by short id.
+- **Executor** (`lib/server/autopilotPlan.ts` → `planForAutopilot(cfg)`): a basket run never calls
+  Vera. `basketToAllocation(basket, amountUsd)` becomes the allocation, its `riskScore` is checked
+  against `riskCeilingBps` (`checkBasketCeiling`, reason "Basket risk above your ceiling" → run
+  skipped), then the usual `checkBounds` → `buildLegs` → `investWithAI` path. A basket that no
+  longer exists logs an error run "Basket no longer exists" and pauses the autopilot
+  (`active=false`); one that exists but holds a non-routable symbol today is skipped, not paused.
+- **Run log**: `autopilot_runs` has no metadata column, so a basket run stores
+  `{"basketId","basketName","reason"}` as JSON in `reason` (encoded/decoded in `autopilotStore`);
+  goal runs keep plain-text reasons. `listRuns` exposes `basketId` / `basketName`.
+- **UI** (`AutopilotScreen`): a "Goal | Basket" segmented choice. Basket mode shows a rail of
+  `BasketRailTile`s (yours, then made by Stax), the basket's risk word next to the chosen ceiling
+  ("Big Tech is Adventurous · ceiling Bolder"), a warning + disabled Start when the basket's risk
+  is above the ceiling, and "Next run … · $25 · Big Tech". Run rows show the basket's logos + name.
+

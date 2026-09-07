@@ -1,0 +1,1 @@
+ALTER TABLE "autopilots" ADD COLUMN "basket_id" text;

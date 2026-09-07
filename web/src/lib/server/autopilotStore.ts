@@ -13,6 +13,11 @@ import "server-only";
 //
 // Time: AutopilotConfig / RunLog carry unix SECONDS; the tables use timestamptz.
 // Money: numeric columns come back as strings; Number() them here, once.
+//
+// Basket runs: autopilot_runs has no metadata column, so a run that targeted a
+// basket stores `{"basketId","basketName","reason"}` as JSON in `reason`
+// (encodeReason / decodeReason). Goal runs keep the plain-text reason; old rows
+// are untouched.
 import { and, desc, eq, isNull, lt, lte, or, sql } from "drizzle-orm";
 import type { AutopilotConfig } from "@/lib/autopilot";
 import { isChainKey, type ChainKey } from "@/lib/chains";
@@ -39,6 +44,7 @@ function rowToConfig(r: AutopilotRow): AutopilotConfig {
     smartAccount: r.smartAccount as `0x${string}`,
     chain: chainOf(r.chain),
     goal: r.goal,
+    basketId: r.basketId,
     amountUsd: Number(r.amountUsd),
     cadence: r.cadence as AutopilotConfig["cadence"],
     riskCeilingBps: r.riskCeilingBps,
@@ -61,6 +67,7 @@ function configToRow(c: AutopilotConfig): NewAutopilotRow {
     smartAccount: c.smartAccount,
     chain: c.chain,
     goal: c.goal,
+    basketId: c.basketId ?? null,
     amountUsd: String(c.amountUsd),
     cadence: c.cadence,
     riskCeilingBps: c.riskCeilingBps,
@@ -100,6 +107,11 @@ export async function upsertAutopilot(cfg: AutopilotConfig): Promise<AutopilotCo
 
 export async function deleteAutopilot(userId: string): Promise<void> {
   await db.delete(autopilots).where(eq(autopilots.userId, userId));
+}
+
+/** Stop scheduling runs (the user sees it off and can re-save). Used when a basket target is gone. */
+export async function pauseAutopilot(id: string): Promise<void> {
+  await db.update(autopilots).set({ active: false }).where(eq(autopilots.id, id));
 }
 
 /** A claim older than this is considered abandoned (crashed run) and may be re-claimed. */
@@ -160,6 +172,43 @@ export interface RunLog {
   reason?: string;
   txHash?: string;
   holdings?: RunHolding[];
+  /** Set when the run bought (or refused) a basket rather than a Vera goal. */
+  basketId?: string;
+  basketName?: string;
+}
+
+interface BasketReason {
+  basketId: string;
+  basketName?: string;
+  reason?: string;
+}
+
+/** Fold the basket fields into the `reason` column (JSON) — plain text when there is no basket. */
+function encodeReason(entry: Pick<RunLog, "reason" | "basketId" | "basketName">): string | null {
+  if (!entry.basketId) return entry.reason ?? null;
+  const packed: BasketReason = { basketId: entry.basketId };
+  if (entry.basketName) packed.basketName = entry.basketName;
+  if (entry.reason) packed.reason = entry.reason;
+  return JSON.stringify(packed);
+}
+
+function decodeReason(raw: string | null): Pick<RunLog, "reason" | "basketId" | "basketName"> {
+  if (!raw) return {};
+  if (raw.startsWith("{")) {
+    try {
+      const p = JSON.parse(raw) as Partial<BasketReason>;
+      if (typeof p.basketId === "string") {
+        return {
+          basketId: p.basketId,
+          basketName: typeof p.basketName === "string" ? p.basketName : undefined,
+          reason: typeof p.reason === "string" ? p.reason : undefined,
+        };
+      }
+    } catch {
+      /* not ours — fall through to plain text */
+    }
+  }
+  return { reason: raw };
 }
 
 /** Recent runs for a user, newest first (the audit trail shown in the app). */
@@ -177,7 +226,7 @@ export async function listRuns(userId: string, limit = 20): Promise<RunLog[]> {
     amountUsd: Number(r.amountUsd),
     assessedRiskBps: r.assessedRiskBps ?? undefined,
     status: r.status as RunLog["status"],
-    reason: r.reason ?? undefined,
+    ...decodeReason(r.reason),
     txHash: r.txHash ?? undefined,
     holdings: Array.isArray(r.holdings) ? (r.holdings as RunHolding[]) : undefined,
   }));
@@ -195,7 +244,7 @@ export async function logRun(entry: RunLog): Promise<void> {
       amountUsd: String(entry.amountUsd),
       assessedRiskBps: entry.assessedRiskBps ?? null,
       status: entry.status,
-      reason: entry.reason ?? null,
+      reason: encodeReason(entry),
       txHash: entry.txHash ?? null,
       holdings: entry.holdings ?? null,
     });

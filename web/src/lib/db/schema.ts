@@ -70,7 +70,14 @@ export const autopilots = pgTable(
     walletId: text("wallet_id").notNull(),
     owner: text("owner").notNull(),
     smartAccount: text("smart_account").notNull(),
+    /** Display string ("Invest in Big Tech" when a basket is set); Vera's prompt otherwise. */
     goal: text("goal").notNull(),
+    /**
+     * Set when the autopilot invests into a fixed basket instead of a Vera goal: a curated
+     * basket id ("base:big-tech", see CURATED_BASKETS) or a stored `baskets.id`. No FK —
+     * curated ids live in code, and a deleted stored basket pauses the autopilot at run time.
+     */
+    basketId: text("basket_id"),
     amountUsd: numeric("amount_usd").notNull(),
     cadence: text("cadence").notNull(),
     riskCeilingBps: integer("risk_ceiling_bps").notNull(),
@@ -301,6 +308,62 @@ export const depositAddresses = pgTable(
   ],
 );
 
+/**
+ * "Gift a basket" (docs/GIFTS.md). One row per gift, keyed by the on-chain `giftId`
+ * (0x + 32 random bytes) so the database row, the TimelockGift entry and the share
+ * link are all the same id.
+ *
+ * The recipient's email is never stored. `recipient_email_hash` is a deterministic,
+ * peppered SHA-256 of the normalised address — that is what makes "gifts addressed
+ * to me" a single indexed lookup. `recipient_salt` is per gift and produces the
+ * DIFFERENT hash that goes on-chain, so two gifts to the same person are unlinkable
+ * to anyone reading Base. `recipient_email_masked` ("a•••@gmail.com") is shown back
+ * to the giver only.
+ *
+ * `status` walks pending → funded → (claimed | reclaimed); `failed` is a gift whose
+ * parking transaction never landed.
+ */
+export const gifts = pgTable(
+  "gifts",
+  {
+    /** The on-chain giftId: 0x + 64 hex chars. */
+    id: text("id").primaryKey(),
+    chain: text("chain").notNull(),
+    fromUserId: text("from_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** The giver's smart account, lowercased — the only address that may reclaim. */
+    fromAddress: text("from_address").notNull(),
+    recipientEmailHash: text("recipient_email_hash").notNull(),
+    recipientSalt: text("recipient_salt").notNull(),
+    recipientEmailMasked: text("recipient_email_masked").notNull(),
+    /** Curated id ("base:big-tech") or a stored `baskets.id`. No FK, same reasoning as autopilots. */
+    basketId: text("basket_id"),
+    basketName: text("basket_name").notNull(),
+    amountUsd: numeric("amount_usd").notNull(),
+    note: text("note"),
+    unlockAt: timestamp("unlock_at", { withTimezone: true }).notNull(),
+    reclaimAfter: timestamp("reclaim_after", { withTimezone: true }).notNull(),
+    status: text("status").notNull().default("pending"),
+    createTxHash: text("create_tx_hash"),
+    claimTxHash: text("claim_tx_hash"),
+    claimedByUserId: text("claimed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** What was parked: [{ symbol, address, amount }] with `amount` in raw token units. */
+    tokens: jsonb("tokens"),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("gifts_chain_recipient_email_hash_idx").on(t.chain, t.recipientEmailHash),
+    index("gifts_chain_from_user_id_idx").on(t.chain, t.fromUserId),
+    chainCheck("gifts_chain_check", t.chain),
+    check(
+      "gifts_status_check",
+      sql`${t.status} in ('pending', 'funded', 'claimed', 'reclaimed', 'failed')`,
+    ),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type SmartAccount = typeof smartAccounts.$inferSelect;
@@ -323,3 +386,5 @@ export type WaitlistEvent = typeof waitlistEvents.$inferSelect;
 export type NewWaitlistEvent = typeof waitlistEvents.$inferInsert;
 export type DepositAddressRow = typeof depositAddresses.$inferSelect;
 export type NewDepositAddressRow = typeof depositAddresses.$inferInsert;
+export type GiftRow = typeof gifts.$inferSelect;
+export type NewGiftRow = typeof gifts.$inferInsert;

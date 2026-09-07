@@ -38,8 +38,16 @@ export interface AutopilotConfig {
   smartAccount: `0x${string}`;
   /** Chain this autopilot runs on (Base default; Mantle legacy). */
   chain: ChainKey;
-  /** Plain-language goal Vera re-allocates against each run. */
+  /**
+   * Plain-language goal Vera re-allocates against each run. When `basketId` is set this
+   * is a display string ("Invest in Big Tech") and Vera is never asked.
+   */
   goal: string;
+  /**
+   * Invest into a fixed basket instead of a Vera goal: a curated id ("base:big-tech") or a
+   * stored basket's short id. Each run buys the basket's weights; the risk ceiling still applies.
+   */
+  basketId?: string | null;
   /** Contribution per run, USD. */
   amountUsd: number;
   cadence: Cadence;
@@ -55,6 +63,15 @@ export interface AutopilotConfig {
   runs: number;
   /** USD deployed in the current period (reset each period) — enforces maxPerPeriod. */
   spentThisPeriod: number;
+}
+
+/** The basket an autopilot targets, as GET /api/autopilot returns it: enough to draw name, logos, risk word. */
+export interface AutopilotBasketSummary {
+  id: string;
+  chain: ChainKey;
+  name: string;
+  items: { symbol: string; weightPct: number }[];
+  riskScore: number;
 }
 
 /** Default bounds for a new autopilot (conservative, user-adjustable). */
@@ -98,6 +115,18 @@ export function checkBounds(
   if (ctx.assessedRiskBps > cfg.riskCeilingBps) {
     return { ok: false, reason: "Plan exceeds your risk ceiling." };
   }
+  return { ok: true };
+}
+
+export const BASKET_RISK_REFUSAL = "Basket risk above your ceiling";
+
+/**
+ * A basket's weights are fixed, so its risk is known before every run: refuse when it sits
+ * above the ceiling the user authorized. Pure — the app uses it to warn while configuring,
+ * the executor to skip the run.
+ */
+export function checkBasketCeiling(basketRiskBps: number, riskCeilingBps: number): BoundsCheck {
+  if (basketRiskBps > riskCeilingBps) return { ok: false, reason: BASKET_RISK_REFUSAL };
   return { ok: true };
 }
 

@@ -2,7 +2,9 @@ import "server-only";
 
 // Autopilot executor — the autonomous run. For one config it:
 //   1. reads the smart account's USDC balance on the config's chain,
-//   2. has Vera re-allocate against the saved goal (that chain's universe),
+//   2. plans the buy (autopilotPlan.ts): a fixed basket's weights when the
+//      autopilot targets a basket, else Vera re-allocates against the saved goal
+//      (that chain's universe). A basket above the risk ceiling is refused there.
 //   3. gates on the user's HARD bounds (checkBounds) — nothing signs if it fails,
 //   4. builds + signs the same investWithAI UserOp the app does (agent key signs
 //      the risk inference for that chain; Privy server signs the owner sig),
@@ -14,8 +16,8 @@ import { encodeFunctionData } from "viem";
 import { checkBounds, type AutopilotConfig } from "@/lib/autopilot";
 import { getChain } from "@/lib/chains";
 import { serverClient } from "@/lib/server/chain";
-import { recordRun, logRun } from "@/lib/server/autopilotStore";
-import { buildAllocation } from "@/lib/server/allocate";
+import { recordRun, logRun, pauseAutopilot } from "@/lib/server/autopilotStore";
+import { planForAutopilot } from "@/lib/server/autopilotPlan";
 import { getServerSmartAccountClient } from "@/lib/server/privySmartAccount";
 import { buildLegs } from "@/lib/legBuilder";
 import { buildPlanId, recHash, signRiskInference } from "@/lib/eip712";
@@ -47,8 +49,12 @@ export async function runAutopilot(
   // A scheduled run begins a fresh cadence period — reset the spend window.
   if (!opts.manual) working.spentThisPeriod = 0;
 
+  // Every log line for a basket autopilot carries the basket, even when it could not be resolved.
+  let basketMeta: { basketId: string; basketName?: string } | undefined = working.basketId
+    ? { basketId: working.basketId }
+    : undefined;
   const log = (entry: Omit<Parameters<typeof logRun>[0], "userId" | "ranAt" | "amountUsd" | "chain">) =>
-    logRun({ userId: working.userId, chain: chain.key, ranAt: now, amountUsd: working.amountUsd, ...entry });
+    logRun({ userId: working.userId, chain: chain.key, ranAt: now, amountUsd: working.amountUsd, ...basketMeta, ...entry });
 
   if (!chain.contracts.deployed) {
     const reason = `Stax is not deployed on ${chain.name} yet.`;
@@ -69,9 +75,15 @@ export async function runAutopilot(
   })) as bigint;
   const availableUsd = Number(bal) / 10 ** chain.usdc.decimals;
 
-  // 2. Vera re-allocates for the saved goal on this chain.
-  const allocation = await buildAllocation(chain, working.goal, working.amountUsd);
-  const assessedRiskBps = Math.max(0, Math.min(RISK_CEILING_BPS, Math.round(allocation.riskScore)));
+  // 2. The plan: the basket's fixed weights, or Vera's allocation for the saved goal.
+  const plan = await planForAutopilot(working, chain);
+  if (plan.basket) basketMeta = { basketId: plan.basket.id, basketName: plan.basket.name };
+  if (!plan.ok) {
+    await log({ assessedRiskBps: plan.assessedRiskBps, status: plan.status, reason: plan.reason });
+    if (plan.pause) await pauseAutopilot(working.id);
+    return { ok: false, reason: plan.reason };
+  }
+  const { allocation, assessedRiskBps } = plan;
 
   // 3. Hard bounds gate — the safety guarantee. Nothing below runs if this fails.
   const bounds = checkBounds(working, { availableUsd, assessedRiskBps });
