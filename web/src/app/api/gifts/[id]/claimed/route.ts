@@ -12,8 +12,8 @@ import { z } from "zod";
 import { giftContractFor } from "@/lib/gifts";
 import {
   callerOwnsRecipient,
-  emailsFor,
   getGiftRow,
+  giverLabelsFor,
   isGiftId,
   markClaimed,
   markReclaimed,
@@ -70,7 +70,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (!updated) return jsonError(409, "That gift has already moved on.");
 
     const direction = isRecipient ? "received" : "sent";
-    const givers = isRecipient ? await emailsFor([row.fromUserId]) : new Map<string, string | null>();
+    const givers = isRecipient ? await giverLabelsFor([row.fromUserId]) : new Map<string, string | null>();
     return Response.json({ gift: toSummary(updated, direction, givers.get(row.fromUserId) ?? null) });
   } catch (err) {
     return serverError("gifts-claimed", err);

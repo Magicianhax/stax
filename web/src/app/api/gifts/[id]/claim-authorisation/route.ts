@@ -20,8 +20,8 @@ import { getChain } from "@/lib/chains";
 import { CLAIM_DEADLINE_SECONDS, GIFT_SIGNER_CONFIGURED, signClaim } from "@/lib/server/giftSigner";
 import {
   callerOwnsRecipient,
-  emailsFor,
   getGiftRow,
+  giverLabelsFor,
   isGiftId,
   readOnChainGift,
   recipientKindOf,
@@ -87,7 +87,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const deadline = BigInt(Math.floor(Date.now() / 1000) + CLAIM_DEADLINE_SECONDS);
     const signature = await signClaim(getChain(chain), giftContract, { giftId: id, to, deadline });
 
-    const givers = await emailsFor([row.fromUserId]);
+    const givers = await giverLabelsFor([row.fromUserId]);
     return Response.json({
       giftContract,
       giftId: id,

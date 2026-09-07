@@ -10,16 +10,25 @@ import { and, eq, sql } from "drizzle-orm";
 import type { ChainKey } from "@/lib/chains";
 import { db, smartAccounts, users, type SmartAccount } from "@/lib/db";
 
-export async function touchUser(userId: string, email?: string | null): Promise<void> {
+/**
+ * The identities are optional and independent: a caller that only knows one passes only
+ * that one, and an X-only account fills `xUsername` while `email` stays null forever.
+ */
+export async function touchUser(
+  userId: string,
+  email?: string | null,
+  xUsername?: string | null,
+): Promise<void> {
   await db
     .insert(users)
-    .values({ id: userId, email: email ?? null })
+    .values({ id: userId, email: email ?? null, xUsername: xUsername ?? null })
     .onConflictDoUpdate({
       target: users.id,
       set: {
         lastSeenAt: sql`now()`,
         // Keep a known email; never blank it out with an undefined.
         email: email ? email : sql`${users.email}`,
+        xUsername: xUsername ? xUsername : sql`${users.xUsername}`,
       },
     });
 }

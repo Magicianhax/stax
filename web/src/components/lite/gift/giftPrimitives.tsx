@@ -9,7 +9,7 @@
 // before it is bought we only have weights (SplitList, dollars by weight), and
 // after it is parked we only have raw token amounts (TokenList, quantities).
 // Neither is invented from the other.
-import type { CSSProperties, ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { Icon, LogoCluster } from "@/components/design";
 import { Reveal } from "@/components/motion";
 import { usd, tokenQty } from "@/lib/format";
@@ -18,7 +18,7 @@ import { assetBySymbol, type StaxChain } from "@/lib/chains";
 import { RampWeightBar } from "../screens/basketPrimitives";
 import { GIFT_PILL_LABEL, pillFor, type Gift, type GiftItem, type GiftPill } from "./types";
 import type { GiftHolding, GiftToken } from "@/lib/gifts";
-import { unlockDate, untilLabel } from "./giftFormat";
+import { countdownTo, unlockLocal, untilLabel } from "./giftFormat";
 
 /** Heaviest holding first — LogoCluster input. */
 export function clusterOfItems(items: GiftItem[]): { symbol: string }[] {
@@ -426,8 +426,78 @@ export function DetailRow({ label, value, first }: { label: string; value: React
 export function UnlockLine({ iso, live = true }: { iso: string; live?: boolean }) {
   return (
     <span className="tnum">
-      {unlockDate(iso)}
+      {unlockLocal(iso)}
       {live && <span style={{ color: "var(--ink-2)", fontWeight: 500 }}> · {untilLabel(iso)}</span>}
     </span>
+  );
+}
+
+const CELL: CSSProperties = { flex: 1, textAlign: "center", minWidth: 0 };
+
+/**
+ * The wait, on a live clock.
+ *
+ * A date answers "when" and leaves "how long" to arithmetic, and the wait is the
+ * whole substance of a locked gift. Seconds tick, so even a gift years away is
+ * visibly counting rather than merely asserted. Renders nothing once the gift is
+ * open, because by then the button below it is the answer.
+ */
+export function GiftCountdown({ iso, style }: { iso: string; style?: CSSProperties }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const left = countdownTo(iso, now);
+  if (left.done) return null;
+  const cells: { value: number; label: string }[] = [
+    { value: left.days, label: left.days === 1 ? "day" : "days" },
+    { value: left.hours, label: "hrs" },
+    { value: left.minutes, label: "min" },
+    { value: left.seconds, label: "sec" },
+  ];
+  // A gift opening this afternoon has no business showing "0 days".
+  const shown = left.days > 0 ? cells : cells.slice(1);
+
+  return (
+    <div
+      className="card"
+      aria-label={`Opens in ${left.days} days, ${left.hours} hours, ${left.minutes} minutes`}
+      style={{ padding: "13px 12px 12px", background: "var(--surface-2)", ...style }}
+    >
+      <div
+        style={{
+          fontSize: 11.5,
+          fontWeight: 700,
+          letterSpacing: ".07em",
+          textTransform: "uppercase",
+          color: "var(--ink-3)",
+          textAlign: "center",
+        }}
+      >
+        Opens in
+      </div>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 4, marginTop: 8 }} aria-hidden>
+        {shown.map((c, i) => (
+          <div key={c.label} style={CELL}>
+            <div
+              className="tnum"
+              style={{
+                fontSize: 24,
+                fontWeight: 700,
+                letterSpacing: "-.02em",
+                lineHeight: 1.1,
+                // The last cell is the one that moves; the rest are context.
+                color: i === shown.length - 1 ? "var(--ink-2)" : "var(--ink)",
+              }}
+            >
+              {c.value < 10 && i > 0 ? `0${c.value}` : c.value}
+            </div>
+            <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--ink-3)", marginTop: 3 }}>{c.label}</div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

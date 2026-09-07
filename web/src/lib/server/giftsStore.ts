@@ -35,6 +35,7 @@ import { getChain } from "@/lib/chains";
 import { curatedBasketById, isBasketInvestable, isBasketShortId, type Basket } from "@/lib/baskets";
 import { fetchPrivyEmail, fetchPrivyXUsername } from "@/lib/server/privyAuth";
 import {
+  giftContractFor,
   normalizeEmail,
   normalizeXUsername,
   recipientLabel,
@@ -116,17 +117,35 @@ export function recipientKindOf(row: Pick<GiftRow, "recipientKind">): GiftRecipi
   return row.recipientKind === "x" ? "x" : "email";
 }
 
+/** The email and X handle Privy holds for a user. Either or both may be null. */
+export interface PrivyIdentities {
+  email: string | null;
+  username: string | null;
+}
+
 /**
- * Every identity Privy holds for `userId`, as lookup hashes — their email, their X
- * handle, or both. This is the whole of "who am I" for gifting, and it is read from the
- * PRIVY USER RECORD with the app's own credentials. Nothing a request carries reaches it.
+ * Everything Privy knows about who `userId` is, in one round trip.
+ *
+ * This is the whole of "who am I" for gifting, and it is read from the PRIVY USER RECORD
+ * with the app's own credentials. Nothing a request carries reaches it. Callers that also
+ * want to persist the identities take them from here rather than asking Privy twice.
  */
-export async function recipientHashesFor(userId: string): Promise<string[]> {
+export async function privyIdentitiesFor(userId: string): Promise<PrivyIdentities> {
   const [email, username] = await Promise.all([fetchPrivyEmail(userId), fetchPrivyXUsername(userId)]);
+  return { email, username };
+}
+
+/** Those identities as lookup hashes — the form "gifts addressed to me" is asked in. */
+export function recipientHashesOf(identities: PrivyIdentities): string[] {
   const hashes: string[] = [];
-  if (email) hashes.push(lookupHash({ kind: "email", email }));
-  if (username) hashes.push(lookupHash({ kind: "x", username }));
+  if (identities.email) hashes.push(lookupHash({ kind: "email", email: identities.email }));
+  if (identities.username) hashes.push(lookupHash({ kind: "x", username: identities.username }));
   return hashes;
+}
+
+/** Every identity Privy holds for `userId`, as lookup hashes — their email, X handle, or both. */
+export async function recipientHashesFor(userId: string): Promise<string[]> {
+  return recipientHashesOf(await privyIdentitiesFor(userId));
 }
 
 /**
@@ -194,12 +213,33 @@ export async function createGift(input: NewGiftInput): Promise<GiftRow> {
   return row;
 }
 
-/** Mark a gift funded once the parking transaction has been verified on-chain. */
-export async function markFunded(id: string, txHash: string, tokens: GiftToken[]): Promise<GiftRow | null> {
+/**
+ * Mark a gift funded once the parking transaction has been verified on-chain.
+ *
+ * `txHash` is nullable because a gift recovered by the self-heal below was funded without
+ * anyone reporting it: the contract proves the money is parked, but the hash the client
+ * would have sent died with the client, and inventing one would put a lie in the receipt.
+ */
+export async function markFunded(id: string, txHash: string | null, tokens: GiftToken[]): Promise<GiftRow | null> {
   const [row] = await db
     .update(gifts)
     .set({ status: "funded", createTxHash: txHash, tokens, updatedAt: new Date() })
     .where(and(eq(gifts.id, id), inArray(gifts.status, ["pending", "funded"])))
+    .returning();
+  return row ?? null;
+}
+
+/**
+ * Give up on a reservation nothing was ever parked against, so it stops reading as
+ * "Setting up" for ever. The WHERE is guarded on `pending` rather than the wider list the
+ * other writers use: a gift that has since been funded must never be walked back by a
+ * self-heal that read the chain a moment too early.
+ */
+export async function markFailed(id: string): Promise<GiftRow | null> {
+  const [row] = await db
+    .update(gifts)
+    .set({ status: "failed", updatedAt: new Date() })
+    .where(and(eq(gifts.id, id), eq(gifts.status, "pending")))
     .returning();
   return row ?? null;
 }
@@ -260,17 +300,33 @@ export async function listGiftsFor(
   for (const row of rows) {
     // A gift you sent to your own address shows up on both sides, which is honest.
     if (row.fromUserId === userId) sent.push(row);
-    if (addressedToMe.has(row.recipientEmailHash)) received.push(row);
+    // A `pending` row is a reservation and nothing more: no money is parked and the
+    // contract has never heard of it, so there is nothing addressed to the recipient yet.
+    // Showing it would announce a gift that may never exist. The giver keeps seeing their
+    // own pending rows — that side of it is real work they started.
+    if (addressedToMe.has(row.recipientEmailHash) && row.status !== "pending") received.push(row);
   }
   return { sent, received };
 }
 
-/** The Privy email we have on file for each of `userIds`, for the giver's first name. */
-export async function emailsFor(userIds: string[]): Promise<Map<string, string | null>> {
+/**
+ * How each of `userIds` is named as a giver: the first name from their email, else their
+ * X handle as "@name". Null when we know neither, and then the gift simply reads without
+ * a name rather than showing a stranger a fragment of an address.
+ */
+export async function giverLabelsFor(userIds: string[]): Promise<Map<string, string | null>> {
   const unique = [...new Set(userIds)];
   if (unique.length === 0) return new Map();
-  const rows = await db.select({ id: users.id, email: users.email }).from(users).where(inArray(users.id, unique));
-  return new Map(rows.map((r) => [r.id, r.email]));
+  const rows = await db
+    .select({ id: users.id, email: users.email, xUsername: users.xUsername })
+    .from(users)
+    .where(inArray(users.id, unique));
+  return new Map(rows.map((r) => [r.id, giverLabel(r.email, r.xUsername)]));
+}
+
+/** The one place a giver's display name is decided, so every screen agrees on it. */
+export function giverLabel(email: string | null, xUsername: string | null): string | null {
+  return firstNameFromEmail(email) ?? (xUsername ? `@${xUsername}` : null);
 }
 
 // ── on-chain truth ───────────────────────────────────────────────────────────
@@ -300,6 +356,80 @@ export async function readOnChainGift(chain: ChainKey, giftContract: Address, id
   })) as OnChainGift;
   if (!gift || gift.from === "0x0000000000000000000000000000000000000000") return null;
   return gift;
+}
+
+// ── the stale-pending self-heal ──────────────────────────────────────────────
+/**
+ * How long a row may sit `pending` before we stop believing the client is still working.
+ * Reserving, investing and parking is a matter of seconds; ten minutes means the tab was
+ * closed, the network died, or the funded callback never landed.
+ */
+const STALE_PENDING_MS = 10 * 60_000;
+
+/** The list endpoint is on the critical path of the gifts screen, so cap the RPC work. */
+const STALE_PENDING_MAX = 5;
+
+/**
+ * What the contract says is parked, as the row records it. Only reached when the funded
+ * callback was lost, so the chain is the only place these amounts still exist. A token
+ * outside the chain's asset list keeps its address as the symbol rather than being
+ * dropped — an odd-looking line is recoverable, a missing holding is not.
+ */
+function tokensFromOnChain(chain: ChainKey, onChain: OnChainGift): GiftToken[] {
+  const staxChain = getChain(chain);
+  return onChain.tokens.map((address, i) => {
+    const lower = address.toLowerCase();
+    const symbol =
+      lower === staxChain.usdc.address.toLowerCase()
+        ? staxChain.usdc.symbol
+        : (staxChain.assets.all.find((a) => a.address?.toLowerCase() === lower)?.symbol ?? lower);
+    return { symbol, address: lower as `0x${string}`, amount: String(onChain.amounts[i] ?? BigInt(0)) };
+  });
+}
+
+/** The chain's verdict on one stale row, or null when it says nothing we can act on. */
+async function settleStalePending(
+  chain: ChainKey,
+  giftContract: Address,
+  row: GiftRow,
+): Promise<GiftRow | null> {
+  const onChain = await readOnChainGift(chain, giftContract, row.id as `0x${string}`);
+  // Nothing on-chain means the money was never parked, so nothing was taken from anyone.
+  if (!onChain) return markFailed(row.id);
+  // The same identity checks the funded route runs, because this writes the same row.
+  if (onChain.from.toLowerCase() !== row.fromAddress.toLowerCase()) return null;
+  if (Number(onChain.unlockAt) !== Math.floor(row.unlockAt.getTime() / 1000)) return null;
+  return markFunded(row.id, row.createTxHash, tokensFromOnChain(chain, onChain));
+}
+
+/**
+ * Resolve the caller's own gifts that have been stuck `pending` too long, by asking the
+ * contract what really happened: funded if the money is parked, failed if it never was.
+ * Without this a client that dies between reserving and reporting leaves a row reading
+ * "Setting up" for ever, with no path out of it.
+ *
+ * `rows` arrives newest first, so the cap takes the most recent stale rows. Everything is
+ * wrapped: a flaky RPC must degrade to leaving the row pending, never to failing the list.
+ */
+export async function healStalePendingGifts(
+  chain: ChainKey,
+  rows: GiftRow[],
+  now = Date.now(),
+): Promise<GiftRow[]> {
+  const giftContract = giftContractFor(chain);
+  if (!giftContract) return rows;
+  const stale = rows
+    .filter((r) => r.status === "pending" && now - r.createdAt.getTime() > STALE_PENDING_MS)
+    .slice(0, STALE_PENDING_MAX);
+  if (stale.length === 0) return rows;
+  try {
+    const settled = await Promise.all(stale.map((row) => settleStalePending(chain, giftContract, row)));
+    const healed = new Map(settled.filter((r): r is GiftRow => r !== null).map((r) => [r.id, r]));
+    return healed.size === 0 ? rows : rows.map((r) => healed.get(r.id) ?? r);
+  } catch (e) {
+    console.warn("[gifts] stale-pending self-heal failed:", e instanceof Error ? e.message : e);
+    return rows;
+  }
 }
 
 const ERC20_BALANCE_ABI = [
@@ -374,7 +504,7 @@ export function parsedHoldings(row: GiftRow): GiftHolding[] {
 export function toSummary(
   row: GiftRow,
   direction: "sent" | "received",
-  fromEmail: string | null,
+  fromLabel: string | null,
   now = Date.now(),
 ): GiftSummary {
   const status = row.status as GiftStatus;
@@ -400,7 +530,7 @@ export function toSummary(
     // The giver's eyes only. A received gift already knows who it is for, and showing it
     // there would put a stranger's address or handle on someone else's screen.
     recipientLabel: direction === "sent" ? row.recipientEmailMasked : null,
-    fromName: direction === "received" ? firstNameFromEmail(fromEmail) : null,
+    fromName: direction === "received" ? fromLabel : null,
     claimable: direction === "received" && status === "funded" && unlocked,
     reclaimable: direction === "sent" && status === "funded" && past,
     shareUrl: direction === "sent" ? giftShareUrl(row.id) : null,

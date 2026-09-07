@@ -32,13 +32,15 @@ import { chainKeyFromRequest } from "@/lib/server/chain";
 import { assertSignerMatchesContract, GIFT_SIGNER_CONFIGURED } from "@/lib/server/giftSigner";
 import {
   createGift,
-  emailsFor,
   giftShareUrl,
+  giverLabelsFor,
+  healStalePendingGifts,
   listGiftsFor,
   newGiftId,
   newSalt,
   onChainHash,
-  recipientHashesFor,
+  privyIdentitiesFor,
+  recipientHashesOf,
   resolveGiftBasket,
   toSummary,
   usdcBalanceUsd,
@@ -237,13 +239,21 @@ export async function GET(req: NextRequest) {
   try {
     // "Addressed to me" is decided by the identities on the Privy user record — their
     // email and their X handle — never by anything the request carries.
-    const hashes = await recipientHashesFor(user.userId);
-    const { sent, received } = await listGiftsFor(chain, user.userId, hashes);
+    const identities = await privyIdentitiesFor(user.userId);
+    // Write them down while we have them. A giver who signed in with X has no email at
+    // all, and their recipient can only be shown a name if the handle is on file — so
+    // opening your own gifts screen once is enough for every gift you send after it.
+    await touchUser(user.userId, identities.email, identities.username);
+    const { sent, received } = await listGiftsFor(chain, user.userId, recipientHashesOf(identities));
 
-    const givers = await emailsFor(received.map((r) => r.fromUserId));
+    // Ask the chain about the caller's own rows that have been "Setting up" too long,
+    // before deciding what to show — otherwise a lost callback strands one for ever.
+    const settledSent = await healStalePendingGifts(chain, sent);
+
+    const givers = await giverLabelsFor(received.map((r) => r.fromUserId));
     const now = Date.now();
     const body: { sent: GiftSummary[]; received: GiftSummary[] } = {
-      sent: sent.map((row) => toSummary(row, "sent", null, now)),
+      sent: settledSent.map((row) => toSummary(row, "sent", null, now)),
       received: received.map((row) => toSummary(row, "received", givers.get(row.fromUserId) ?? null, now)),
     };
     return Response.json(body);

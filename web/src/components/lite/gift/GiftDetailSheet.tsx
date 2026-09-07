@@ -9,8 +9,16 @@ import { useClaimGift, useReclaimGift } from "@/hooks/useGifts";
 import { usd, txUrl } from "@/lib/format";
 import { useChain } from "@/lib/chains/active";
 import { haptic } from "@/lib/haptics";
-import { CashSliceNote, DetailRow, GiftTokenHead, SplitList, StatusPill, TokenList } from "./giftPrimitives";
-import { giftShareUrl, splitOf, unlockDate, untilLabel } from "./giftFormat";
+import {
+  CashSliceNote,
+  DetailRow,
+  GiftCountdown,
+  GiftTokenHead,
+  SplitList,
+  StatusPill,
+  TokenList,
+} from "./giftPrimitives";
+import { giftShareUrl, splitOf, unlockLocal, untilLabel } from "./giftFormat";
 import { pillFor, type Gift } from "./types";
 
 export function GiftDetailSheet({ gift, onClose }: { gift: Gift | null; onClose: () => void }) {
@@ -105,7 +113,7 @@ export function GiftDetailSheet({ gift, onClose }: { gift: Gift | null; onClose:
               }
               value={
                 <span className="tnum">
-                  {unlockDate(gift.unlockAt)}
+                  {unlockLocal(gift.unlockAt)}
                   {kind === "waiting" && (
                     <span style={{ color: "var(--ink-2)", fontWeight: 500 }}> · {untilLabel(gift.unlockAt)}</span>
                   )}
@@ -115,14 +123,16 @@ export function GiftDetailSheet({ gift, onClose }: { gift: Gift | null; onClose:
             <DetailRow label="Network" value={chain.name} />
           </div>
 
+          {kind === "waiting" && <GiftCountdown iso={gift.unlockAt} style={{ marginTop: 12 }} />}
+
           {/* what's true right now, in plain words */}
           <div style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "14px 4px 0" }}>
             <Seal size={20} />
             <p style={{ margin: 0, fontSize: 13, color: "var(--ink-2)", lineHeight: 1.5 }}>
               {kind === "waiting" &&
                 (gift.direction === "sent"
-                  ? `Invested and held safely until ${unlockDate(gift.unlockAt)}. Nobody can spend it before then, including you.`
-                  : `Already invested for you. You can open it on ${unlockDate(gift.unlockAt)}.`)}
+                  ? `Invested and held safely until ${unlockLocal(gift.unlockAt)}. Nobody can spend it before then, including you.`
+                  : `Already invested for you. You can open it on ${unlockLocal(gift.unlockAt)}.`)}
               {kind === "ready" &&
                 (gift.direction === "sent"
                   ? "Waiting for them to open it. It stays invested until they do."
@@ -170,7 +180,7 @@ export function GiftDetailSheet({ gift, onClose }: { gift: Gift | null; onClose:
             )}
             {gift.direction === "received" && !gift.claimable && kind === "waiting" && (
               <p style={{ margin: 0, fontSize: 13, color: "var(--ink-2)", textAlign: "center", lineHeight: 1.45 }}>
-                Come back on {unlockDate(gift.unlockAt)} and you can open it.
+                Come back on {unlockLocal(gift.unlockAt)} and you can open it.
               </p>
             )}
           </div>

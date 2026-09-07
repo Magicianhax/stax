@@ -11,7 +11,7 @@ import { usd } from "@/lib/format";
 import { useChain } from "@/lib/chains/active";
 import { haptic } from "@/lib/haptics";
 import { clusterOfTokens, DetailRow, TokenList } from "./giftPrimitives";
-import { unlockDate, untilLabel } from "./giftFormat";
+import { unlockLocal, untilLabel } from "./giftFormat";
 import type { SentGift } from "@/hooks/useGifts";
 
 export function GiftSent({
@@ -119,7 +119,7 @@ export function GiftSent({
             label="Opens"
             value={
               <span className="tnum">
-                {unlockDate(gift.unlockAtIso)}
+                {unlockLocal(gift.unlockAtIso)}
                 <span style={{ color: "var(--ink-2)", fontWeight: 500 }}> · {untilLabel(gift.unlockAtIso)}</span>
               </span>
             }
@@ -143,7 +143,7 @@ export function GiftSent({
           </div>
           <p style={{ fontSize: 13.5, color: "var(--ink-2)", margin: "12px 0 0", lineHeight: 1.55 }}>
             The money is already invested and set aside for them. Nobody can spend it in the meantime, not even you,
-            and on {unlockDate(gift.unlockAtIso)} they can claim it from their own account. If they never do, you can
+            and on {unlockLocal(gift.unlockAtIso)} they can claim it from their own account. If they never do, you can
             take it back three months later.
           </p>
         </div>

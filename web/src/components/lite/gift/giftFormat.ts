@@ -46,21 +46,6 @@ export function fromDateTimeInput(value: string): number | null {
   return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
 }
 
-/**
- * "Sep 7, 2031" for a distant unlock, "Sep 7 at 4:30 pm" when it opens within a
- * couple of days — a same-day gift needs its time on screen, and a gift twelve
- * years out does not.
- */
-export function unlockWhenFromSeconds(unixSec: number, nowMs: number = Date.now()): string {
-  const at = unixSec * 1000;
-  const soon = at - nowMs < 2 * 86_400_000;
-  const d = new Date(at);
-  if (!soon) return DATE.format(d);
-  const day = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-  return `${day} at ${time}`;
-}
-
 /** Read a native date input back to unix seconds at midday UTC (never drifts a day). */
 export function fromDateInput(value: string): number | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
@@ -89,20 +74,90 @@ export function todayAnchor(nowMs: number = Date.now()): number {
   return Math.floor(Date.UTC(new Date(nowMs).getUTCFullYear(), new Date(nowMs).getUTCMonth(), new Date(nowMs).getUTCDate(), 12) / 1000);
 }
 
+// Formatters with no `timeZone`, so they print in whatever zone the reader is in.
+// Client-side only, for the reason `unlockLocal` explains.
+const LOCAL_DATE = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
+const LOCAL_DAY = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
+const LOCAL_TIME = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" });
+
+/** Calendar days between two instants in the reader's zone, so "tomorrow" means their tomorrow. */
+function localDaysApart(fromMs: number, toMs: number): number {
+  const midnight = (ms: number) => {
+    const d = new Date(ms);
+    return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+  };
+  return Math.round((midnight(toMs) - midnight(fromMs)) / DAY);
+}
+
 /**
- * How long until it opens, without the verb: "Ready now", "Tomorrow",
- * "in 12 days", "in 7 months", "in 4 years". `@/lib/gifts` has the sentence
- * form ("opens in 7 months"); rows need the bare phrase so it can sit after a
- * status pill. Reads the clock, so client-side only — the public page shows the
- * date instead.
+ * The unlock on the reader's own clock: "Sep 8, 2026", or "Sep 8 at 3:30 am" when
+ * it lands within three days and the hour is the part they need.
+ *
+ * `unlockDate` formats in UTC on purpose, because the public share page renders on
+ * the server and in the browser and the two must agree. Inside the app that is the
+ * wrong choice: a gift opening at 22:00 UTC opens on the ninth for anyone east of
+ * London, and printing "Sep 8" tells them the wrong day.
+ */
+export function unlockLocal(iso: string, nowMs: number = Date.now()): string {
+  const at = Date.parse(iso);
+  if (!Number.isFinite(at)) return "—";
+  const d = new Date(at);
+  const soon = at > nowMs && at - nowMs < 3 * DAY;
+  return soon ? `${LOCAL_DAY.format(d)} at ${LOCAL_TIME.format(d)}` : LOCAL_DATE.format(d);
+}
+
+/**
+ * The same, from unix seconds: the give flow works in seconds until it sends.
+ */
+export function unlockWhenFromSeconds(unixSec: number, nowMs: number = Date.now()): string {
+  return unlockLocal(new Date(unixSec * 1000).toISOString(), nowMs);
+}
+
+/** What is left on the clock. `done` once the gift is open. */
+export interface Countdown {
+  days: number;
+  hours: number;
+  minutes: number;
+  seconds: number;
+  done: boolean;
+}
+
+/** The remaining time, broken into the parts a countdown shows. */
+export function countdownTo(iso: string, nowMs: number = Date.now()): Countdown {
+  const at = Date.parse(iso);
+  let left = Number.isFinite(at) ? Math.floor((at - nowMs) / 1000) : 0;
+  if (left <= 0) return { days: 0, hours: 0, minutes: 0, seconds: 0, done: true };
+  const days = Math.floor(left / 86_400);
+  left -= days * 86_400;
+  const hours = Math.floor(left / 3600);
+  left -= hours * 3600;
+  const minutes = Math.floor(left / 60);
+  return { days, hours, minutes, seconds: left - minutes * 60, done: false };
+}
+
+/**
+ * How long until it opens, without the verb: "Ready now", "in 40 min",
+ * "in 5 hours", "Tomorrow", "in 12 days", "in 7 months", "in 4 years".
+ * `@/lib/gifts` has the sentence form ("opens in 7 months"); rows need the bare
+ * phrase so it can sit after a status pill. Reads the clock, so client-side only —
+ * the public page shows the date instead.
+ *
+ * Days are counted as calendar days in the reader's zone rather than by rounding
+ * the gap up: a gift two hours away is not "Tomorrow", and one at nine tonight is
+ * not "Tomorrow" either.
  */
 export function untilLabel(iso: string, nowMs: number = Date.now()): string {
   const at = Date.parse(iso);
   if (!Number.isFinite(at)) return "—";
   const ms = at - nowMs;
   if (ms <= 0) return "Ready now";
-  const days = Math.ceil(ms / DAY);
-  if (days <= 1) return "Tomorrow";
+  if (ms < 3_600_000) return `in ${Math.max(1, Math.round(ms / 60_000))} min`;
+  const days = localDaysApart(nowMs, at);
+  if (days === 0) {
+    const hours = Math.round(ms / 3_600_000);
+    return `in ${hours} ${hours === 1 ? "hour" : "hours"}`;
+  }
+  if (days === 1) return "Tomorrow";
   if (days < 31) return `in ${days} days`;
   const months = Math.round(days / 30.44);
   if (months < 24) return `in ${months} ${months === 1 ? "month" : "months"}`;

@@ -34,6 +34,12 @@ const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull(
 export const users = pgTable("users", {
   id: text("id").primaryKey(),
   email: text("email"),
+  /**
+   * Their X handle, lowercased and without its "@". Kept beside the email because an
+   * account that signed in with X has no email at all, and without this there is nothing
+   * left to call them by on a gift they sent.
+   */
+  xUsername: text("x_username"),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
   createdAt: createdAt(),
 });

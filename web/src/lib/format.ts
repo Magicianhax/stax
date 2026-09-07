@@ -41,14 +41,28 @@ export function fromUnits(raw: bigint, decimals: number): number {
   return Number(`${whole}.${frac}`);
 }
 
-/** Token quantity, trimmed to a sensible number of significant places for display. */
+/** Drop the zeroes a fixed number of places leaves behind: "0.01500" reads worse than "0.015". */
+function trimZeros(s: string): string {
+  return s.includes(".") ? s.replace(/0+$/, "").replace(/\.$/, "") : s;
+}
+
+/**
+ * A token quantity, at four significant figures and never in exponent notation.
+ *
+ * Exponents have no place in a broker. A third of a ten dollar gift in Bitcoin
+ * printed as "3.14e-5 BTC", which nobody can read, compare, or check against a
+ * receipt. Small quantities are exactly where fractional shares live, so they are
+ * given the decimal places they need instead of being folded away.
+ */
 export function tokenQty(raw: bigint, decimals: number): string {
   const n = fromUnits(raw, decimals);
   if (n === 0) return "0";
-  if (n < 0.0001) return n.toExponential(2);
-  if (n < 1) return n.toFixed(4);
-  if (n < 1000) return n.toFixed(3);
-  return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  if (n >= 1000) return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  if (n >= 1) return trimZeros(n.toFixed(3));
+  // Below one, count places from the first significant digit. Capped, so a dust
+  // balance is a short number rather than a wall of zeroes.
+  const places = Math.min(12, 3 - Math.floor(Math.log10(n)));
+  return trimZeros(n.toFixed(places));
 }
 
 /** "just now" / "4m ago" / "2h ago" / "3d ago" — age of a unix-seconds timestamp. */
