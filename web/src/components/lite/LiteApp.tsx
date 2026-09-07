@@ -49,6 +49,10 @@ import { SendScreen } from "./screens/SendScreen";
 import { AutopilotScreen } from "./screens/AutopilotScreen";
 import { BasketsScreen } from "./screens/BasketsScreen";
 import { BasketDetailScreen } from "./screens/BasketDetailScreen";
+// ── gift-ui ─────────────────────────────────────────────────────────────────
+import { GiftScreen } from "./screens/GiftScreen";
+import { GiftViewScreen } from "./screens/GiftViewScreen";
+// ── end gift-ui ─────────────────────────────────────────────────────────────
 import { decodeBasketLink, type Basket, type DecodeResult } from "@/lib/baskets";
 import { fetchSharedBasket } from "@/hooks/useBaskets";
 import type { AllocateResult } from "@/lib/invest-types";
@@ -58,6 +62,10 @@ type Screen =
   | "home"
   | "baskets"
   | "basket"
+  // ── gift-ui: give a basket ("gift") and your gifts ("gifts") ──────────────
+  | "gift"
+  | "gifts"
+  // ── end gift-ui ───────────────────────────────────────────────────────────
   | "wallet"
   | "send"
   | "autopilot"
@@ -416,6 +424,30 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── gift-ui ─────────────────────────────────────────────────────────────────
+  // A gift link opens the gift on load: `/app?gift=<id>` (the "Open in Stax"
+  // button on the public /gift/<id> page). The id is opaque and never trusted —
+  // GiftViewScreen only opens a sheet for a gift the signed-in person's own list
+  // actually contains, so a guessed id shows nothing. The param is stripped so a
+  // refresh doesn't re-open it.
+  useEffect(() => {
+    if (demoPlay) return; // the landing's auto-playing phones ignore the page URL
+    if (!new URL(window.location.href).searchParams.has("gift")) return;
+    const t = setTimeout(() => {
+      const url = new URL(window.location.href);
+      const id = url.searchParams.get("gift");
+      url.searchParams.delete("gift");
+      window.history.replaceState(window.history.state, "", url.toString());
+      if (!id) return;
+      setDir("push");
+      setStack((s) => [...s, { screen: "gifts", params: { focus: id } }]);
+    }, 0);
+    return () => clearTimeout(t);
+    // Run once on mount only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // ── end gift-ui ─────────────────────────────────────────────────────────────
+
   // Latest handlers for the demo autoplay driver (avoids stale closures).
   const goRef = useRef(go);
   const onInvestRef = useRef(onInvest);
@@ -506,6 +538,9 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
       home: "Your money",
       baskets: "Baskets",
       basket: "Basket",
+      // gift-ui
+      gift: "Give a basket",
+      gifts: "Gifts",
       wallet: "Wallet",
       send: "Send",
       autopilot: "Autopilot",
@@ -611,6 +646,14 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
         />
       );
       break;
+    // ── gift-ui ───────────────────────────────────────────────────────────────
+    case "gift":
+      view = <GiftScreen go={go} basketId={params.basketId as string | undefined} />;
+      break;
+    case "gifts":
+      view = <GiftViewScreen go={go} focus={params.focus as string | undefined} />;
+      break;
+    // ── end gift-ui ───────────────────────────────────────────────────────────
     case "plan":
       view = activeAllocation ? (
         <PlanScreen

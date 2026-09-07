@@ -1,0 +1,393 @@
+"use client";
+
+// Gift-only presentational bits: the status pill, a list row, the two split
+// views, and the "step" wrapper the give flow reveals its questions with. Built
+// from the incumbent primitives (.card / .chip / .row, LogoCluster, Reveal) —
+// nothing here invents a new surface.
+//
+// There are two ways to show what a gift holds, because there are two moments:
+// before it is bought we only have weights (SplitList, dollars by weight), and
+// after it is parked we only have raw token amounts (TokenList, quantities).
+// Neither is invented from the other.
+import type { CSSProperties, ReactNode } from "react";
+import { Icon, LogoCluster } from "@/components/design";
+import { Reveal } from "@/components/motion";
+import { usd, tokenQty } from "@/lib/format";
+import { toTile } from "@/lib/displayAssets";
+import { assetBySymbol, type StaxChain } from "@/lib/chains";
+import { RampWeightBar } from "../screens/basketPrimitives";
+import { GIFT_PILL_LABEL, pillFor, type Gift, type GiftItem, type GiftPill } from "./types";
+import type { GiftToken } from "@/lib/gifts";
+import { splitOf, unlockDate, untilLabel } from "./giftFormat";
+
+/** Heaviest holding first — LogoCluster input. */
+export function clusterOfItems(items: GiftItem[]): { symbol: string }[] {
+  return [...items].sort((a, b) => b.weightPct - a.weightPct).map((i) => ({ symbol: i.symbol }));
+}
+
+/** The same, for a gift that has already been bought. */
+export function clusterOfTokens(tokens: GiftToken[]): { symbol: string }[] {
+  return tokens.map((t) => ({ symbol: t.symbol }));
+}
+
+/**
+ * The logos for a gift. `holdings` is the basket's split as given and is set
+ * from the moment the row exists, so it works for a gift still being set up;
+ * `tokens` only exists once the parking transaction has landed.
+ */
+export function clusterOfGift(gift: Pick<Gift, "holdings" | "tokens">): { symbol: string }[] {
+  return gift.holdings.length > 0 ? clusterOfItems(gift.holdings) : clusterOfTokens(gift.tokens);
+}
+
+const TONE: Record<GiftPill, { fg: string; bg: string }> = {
+  preparing: { fg: "var(--ink-2)", bg: "var(--surface-2)" },
+  waiting: { fg: "var(--ink-2)", bg: "var(--surface-2)" },
+  ready: { fg: "var(--primary)", bg: "var(--primary-soft)" },
+  claimed: { fg: "var(--accent)", bg: "var(--accent-soft)" },
+  returned: { fg: "var(--ink-2)", bg: "var(--surface-2)" },
+  failed: { fg: "var(--neg)", bg: "color-mix(in srgb, var(--neg) 13%, var(--surface))" },
+};
+
+const PILL_ICON: Partial<Record<GiftPill, "check" | "clock" | "info">> = {
+  ready: "check",
+  waiting: "clock",
+  preparing: "clock",
+  failed: "info",
+};
+
+/** Where a gift is, in one word or three. Never a raw status string. */
+export function StatusPill({ gift, style }: { gift: { status: Gift["status"]; claimable?: boolean }; style?: CSSProperties }) {
+  const kind = pillFor(gift);
+  const tone = TONE[kind];
+  const icon = PILL_ICON[kind];
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        height: 24,
+        padding: "0 9px",
+        borderRadius: 99,
+        fontSize: 12,
+        fontWeight: 700,
+        whiteSpace: "nowrap",
+        flex: "none",
+        background: tone.bg,
+        color: tone.fg,
+        ...style,
+      }}
+    >
+      {icon && <Icon name={icon} size={13} stroke={2.3} />}
+      {GIFT_PILL_LABEL[kind]}
+    </span>
+  );
+}
+
+/**
+ * One gift in the "You sent" / "For you" lists.
+ *
+ * Two lines, not two columns: the name and the amount own the first line, and
+ * the pill sits on the second with the timing and who it's between. Putting the
+ * pill beside the name squeezed longer basket names ("Bitcoin & Blue Chips") to
+ * an ellipsis, and the name is the part you scan for.
+ */
+export function GiftRow({ gift, onClick, last }: { gift: Gift; onClick: () => void; last?: boolean }) {
+  const kind = pillFor(gift);
+  const who = gift.direction === "sent" ? gift.recipientEmailMasked : gift.fromName;
+  // The pill already says "Claimed" / "Returned" / "Ready to claim", so only a
+  // gift still counting down needs the timing spelled out beside it. Timing goes
+  // first: if the line has to truncate it should eat the tail of an address, not
+  // the countdown. The section heading supplies the preposition the name drops.
+  const when = kind === "waiting" ? untilLabel(gift.unlockAt) : null;
+  const secondary = [when, who].filter(Boolean).join(" · ");
+  return (
+    <button
+      className="row"
+      onClick={onClick}
+      aria-label={`${gift.basketName}, ${usd(gift.amountUsd)}, ${GIFT_PILL_LABEL[kind]}${when ? `, ${when}` : ""}`}
+      style={{
+        padding: "13px 0",
+        minHeight: 68,
+        gap: 12,
+        alignItems: "flex-start",
+        borderBottom: last ? "none" : "1px solid var(--line-2)",
+        width: "100%",
+      }}
+    >
+      <span style={{ display: "inline-flex", flex: "none", paddingTop: 2 }}>
+        <LogoCluster assets={clusterOfGift(gift)} size={24} max={3} showRest={false} />
+      </span>
+      <div style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+          <span
+            style={{
+              flex: 1,
+              minWidth: 0,
+              fontWeight: 600,
+              fontSize: 15,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {gift.basketName}
+          </span>
+          <span className="tnum" style={{ flex: "none", fontWeight: 700, fontSize: 15 }}>
+            {usd(gift.amountUsd)}
+          </span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 7, minWidth: 0 }}>
+          <StatusPill gift={gift} />
+          <span
+            className="tnum"
+            style={{
+              flex: 1,
+              minWidth: 0,
+              fontSize: 12,
+              color: "var(--ink-2)",
+              fontWeight: 600,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {secondary}
+          </span>
+        </div>
+      </div>
+    </button>
+  );
+}
+
+const line = (i: number): CSSProperties => ({
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  padding: "9px 0",
+  borderTop: i ? "1px solid var(--line-2)" : "none",
+});
+
+/**
+ * What the money will buy, before it buys it: dollars by weight. Used only on
+ * the give flow's review card, where nothing has been bought yet.
+ */
+export function SplitList({ items, amountUsd }: { items: GiftItem[]; amountUsd: number }) {
+  return (
+    <div>
+      {splitOf(items, amountUsd).map((l, i) => (
+        <div key={l.symbol} style={line(i)}>
+          <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500 }}>{toTile(l.symbol).name}</span>
+          <span className="tnum" style={{ fontSize: 12.5, color: "var(--ink-2)", flex: "none" }}>
+            {l.weightPct}%
+          </span>
+          <span className="tnum" style={{ fontSize: 14, fontWeight: 700, flex: "none", minWidth: 62, textAlign: "right" }}>
+            {usd(l.amountUsd)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * What a gift actually holds: the real quantities parked in the contract. These
+ * are the amounts the swaps returned, so they are shown as quantities and never
+ * converted back into dollars — the dollars would be today's guess at a past
+ * purchase, and the receipt already carries what was paid.
+ */
+export function TokenList({ tokens, chain }: { tokens: GiftToken[]; chain: StaxChain }) {
+  return (
+    <div>
+      {tokens.map((t, i) => {
+        const decimals = assetBySymbol(chain, t.symbol)?.decimals ?? 18;
+        return (
+          <div key={t.address} style={line(i)}>
+            <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500 }}>{toTile(t.symbol).name}</span>
+            <span className="tnum" style={{ fontSize: 14, fontWeight: 700, flex: "none", textAlign: "right" }}>
+              {tokenQty(BigInt(t.amount), decimals)} {t.symbol}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Basket identity: cluster, name, weight bar. Used on the review card. */
+export function GiftBasketHead({ name, items }: { name: string; items: GiftItem[] }) {
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <LogoCluster assets={clusterOfItems(items)} size={30} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontWeight: 700,
+              fontSize: 16.5,
+              letterSpacing: "-.01em",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {name}
+          </div>
+          <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 2 }}>
+            {items.length} {items.length === 1 ? "holding" : "holdings"}
+          </div>
+        </div>
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <RampWeightBar items={items} />
+      </div>
+    </div>
+  );
+}
+
+/** The same head for a gift that already exists. */
+export function GiftTokenHead({ name, gift }: { name: string; gift: Pick<Gift, "holdings" | "tokens"> }) {
+  const count = gift.tokens.length || gift.holdings.length;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <LogoCluster assets={clusterOfGift(gift)} size={30} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            fontWeight: 700,
+            fontSize: 16.5,
+            letterSpacing: "-.01em",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {name}
+        </div>
+        <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 2 }}>
+          {count} {count === 1 ? "holding" : "holdings"}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One question in the give flow. Answered steps stay visible and quiet; the step
+ * being asked carries the accent. Reveal keys off the step's mount so a newly
+ * revealed question rises in rather than appearing.
+ */
+export function Step({
+  n,
+  title,
+  hint,
+  answer,
+  open,
+  onEdit,
+  children,
+}: {
+  n: number;
+  title: string;
+  hint?: string;
+  /** The short form of the answer, shown once the step is behind you. */
+  answer?: string;
+  open: boolean;
+  /** Reopen an answered step. Makes the whole header a 44px-tall target. */
+  onEdit?: () => void;
+  children?: ReactNode;
+}) {
+  const head = (
+    <>
+      <span
+        className="tnum"
+        aria-hidden
+        style={{
+          width: 26,
+          height: 26,
+          borderRadius: 99,
+          flex: "none",
+          display: "grid",
+          placeItems: "center",
+          fontSize: 12.5,
+          fontWeight: 700,
+          background: answer ? "var(--primary-soft)" : "var(--surface-2)",
+          color: answer ? "var(--primary)" : "var(--ink-3)",
+        }}
+      >
+        {answer ? <Icon name="check" size={14} stroke={2.6} /> : n}
+      </span>
+      <div style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
+        <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-.01em" }}>{title}</div>
+        {hint && open && (
+          <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 2, lineHeight: 1.4 }}>{hint}</div>
+        )}
+      </div>
+      {!open && answer && (
+        <span
+          className="tnum"
+          style={{
+            fontSize: 13.5,
+            fontWeight: 600,
+            color: "var(--ink-2)",
+            flex: "none",
+            maxWidth: 140,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {answer}
+        </span>
+      )}
+      {!open && onEdit && <Icon name="chevR" size={16} style={{ color: "var(--ink-3)", flex: "none" }} />}
+    </>
+  );
+  return (
+    <Reveal className="card" style={{ padding: 16, marginBottom: 10 }}>
+      {!open && onEdit ? (
+        <button
+          onClick={onEdit}
+          className="tap"
+          aria-label={`Change ${title.toLowerCase()}`}
+          style={{ display: "flex", alignItems: "center", gap: 11, width: "100%", minHeight: 44 }}
+        >
+          {head}
+        </button>
+      ) : (
+        <div style={{ display: "flex", alignItems: "center", gap: 11, minHeight: 26 }}>{head}</div>
+      )}
+      {open && children && <div style={{ marginTop: 14 }}>{children}</div>}
+    </Reveal>
+  );
+}
+
+/** A labelled line on the review card / detail sheet. */
+export function DetailRow({ label, value, first }: { label: string; value: ReactNode; first?: boolean }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        gap: 12,
+        padding: "11px 0",
+        borderTop: first ? "none" : "1px solid var(--line-2)",
+        fontSize: 14.5,
+      }}
+    >
+      <span style={{ color: "var(--ink-2)", flex: "none" }}>{label}</span>
+      <span className="tnum" style={{ fontWeight: 600, textAlign: "right", minWidth: 0 }}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+/** "Sep 7, 2031 · in 4 years" — the unlock line. */
+export function UnlockLine({ iso, live = true }: { iso: string; live?: boolean }) {
+  return (
+    <span className="tnum">
+      {unlockDate(iso)}
+      {live && <span style={{ color: "var(--ink-2)", fontWeight: 500 }}> · {untilLabel(iso)}</span>}
+    </span>
+  );
+}

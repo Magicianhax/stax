@@ -1,0 +1,215 @@
+/* The public gift page: one centred glass card on the site's paper, the same
+   material and type scale as the legal pages and the landing's cards. Light and
+   dark come from the `--s-*` tokens, so nothing here hard-codes a colour. */
+.main {
+  display: flex;
+  align-items: center;
+  min-height: calc(100dvh - 72px);
+  padding: 56px 0 64px;
+}
+
+.card {
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 40px 36px 36px;
+  border-radius: var(--s-r-lg);
+  background: var(--s-glass);
+  backdrop-filter: var(--s-glass-blur);
+  border: 1px solid var(--s-glass-line);
+  box-shadow: var(--s-glass-hi), var(--s-shadow);
+  text-align: center;
+}
+
+.eyebrow {
+  margin: 0 0 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--s-ink-3);
+}
+
+.title {
+  margin: 0;
+  font-family: var(--s-display);
+  font-optical-sizing: auto;
+  font-weight: 500;
+  font-size: clamp(30px, 5.4vw, 42px);
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+  color: var(--s-ink);
+  text-wrap: balance;
+}
+
+.amount {
+  font-variant-numeric: tabular-nums;
+  color: var(--s-primary-d);
+  white-space: nowrap;
+}
+
+/* Asset tiles in a spaced row, not the app's overlapping cluster. Overlapping
+   rounded tiles need a ring the exact colour of what sits behind them, and here
+   that is a translucent glass card — any solid ring left a grey wedge in the
+   sliver between two corners. At 52px they read better with air anyway. */
+.tiles {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 26px 0 0;
+}
+
+.tile {
+  width: 52px;
+  height: 52px;
+  flex: none;
+  border-radius: 16px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 6px 16px rgba(0, 0, 0, 0.07);
+}
+
+/* The logo PNGs from the issuer's CDN carry four grey inward-pointing arrows in
+   a band across the outer 16.3% of every edge. They are invisible at the 24px
+   the app draws clusters at, but obvious at 52px, so crop past them: scaling by
+   1.5 inside the clipped tile removes 16.7% per side and leaves every mark
+   whole. */
+.tile img {
+  width: 52px;
+  height: 52px;
+  object-fit: cover;
+  display: block;
+  transform: scale(1.5);
+}
+
+.glyph {
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #fff;
+}
+
+.rest {
+  border-radius: 50%;
+  background: var(--s-paper-2);
+  color: var(--s-ink-2);
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.note {
+  margin: 26px 0 0;
+  padding: 0 8px;
+  font-size: 18px;
+  line-height: 1.55;
+  font-style: italic;
+  color: var(--s-ink);
+  text-wrap: pretty;
+}
+
+.when {
+  margin: 22px 0 0;
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--s-primary-d);
+}
+
+.lead {
+  margin: 12px auto 0;
+  max-width: 44ch;
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--s-ink-2);
+  text-wrap: pretty;
+}
+
+.cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+  margin-top: 26px;
+  padding: 0 30px;
+  border-radius: 99px;
+  font-size: 16.5px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--s-hero-grad);
+  box-shadow: var(--s-shadow);
+  transition: transform 180ms var(--s-ease-soft), box-shadow 180ms var(--s-ease);
+}
+
+@media (hover: hover) {
+  .cta:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--s-shadow-lg);
+  }
+}
+
+.cta:active {
+  transform: translateY(0);
+}
+
+.fine {
+  margin: 14px 0 0;
+  font-size: 13.5px;
+  color: var(--s-ink-3);
+}
+
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0 20px;
+  max-width: 560px;
+  margin: 28px auto 0;
+}
+
+.foot a,
+.copy {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 4px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--s-ink-2);
+}
+
+.copy {
+  font-size: 13px;
+  color: var(--s-ink-3);
+}
+
+@media (hover: hover) {
+  .foot a:hover {
+    color: var(--s-ink);
+  }
+}
+
+@media (max-width: 479px) {
+  .main {
+    padding: 32px 0 44px;
+  }
+  .card {
+    padding: 30px 22px 28px;
+  }
+  .note {
+    font-size: 17px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cta {
+    transition: none;
+  }
+  .cta:hover {
+    transform: none;
+  }
+}

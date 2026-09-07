@@ -21,6 +21,7 @@ import {
 } from "@/components/design";
 import { Reveal } from "@/components/motion";
 import { useBaskets } from "@/hooks/useBaskets";
+import { useGiftsEnabled } from "@/hooks/useGifts"; // gift-ui
 import { useBasketPerformance } from "@/hooks/useBasketPerformance";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { useUsdcBalance } from "@/hooks/useBalances";
@@ -54,6 +55,7 @@ export function BasketDetailScreen({
   const { chain, ready } = useChainReady();
   const { byId, mine, save, remove, publish } = useBaskets();
   const { notify } = useToast();
+  const giftsOn = useGiftsEnabled(); // gift-ui
   const { address } = useSmartAccount();
   const { data: bal } = useUsdcBalance(address ?? undefined);
   const balance = bal?.value ?? 0;
@@ -313,6 +315,22 @@ export function BasketDetailScreen({
           })}
         </Reveal>
       </div>
+
+      {/* gift-ui: give this exact mix to someone else — same weights, held until a day you pick */}
+      {investable && giftsOn && (
+        <div style={{ padding: "14px 22px 0" }}>
+          <button
+            className="btn btn-ghost btn-block tap"
+            style={{ minHeight: 46 }}
+            onClick={() => {
+              haptic.light();
+              go("gift", { basketId: basket.id });
+            }}
+          >
+            <Icon name="send" size={17} /> Gift this basket
+          </button>
+        </div>
+      )}
 
       {/* secondary actions: Share lives in the header; Save / Remove only when they apply */}
       {(canSave || isMine) && (

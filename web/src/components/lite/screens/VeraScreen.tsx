@@ -25,6 +25,8 @@ import {
   type PricePoint,
 } from "@/components/design";
 import { Reveal } from "@/components/motion";
+// gift-ui: the gift entry points live in the actions group below
+import { useGifts, useGiftsEnabled } from "@/hooks/useGifts";
 import { addressUrl, shortAddress, usd, riskLabel } from "@/lib/format";
 import { planSeriesSince, trackRecordSeries } from "@/lib/demoSeries";
 import { useChainReady } from "../useChainReady";
@@ -46,6 +48,10 @@ export function VeraScreen({
   const demo = useDemo();
   const { data: identity } = useAgentIdentity();
   const { data: record, isLoading: recordLoading } = useVeraRecord();
+  // gift-ui: how many gifts are waiting to be opened (the badge on "Your gifts")
+  const giftsOn = useGiftsEnabled();
+  const { sent: giftsSent, received: giftsReceived, claimableCount } = useGifts();
+  const hasGifts = giftsSent.length + giftsReceived.length > 0;
 
   // Track record: $100 following every recorded plan. Only the demo has a
   // series today — the real record has no cost basis yet, so the card is
@@ -189,6 +195,76 @@ export function VeraScreen({
           </div>
           <Icon name="chevR" size={18} style={{ color: "var(--ink-3)", flex: "none" }} />
         </button>
+
+        {/* ── gift-ui: hidden until the gift contract is live on this chain ─ */}
+        {giftsOn && (
+        <button
+          className="card tap"
+          onClick={() => go("gift")}
+          style={{ width: "100%", padding: 16, display: "flex", alignItems: "center", gap: 14, textAlign: "left" }}
+        >
+          <span
+            style={{ width: 44, height: 44, borderRadius: 13, flex: "none", display: "grid", placeItems: "center", background: "var(--accent-soft)", color: "var(--accent)" }}
+          >
+            <Icon name="send" size={21} stroke={2} />
+          </span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 700, fontSize: 15.5 }}>Gift a basket</div>
+            <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 2, lineHeight: 1.45 }}>
+              Invest for someone else, held safely until a day you pick.
+            </div>
+          </div>
+          <Icon name="chevR" size={18} style={{ color: "var(--ink-3)", flex: "none" }} />
+        </button>
+
+        )}
+        {giftsOn && hasGifts && (
+          <button
+            className="card tap"
+            onClick={() => go("gifts")}
+            aria-label={claimableCount > 0 ? `Your gifts, ${claimableCount} ready to claim` : "Your gifts"}
+            style={{ width: "100%", padding: 16, display: "flex", alignItems: "center", gap: 14, textAlign: "left" }}
+          >
+            <span
+              style={{ position: "relative", width: 44, height: 44, borderRadius: 13, flex: "none", display: "grid", placeItems: "center", background: "var(--surface-2)", color: "var(--ink-2)" }}
+            >
+              <Icon name="receipt" size={20} stroke={2} />
+              {claimableCount > 0 && (
+                <span
+                  className="tnum"
+                  style={{
+                    position: "absolute",
+                    top: -5,
+                    right: -5,
+                    minWidth: 20,
+                    height: 20,
+                    padding: "0 5px",
+                    borderRadius: 99,
+                    display: "grid",
+                    placeItems: "center",
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                    background: "var(--primary)",
+                    color: "var(--primary-ink)",
+                    boxShadow: "0 0 0 2px var(--surface)",
+                  }}
+                >
+                  {claimableCount}
+                </span>
+              )}
+            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 15.5 }}>Your gifts</div>
+              <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 2, lineHeight: 1.45 }}>
+                {claimableCount > 0
+                  ? `${claimableCount === 1 ? "One is" : `${claimableCount} are`} ready to claim.`
+                  : "The ones you sent and the ones waiting for you."}
+              </div>
+            </div>
+            <Icon name="chevR" size={18} style={{ color: "var(--ink-3)", flex: "none" }} />
+          </button>
+        )}
+        {/* ── end gift-ui ─────────────────────────────────────────────────── */}
       </div>
 
       {/* why trust me */}
