@@ -123,9 +123,32 @@ function toBigInt(v: unknown, field: string): bigint {
  * Best route for `amountIn` (raw) of `tokenIn` into `tokenOut`. Returns null when Kyber has
  * no path (e.g. a stock that isn't minted yet). Throws KyberError on upstream failure.
  */
+/**
+ * Private market makers quote off-chain: the price is signed, short-lived and
+ * usually single-use. That is fine for a swap that is signed and sent in the
+ * same breath, and wrong for a plan, which is built, reviewed, held to confirm,
+ * then bundled — by the time it lands the quote can be gone, and the whole
+ * invest reverts with its gas spent. One of ours did, on a Bitcoin leg routed
+ * through `pmm-8`.
+ *
+ * So: look at the route we were given, and if any hop is a PMM, ask again with
+ * those sources excluded. Costs a second request only when a PMM appears, and
+ * an AMM route survives the wait.
+ */
+function pmmSourcesIn(summary: KyberRouteSummary): string[] {
+  const route = summary.route;
+  if (!Array.isArray(route)) return [];
+  const found = new Set<string>();
+  for (const hop of route.flat() as { exchange?: unknown }[]) {
+    const ex = typeof hop?.exchange === "string" ? hop.exchange : "";
+    if (ex.toLowerCase().startsWith("pmm")) found.add(ex);
+  }
+  return [...found];
+}
+
 export async function kyberRoute(
   chain: StaxChain,
-  args: { tokenIn: `0x${string}`; tokenOut: `0x${string}`; amountIn: bigint },
+  args: { tokenIn: `0x${string}`; tokenOut: `0x${string}`; amountIn: bigint; excludeSources?: string[] },
 ): Promise<KyberRouteResult | null> {
   const slug = slugOf(chain);
   const q = new URLSearchParams({
@@ -133,6 +156,7 @@ export async function kyberRoute(
     tokenOut: args.tokenOut,
     amountIn: args.amountIn.toString(),
   });
+  if (args.excludeSources?.length) q.set("excludedSources", args.excludeSources.join(","));
   try {
     const data = await call<{ routeSummary?: KyberRouteSummary; routerAddress?: string }>(
       `${API_BASE}/${slug}/api/v1/routes?${q}`,
@@ -142,6 +166,15 @@ export async function kyberRoute(
     const routerAddress = assertWhitelistedRouter(chain, data.routerAddress);
     const amountOut = toBigInt(data.routeSummary.amountOut, "amountOut");
     if (amountOut <= BigInt(0)) return null;
+
+    // Second pass only when the first route leaned on a market maker.
+    const pmm = args.excludeSources?.length ? [] : pmmSourcesIn(data.routeSummary);
+    if (pmm.length) {
+      const amm = await kyberRoute(chain, { ...args, excludeSources: pmm });
+      if (amm) return amm;
+      // No AMM-only route: better a perishable quote than no route at all.
+      console.warn(`[kyber] only a PMM route for ${args.tokenOut} (${pmm.join(",")})`);
+    }
     return { routeSummary: data.routeSummary, routerAddress, amountOut };
   } catch (e) {
     if (e instanceof KyberNoRoute) return null;
