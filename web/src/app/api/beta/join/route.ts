@@ -20,6 +20,9 @@ const Body = z.object({
     .refine((a) => isAddress(a), "Invalid address.")
     .optional(),
   ref: z.string().trim().max(32).optional(),
+  // Honeypot: a hidden "website" field on the beta page that people never see.
+  // Anything in it means a bot filled the form.
+  website: z.string().max(200).optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -35,6 +38,7 @@ export async function POST(req: NextRequest) {
   } catch {
     return badRequest("Invalid request body.");
   }
+  if (body.website) return badRequest();
 
   try {
     const access = await joinWaitlist({ userId: user.userId, address: body.address, ref: body.ref });

@@ -87,6 +87,16 @@
   max-width: 100%;
 }
 
+/* Honeypot: off-screen, never focusable, never read out. */
+.honeypot {
+  position: absolute;
+  left: -10000px;
+  top: auto;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
 /* ── The card ─────────────────────────────────────────────────────────── */
 .cardCol {
   grid-column: 4 / span 6;

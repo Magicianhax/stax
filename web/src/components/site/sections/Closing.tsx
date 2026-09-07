@@ -77,7 +77,15 @@ export function Closing() {
             </nav>
             <div className={s.legal}>
               <p className={s.elig}>Stocks are issued by Coinbase on Base and Backed on Mantle for eligible non-US users.</p>
-              <p className={s.copy}>© 2026 Stax</p>
+              <p className={s.copy}>
+                <span>© 2026 Stax</span>
+                <Link href="/privacy" className={s.legalLink}>
+                  Privacy
+                </Link>
+                <Link href="/terms" className={s.legalLink}>
+                  Terms
+                </Link>
+              </p>
             </div>
           </div>
         </div>

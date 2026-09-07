@@ -3,6 +3,8 @@
 // /beta first viewport: the line, one sentence, the live counts, then either
 // the login button (signed out) or the waitlist card (signed in). Signing in
 // joins the list automatically (useBetaJoin) and the card takes over in place.
+// Spam: a hidden "website" honeypot (rejected server-side if filled) and a 2 s
+// minimum time on the page before the sign-in opens. No captcha.
 import { useEffect, useRef, useState } from "react";
 import { useLogin, useModalStatus, usePrivy } from "@privy-io/react-auth";
 import { useBetaAccess, useBetaJoin, useBetaStats } from "@/hooks/useBetaAccess";
@@ -14,11 +16,24 @@ import L from "@/components/site/layout.module.css";
 import { BetaCard } from "./BetaCard";
 import s from "./Beta.module.css";
 
+const MIN_TIME_ON_PAGE_MS = 2000;
+
 export function BetaHero() {
   const { ready, authenticated } = usePrivy();
   const { stats } = useBetaStats();
   const { access, loading, error, refresh } = useBetaAccess();
-  const { joining, joinError, retryJoin } = useBetaJoin(access);
+  const honeypot = useRef<HTMLInputElement>(null);
+  const { joining, joinError, retryJoin } = useBetaJoin(access, {
+    honeypot: () => honeypot.current?.value ?? "",
+  });
+  const mountedAt = useRef(0);
+  const delay = useRef<number | null>(null);
+  useEffect(() => {
+    mountedAt.current = Date.now();
+    return () => {
+      if (delay.current) window.clearTimeout(delay.current);
+    };
+  }, []);
 
   const [signing, setSigning] = useState(false);
   const { login } = useLogin({
@@ -37,9 +52,14 @@ export function BetaHero() {
   }, [isOpen]);
 
   const onJoin = () => {
-    if (!ready) return;
+    if (!ready || signing) return;
+    if (honeypot.current?.value) return;
     setSigning(true);
-    login({ loginMethods: ["email", "google", "twitter", "wallet"] });
+    const open = () => login({ loginMethods: ["email", "google", "twitter", "wallet"] });
+    // A person takes longer than 2 s to read the page; a script does not.
+    const wait = MIN_TIME_ON_PAGE_MS - (Date.now() - mountedAt.current);
+    if (wait > 0) delay.current = window.setTimeout(open, wait);
+    else open();
   };
 
   const cardError = error ?? joinError;
@@ -76,11 +96,15 @@ export function BetaHero() {
           </p>
 
           {!authenticated && (
-            <div className={s.action}>
+            <form className={s.action} onSubmit={(e) => e.preventDefault()}>
+              <div className={s.honeypot} aria-hidden="true">
+                <label htmlFor="beta-website">Website</label>
+                <input ref={honeypot} id="beta-website" name="website" type="text" tabIndex={-1} autoComplete="off" />
+              </div>
               <ShineButton onClick={onJoin} disabled={signing}>
                 {signing ? "Opening sign-in…" : "Continue with email, Google, X or a wallet"}
               </ShineButton>
-            </div>
+            </form>
           )}
         </Reveal>
 

@@ -10,6 +10,7 @@ import { useTheme, type ColorMode } from "@/hooks/useTheme";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { useHaptics, haptic } from "@/lib/haptics";
 import { shortAddress } from "@/lib/format";
+import { siteUrl } from "@/lib/urls";
 import { iconBtn, sectionLabel } from "./primitives";
 import { useChainReady } from "../useChainReady";
 
@@ -299,6 +300,20 @@ export function SettingsScreen({
             title="Follow @stax_market"
             sub="Updates and support on X"
             onClick={() => window.open("https://x.com/stax_market", "_blank", "noopener")}
+            right={<Icon name="arrowUR" size={16} style={{ color: "var(--ink-3)" }} />}
+            borderTop
+          />
+          <Row
+            icon="lock"
+            title="Privacy"
+            onClick={() => window.open(siteUrl("/privacy"), "_blank", "noopener")}
+            right={<Icon name="arrowUR" size={16} style={{ color: "var(--ink-3)" }} />}
+            borderTop
+          />
+          <Row
+            icon="signature"
+            title="Terms"
+            onClick={() => window.open(siteUrl("/terms"), "_blank", "noopener")}
             right={<Icon name="arrowUR" size={16} style={{ color: "var(--ink-3)" }} />}
             borderTop
           />

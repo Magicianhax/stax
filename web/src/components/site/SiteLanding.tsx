@@ -32,6 +32,7 @@ import { Baskets } from "@/components/site/sections/Baskets";
 import { Assets } from "@/components/site/sections/Assets";
 import { Faq } from "@/components/site/sections/Faq";
 import { Closing } from "@/components/site/sections/Closing";
+import { CookieNotice } from "@/components/site/CookieNotice";
 import { captureRef } from "@/lib/referral";
 import { appUrl } from "@/lib/urls";
 
@@ -67,6 +68,7 @@ export function SiteLanding() {
         <Assets />
         <Faq />
         <Closing />
+        <CookieNotice />
       </div>
       <script dangerouslySetInnerHTML={{ __html: MODE_SCRIPT }} />
     </>

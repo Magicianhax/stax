@@ -76,7 +76,13 @@ export function useBetaAccess(): {
 
 const SMART_ACCOUNT_WAIT_MS = 2000;
 
-export function useBetaJoin(access: Access | null): {
+export function useBetaJoin(
+  access: Access | null,
+  opts: {
+    /** Reads the hidden honeypot field on the page; a filled value is sent and the server rejects it. */
+    honeypot?: () => string;
+  } = {},
+): {
   joining: boolean;
   joinError: string | null;
   retryJoin: () => void;
@@ -94,15 +100,20 @@ export function useBetaJoin(access: Access | null): {
   useEffect(() => {
     walletRef.current = wallet;
   });
+  const honeypotRef = useRef(opts.honeypot);
+  useEffect(() => {
+    honeypotRef.current = opts.honeypot;
+  });
 
   const mutation = useMutation({
     mutationFn: async (address: string | undefined): Promise<Access> => {
       const ref = getRef();
+      const website = honeypotRef.current?.() || undefined;
       return readJson<Access>(
         await authedFetch("/api/beta/join", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ address, ref: ref ?? undefined }),
+          body: JSON.stringify({ address, ref: ref ?? undefined, website }),
         }),
       );
     },

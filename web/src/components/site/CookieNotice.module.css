@@ -1,0 +1,113 @@
+/* One-line notice, bottom of the viewport, glass. Slides up 1.5 s after the
+   landing mounts; the dismiss is a 44px round button. Reduced motion: no
+   slide, just appears. */
+.notice {
+  position: fixed;
+  left: 50%;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(calc(100vw - 32px), 560px);
+  padding: 6px 6px 6px 18px;
+  border-radius: 99px;
+  background: var(--s-glass-strong);
+  backdrop-filter: var(--s-glass-blur);
+  border: 1px solid var(--s-glass-line);
+  box-shadow: var(--s-glass-hi), var(--s-shadow-lg);
+  color: var(--s-ink);
+  transform: translate(-50%, 0);
+  animation: cookieIn 420ms var(--s-ease-expo) both;
+}
+
+.text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--s-ink-2);
+  text-wrap: pretty;
+}
+
+.text b {
+  font-weight: 600;
+  color: var(--s-ink);
+}
+
+.link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 2px;
+  font-weight: 600;
+  color: var(--s-primary-d);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--s-primary) 45%, transparent);
+  text-underline-offset: 3px;
+  border-radius: 6px;
+}
+
+.close {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--s-ink) 6%, transparent);
+  color: var(--s-ink);
+  cursor: pointer;
+  transition: background 180ms var(--s-ease);
+}
+
+@media (hover: hover) {
+  .close:hover {
+    background: var(--s-primary-soft);
+    color: var(--s-primary-d);
+  }
+}
+
+@keyframes cookieIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 12px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+@media (max-width: 479px) {
+  .notice {
+    left: 16px;
+    right: 16px;
+    max-width: none;
+    transform: none;
+    border-radius: 22px;
+    padding: 8px 8px 8px 16px;
+  }
+  .text {
+    font-size: 13.5px;
+  }
+  @keyframes cookieIn {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notice {
+    animation: none;
+  }
+  .close {
+    transition: none;
+  }
+}
