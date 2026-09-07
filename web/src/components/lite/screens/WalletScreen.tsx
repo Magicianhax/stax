@@ -247,6 +247,42 @@ export function WalletScreen({
           </div>
           <div className="tnum" style={{ fontWeight: 700, fontSize: 16 }}>{hide ? DOTS : usd(cash)}</div>
         </button>
+
+        {/* Wallet is money movement; the holdings live on Owned. Without this row a
+            person with stocks sees only their cash here and thinks they lost them. */}
+        <button
+          className="card row tap"
+          onClick={() => { haptic.light(); go("portfolio"); }}
+          style={{ width: "100%", marginTop: 10, padding: "14px 16px", display: "flex", alignItems: "center", gap: 13, textAlign: "left" }}
+        >
+          <span
+            aria-hidden
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: 12,
+              flex: "none",
+              display: "grid",
+              placeItems: "center",
+              background: "var(--primary-soft)",
+              color: "var(--primary)",
+            }}
+          >
+            <Icon name="trend" size={19} stroke={2.2} />
+          </span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 600, fontSize: 15.5, letterSpacing: "-.01em" }}>
+              {invested > 0 ? "Your stocks and funds" : "Looking for stocks?"}
+            </div>
+            <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 2 }}>
+              {invested > 0 ? "See what you own and how it's doing" : "Browse the market and put your cash to work"}
+            </div>
+          </div>
+          {invested > 0 && (
+            <div className="tnum" style={{ fontWeight: 700, fontSize: 16 }}>{hide ? DOTS : usd(invested)}</div>
+          )}
+          <Icon name="chevR" size={18} style={{ color: "var(--ink-3)", flex: "none" }} />
+        </button>
       </div>
 
       {/* cash flow — net in/out by week, from the same transfers listed below */}

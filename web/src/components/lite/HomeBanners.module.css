@@ -1,0 +1,128 @@
+/* Home hero banner: slides stack in one frame and cross-fade, so the card never
+   changes height and nothing below it moves as the message rotates. */
+
+.frame {
+  position: relative;
+  display: grid;
+}
+
+.slide {
+  grid-area: 1 / 1;
+  width: 100%;
+  text-align: left;
+  padding: 18px;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  /* background / colour / shadow are set inline on the element: the global
+     `.card` rule would otherwise win on source order. */
+  position: relative;
+  overflow: hidden;
+  opacity: 0;
+  transform: scale(0.995);
+  transition:
+    opacity 0.5s var(--ease-out),
+    transform 0.5s var(--ease-out);
+  pointer-events: none;
+}
+.slide[data-on="true"] {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+/* ambient sheen — sits behind, never blocks the press */
+.wash {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(120% 140% at 92% -20%, rgba(255, 255, 255, 0.28), transparent 55%);
+  pointer-events: none;
+}
+
+.copy {
+  flex: 1;
+  position: relative;
+  min-width: 0;
+}
+.title {
+  display: block;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.body {
+  display: block;
+  font-size: 13.5px;
+  opacity: 0.85;
+  margin-top: 1px;
+}
+
+/* The gift slide's mark: a soft disc so it holds the same visual weight as the orb. */
+.giftArt {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  flex: none;
+  display: grid;
+  place-items: center;
+  position: relative;
+  background: color-mix(in srgb, var(--primary-ink) 16%, transparent);
+  color: var(--primary-ink);
+}
+
+/* Dots sit inside the card's bottom edge: a progress hint, not furniture. */
+.dots {
+  position: absolute;
+  right: 16px;
+  bottom: 10px;
+  display: flex;
+  gap: 6px;
+  z-index: 1;
+}
+.dot {
+  width: 22px;
+  height: 22px; /* 22px visual, but the row sits inside a 44px-tall press area */
+  display: grid;
+  place-items: center;
+  position: relative;
+}
+.dot::after {
+  content: "";
+  width: 18px;
+  height: 4px;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--primary-ink) 26%, transparent);
+  transition: background 0.3s var(--ease-out);
+}
+.dot[data-on="true"]::after {
+  background: color-mix(in srgb, var(--primary-ink) 42%, transparent);
+}
+.fill {
+  position: absolute;
+  left: 2px;
+  width: 18px;
+  height: 4px;
+  border-radius: 99px;
+  background: var(--primary-ink);
+  transform-origin: left center;
+  animation: bannerFill 6s linear both;
+}
+@keyframes bannerFill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slide {
+    transition: opacity 0.2s linear;
+    transform: none;
+  }
+  .fill {
+    animation: none;
+    transform: scaleX(1);
+  }
+}

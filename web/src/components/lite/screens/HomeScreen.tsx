@@ -15,22 +15,14 @@ import { usePortfolio, type Holding } from "@/hooks/useBalances";
 import { useActivity } from "@/hooks/useActivity";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { useDemo } from "@/components/demo/DemoProvider";
-import {
-  Icon,
-  VeraOrb,
-  HoldingRow,
-  LogoCluster,
-  SectionTitle,
-  Sparkline,
-  VerifiedBadge,
-  NetworkChip,
-} from "@/components/design";
+import { Icon, HoldingRow, LogoCluster, SectionTitle, Sparkline, VerifiedBadge, NetworkChip } from "@/components/design";
 import { Money, Reveal } from "@/components/motion";
 import { toTile, catFor } from "@/lib/displayAssets";
 import { usd, tokenQty } from "@/lib/format";
 import { portfolioSeries } from "@/lib/demoSeries";
 import { iconBtn } from "./primitives";
 import { useChainReady } from "../useChainReady";
+import { HomeBanners } from "../HomeBanners";
 import { useBaskets } from "@/hooks/useBaskets";
 import { BasketRailTile } from "./basketPrimitives";
 import type { LoopParams } from "../LiteApp";
@@ -279,52 +271,8 @@ export function HomeScreen({
           </button>
         </div>
 
-        {/* Vera invite */}
-        <div style={{ padding: "16px 22px 4px" }}>
-          <button
-            onClick={() => go("goal")}
-            className="card tap"
-            style={{
-              width: "100%",
-              textAlign: "left",
-              padding: 18,
-              display: "flex",
-              gap: 14,
-              alignItems: "center",
-              background: "var(--vera-grad)",
-              color: "var(--primary-ink)",
-              boxShadow: "var(--shadow-lg)",
-              position: "relative",
-              overflow: "hidden",
-            }}
-          >
-            {/* ambient sheen — sits behind, never blocks the press */}
-            <span
-              aria-hidden
-              style={{
-                position: "absolute",
-                inset: 0,
-                background:
-                  "radial-gradient(120% 140% at 92% -20%, rgba(255,255,255,.28), transparent 55%)",
-                pointerEvents: "none",
-              }}
-            />
-            {/* signature light-sweep — one pass on mount, the brand's hero moment */}
-            <span aria-hidden className="sheen-sweep" />
-            <VeraOrb size={50} pulse />
-            <div style={{ flex: 1, position: "relative" }}>
-              <div style={{ fontSize: 17, fontWeight: 700, letterSpacing: "-.01em" }}>
-                Invest with Vera
-              </div>
-              <div style={{ fontSize: 13.5, opacity: 0.85, marginTop: 1 }}>
-                {ready
-                  ? "Tell me a goal, and I’ll build the plan."
-                  : `Opening shortly on ${chain.name}. Browse prices meanwhile.`}
-              </div>
-            </div>
-            <Icon name="arrowUR" size={22} stroke={2.2} style={{ position: "relative" }} />
-          </button>
-        </div>
+        {/* hero invite — Vera, and gifting once its contract is live, rotating */}
+        <HomeBanners go={go} />
 
         {/* baskets rail — one-tap mixes, under the Vera card */}
         {rail.length > 0 && (
