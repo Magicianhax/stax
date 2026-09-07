@@ -66,11 +66,22 @@ export function reverseRoute(hops: RouteHop[]): RouteHop[] {
  * next endpoint on HTTP/RPC errors such as "over rate limit".
  */
 export function chainTransport(chain: StaxChain): Transport {
-  const urls = [chain.rpcUrl, ...chain.rpcFallbacks];
+  // Server-only keyed endpoint (BASE_RPC_URL / MANTLE_RPC_URL) goes first: it
+  // never ships to the browser, so a CDP/Alchemy token can't be lifted from the
+  // bundle. The client keeps the public NEXT_PUBLIC_* / fallback order.
+  const keyed = serverRpcUrl(chain);
+  const urls = [...(keyed ? [keyed] : []), chain.rpcUrl, ...chain.rpcFallbacks].filter((u, i, a) => a.indexOf(u) === i);
   return fallback(
     urls.map((u) => http(u, { timeout: 12_000, retryCount: 1 })),
     { rank: false, retryCount: 0 },
   );
+}
+
+/** The keyed, server-only RPC for `chain`, if configured. Undefined in the browser. */
+export function serverRpcUrl(chain: StaxChain): string | undefined {
+  if (typeof window !== "undefined") return undefined;
+  const v = chain.key === "base" ? process.env.BASE_RPC_URL : process.env.MANTLE_RPC_URL;
+  return v?.trim() || undefined;
 }
 
 export { BASE, MANTLE };

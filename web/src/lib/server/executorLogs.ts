@@ -17,6 +17,7 @@ import "server-only";
 import { createPublicClient, decodeEventLog, encodeEventTopics, fallback, http, parseAbiItem, type AbiEvent, type PublicClient } from "viem";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import type { ChainKey, StaxChain } from "@/lib/chains/types";
+import { serverRpcUrl } from "@/lib/chains";
 import { db, executorEvents } from "@/lib/db";
 import { serverClient } from "@/lib/server/chain";
 import {
@@ -199,7 +200,8 @@ const logClients = new Map<ChainKey, PublicClient>();
 function logClient(chain: StaxChain): PublicClient {
   let c = logClients.get(chain.key);
   if (!c) {
-    const urls = [chain.rpcUrl, ...LOG_RPC_FALLBACKS[chain.key].filter((u) => u !== chain.rpcUrl)];
+    const keyed = serverRpcUrl(chain);
+    const urls = [...(keyed ? [keyed] : []), chain.rpcUrl, ...LOG_RPC_FALLBACKS[chain.key]].filter((u, i, a) => a.indexOf(u) === i);
     c = createPublicClient({
       chain: chain.chain,
       transport: fallback(urls.map((u) => http(u, { retryCount: 1 })), { rank: false }),
