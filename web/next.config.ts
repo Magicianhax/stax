@@ -38,7 +38,7 @@ const ADMIN_HOST = hostOf(ADMIN_URL, "admin.stax.best");
 const SITE_HOSTS = ["www.stax.best", "stax.best"];
 
 // Paths a product host must still serve as-is (assets, API, PWA files, real routes).
-const PASSTHROUGH = "api|_next|sw\\.js|manifest\\.webmanifest|offline|brand|icons|favicon\\.ico|icon|apple-icon|opengraph-image|twitter-image|robots\\.txt|sitemap\\.xml|llms\\.txt|app|beta|admin|demo";
+const PASSTHROUGH = "api|monitoring|_next|sw\\.js|manifest\\.webmanifest|offline|brand|icons|favicon\\.ico|icon|apple-icon|opengraph-image|twitter-image|robots\\.txt|sitemap\\.xml|llms\\.txt|app|beta|admin|demo";
 
 const nextConfig: NextConfig = {
   async headers() {
@@ -92,4 +92,8 @@ export default withSentryConfig(nextConfig, {
   project: process.env.SENTRY_PROJECT,
   silent: true,
   sourcemaps: { disable: !process.env.SENTRY_AUTH_TOKEN },
+  // Browser events go through our own origin (ad blockers and Brave Shields
+  // block *.sentry.io). The route is rewritten by the Sentry plugin; the
+  // subdomain PASSTHROUGH below lets it through on app./beta./admin. hosts.
+  tunnelRoute: "/monitoring",
 });
