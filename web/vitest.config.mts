@@ -15,6 +15,17 @@ export default defineConfig({
     include: ["src/**/*.test.ts"],
   },
   resolve: {
-    alias: [{ find: /^@\//, replacement: `${fileURLToPath(new URL("./src", import.meta.url))}/` }],
+    alias: [
+      { find: /^@\//, replacement: `${fileURLToPath(new URL("./src", import.meta.url))}/` },
+      // `server-only` throws on import outside a React Server Component. It ships an empty
+      // module for exactly this, reached in the app by the `react-server` export condition
+      // (the repo's own scripts pass `tsx --conditions=react-server` for the same reason).
+      // Pointing at the file directly keeps the condition out of global resolution, so no
+      // other package silently switches build.
+      {
+        find: /^server-only$/,
+        replacement: fileURLToPath(new URL("./node_modules/server-only/empty.js", import.meta.url)),
+      },
+    ],
   },
 });

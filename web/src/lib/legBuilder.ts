@@ -177,8 +177,11 @@ async function quoterPath(
   }
 }
 
-/** Split usdcTotal across symbols by weight; last leg absorbs rounding dust. */
-function splitByWeight(
+/**
+ * Split usdcTotal across symbols by weight; last leg absorbs rounding dust.
+ * Exported for lib/legBuilder.test.ts — it divides real money and is worth pinning.
+ */
+export function splitByWeight(
   entries: { asset: Asset; weightPct: number }[],
   usdcTotal: bigint,
 ): { asset: Asset; usdcIn: bigint }[] {
