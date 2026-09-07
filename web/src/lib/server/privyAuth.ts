@@ -115,6 +115,40 @@ export async function fetchPrivyEmail(userId: string): Promise<string | null> {
   }
 }
 
+/**
+ * The X (Twitter) username Privy knows for a user, lowercased and without its "@".
+ * Null when they have no X account linked or the lookup fails.
+ *
+ * This needs no EMAIL_TRUSTED_PROVIDERS-style guard, and the difference is worth being
+ * precise about. That guard exists because several providers hand over a profile `email`
+ * the account holder never proved they control, so the address is a claim about a THIRD
+ * party. A `twitter_oauth` account's `username` is not a claim about anyone else: X itself
+ * returned it for the account that just completed the OAuth handshake, so holding the
+ * account and holding the handle are the same fact. We still require `verified_at`, so a
+ * half-linked account can never answer for a gift.
+ *
+ * The honest caveat: X releases and re-issues usernames, so a handle can change hands in a
+ * way an email address cannot. A gift addressed to "@name" is claimable by whoever holds
+ * "@name" on the day it unlocks. That is exactly why a gift can only be claimed ONCE, and
+ * why the giver sees who claimed it: the window is one claim, visible, not an open door.
+ */
+export async function fetchPrivyXUsername(userId: string): Promise<string | null> {
+  try {
+    const user = await privy().users()._get(userId);
+    for (const acct of user.linked_accounts) {
+      if (acct.type !== "twitter_oauth") continue;
+      const username = typeof acct.username === "string" ? acct.username.trim() : "";
+      if (username && typeof acct.verified_at === "number") {
+        return username.replace(/^@+/, "").toLowerCase();
+      }
+    }
+    return null;
+  } catch (e) {
+    console.warn("[auth] fetchPrivyXUsername failed:", e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
 export interface PrivyWallet {
   address: string;
   /** embedded = Privy-managed EOA; external = user's own wallet; smart_wallet = Privy smart wallet. */

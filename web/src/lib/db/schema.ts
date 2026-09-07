@@ -313,12 +313,18 @@ export const depositAddresses = pgTable(
  * (0x + 32 random bytes) so the database row, the TimelockGift entry and the share
  * link are all the same id.
  *
- * The recipient's email is never stored. `recipient_email_hash` is a deterministic,
- * peppered SHA-256 of the normalised address — that is what makes "gifts addressed
- * to me" a single indexed lookup. `recipient_salt` is per gift and produces the
- * DIFFERENT hash that goes on-chain, so two gifts to the same person are unlinkable
- * to anyone reading Base. `recipient_email_masked` ("a•••@gmail.com") is shown back
- * to the giver only.
+ * A gift is addressed to an email or to an X username — `recipient_kind` says which,
+ * and it is the ONLY thing that differs. Both kinds reuse the same two hash columns,
+ * so the storage, the salt and the on-chain value are identical either way.
+ *
+ * The recipient's identity itself is never stored. `recipient_email_hash` is a
+ * deterministic, peppered SHA-256 of the normalised address or handle — that is what
+ * makes "gifts addressed to me" a single indexed lookup. `recipient_salt` is per gift
+ * and produces the DIFFERENT hash that goes on-chain, so two gifts to the same person
+ * are unlinkable to anyone reading Base. `recipient_email_masked` is the giver's own
+ * display line: "a•••@gmail.com" for an email, and "@jack" in the clear for an X handle,
+ * because a handle is public where an address is not. Shown back to the giver only,
+ * never on the public share page.
  *
  * `status` walks pending → funded → (claimed | reclaimed); `failed` is a gift whose
  * parking transaction never landed.
@@ -334,8 +340,11 @@ export const gifts = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     /** The giver's smart account, lowercased — the only address that may reclaim. */
     fromAddress: text("from_address").notNull(),
+    /** 'email' or 'x'. Decides which Privy identity a claim is checked against. */
+    recipientKind: text("recipient_kind").notNull().default("email"),
     recipientEmailHash: text("recipient_email_hash").notNull(),
     recipientSalt: text("recipient_salt").notNull(),
+    /** The giver's display line: "a•••@gmail.com" masked, or "@jack" in the clear. */
     recipientEmailMasked: text("recipient_email_masked").notNull(),
     /** Curated id ("base:big-tech") or a stored `baskets.id`. No FK, same reasoning as autopilots. */
     basketId: text("basket_id"),
@@ -367,6 +376,7 @@ export const gifts = pgTable(
       "gifts_status_check",
       sql`${t.status} in ('pending', 'funded', 'claimed', 'reclaimed', 'failed')`,
     ),
+    check("gifts_recipient_kind_check", sql`${t.recipientKind} in ('email', 'x')`),
   ],
 );
 

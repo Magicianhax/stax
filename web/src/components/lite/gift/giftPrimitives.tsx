@@ -94,7 +94,8 @@ export function StatusPill({ gift, style }: { gift: { status: Gift["status"]; cl
  */
 export function GiftRow({ gift, onClick, last }: { gift: Gift; onClick: () => void; last?: boolean }) {
   const kind = pillFor(gift);
-  const who = gift.direction === "sent" ? gift.recipientEmailMasked : gift.fromName;
+  // "a•••@gmail.com" or "@jack" on a gift you sent; their first name on one you were sent.
+  const who = gift.direction === "sent" ? gift.recipientLabel : gift.fromName;
   // The pill already says "Claimed" / "Returned" / "Ready to claim", so only a
   // gift still counting down needs the timing spelled out beside it. Timing goes
   // first: if the line has to truncate it should eat the tail of an address, not

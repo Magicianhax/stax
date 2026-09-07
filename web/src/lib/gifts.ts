@@ -47,8 +47,24 @@ export function giftContractFor(chain: ChainKey): `0x${string}` | null {
   return address && address !== ZERO ? address : null;
 }
 
+/** X's own rule for a username: 1–15 characters of [A-Za-z0-9_]. */
+export const X_USERNAME_MAX = 15;
+
 // ── shapes ───────────────────────────────────────────────────────────────────
 export type GiftStatus = "pending" | "funded" | "claimed" | "reclaimed" | "failed";
+
+/**
+ * Who a gift is addressed to. Both kinds are answered the same way — the recipient
+ * signs in with that identity through Privy and the server checks its OWN Privy user
+ * record before it signs a claim — so only the identity check differs, never the
+ * storage, the hashes or the contract.
+ */
+export type GiftRecipientKind = "email" | "x";
+
+/** A recipient in the one normalised form the hashes are ever taken over. */
+export type GiftRecipient =
+  | { kind: "email"; email: string }
+  | { kind: "x"; username: string };
 
 /** One parked holding. `amount` is raw token units as a decimal string (never a number). */
 export interface GiftToken {
@@ -95,8 +111,14 @@ export interface GiftSummary {
   holdings: GiftHolding[];
   createTxHash: string | null;
   claimTxHash: string | null;
-  /** Masked recipient ("a•••@gmail.com"). Only on gifts the caller sent. */
-  recipientEmailMasked: string | null;
+  /** Which identity this gift is addressed to. Decides the claim check, nothing else. */
+  recipientKind: GiftRecipientKind;
+  /**
+   * Who it's for, as the giver sees it: "a•••@gmail.com" for an email, "@jack" for an X
+   * handle. Only on gifts the caller SENT — never on a received gift and never on the
+   * public share page, which must not reveal who a gift is for.
+   */
+  recipientLabel: string | null;
   /** The giver's first name when we can tell. Only on gifts addressed to the caller. */
   fromName: string | null;
   /** True when the caller can claim it right now (received, funded, past the unlock date). */
@@ -111,7 +133,14 @@ export interface GiftSummary {
 export interface CreateGiftRequest {
   basketId: string;
   amountUsd: number;
-  recipientEmail: string;
+  /** Who it's for. `{ kind: "x", username }` addresses it to an X account instead. */
+  recipient: GiftRecipient;
+  /**
+   * The pre-X body shape: a bare email, treated as `{ kind: "email" }`. Still accepted so
+   * an older client keeps working; new callers send `recipient`.
+   * @deprecated use `recipient`
+   */
+  recipientEmail?: string;
   /** ISO date/time the recipient may claim from. */
   unlockAt: string;
   note?: string;
@@ -148,7 +177,10 @@ export interface CreateGiftResponse {
   /** The full split as shown to people, with the cash-held slices marked. */
   holdings: GiftHolding[];
   basketName: string;
-  recipientEmailMasked: string;
+  /** Which identity the gift was addressed to, echoed back. */
+  recipientKind: GiftRecipientKind;
+  /** Who it's for, as the giver sees it: "a•••@gmail.com" or "@jack". */
+  recipientLabel: string;
   shareUrl: string;
 }
 
@@ -223,6 +255,50 @@ export function maskEmail(email: string): string {
   const domain = e.slice(at + 1);
   const head = local.slice(0, 1);
   return `${head}•••@${domain}`;
+}
+
+/**
+ * "@Jack" → "jack". The one form an X username is hashed, stored or compared in.
+ *
+ * X usernames are case-insensitive, so lowercasing is what makes "@Jack" on the gift and
+ * "jack" on the Privy record the same person. The leading "@" is display sugar people
+ * type by habit and never part of the handle itself.
+ */
+export function normalizeXUsername(username: string): string {
+  return username.trim().replace(/^@+/, "").toLowerCase();
+}
+
+const X_USERNAME_RE = new RegExp(`^[A-Za-z0-9_]{1,${X_USERNAME_MAX}}$`);
+
+/** X's rule, applied to the normalised form: 1–15 characters of [A-Za-z0-9_]. */
+export function looksLikeXUsername(username: string): boolean {
+  return X_USERNAME_RE.test(normalizeXUsername(username));
+}
+
+/**
+ * Normalise and validate a recipient of either kind, or null when it doesn't pass.
+ *
+ * The one place the two kinds branch on the way IN. Both halves of the feature call it —
+ * the give flow to decide whether the step is answered, the API before it hashes — so a
+ * handle the screen accepted can never be one the server rejects, and neither can hash a
+ * form the other would not have.
+ */
+export function parseGiftRecipient(input: GiftRecipient): GiftRecipient | null {
+  if (input.kind === "x") {
+    const username = normalizeXUsername(input.username);
+    return looksLikeXUsername(username) ? { kind: "x", username } : null;
+  }
+  const email = normalizeEmail(input.email);
+  return looksLikeEmail(email) ? { kind: "email", email } : null;
+}
+
+/**
+ * What the GIVER sees on their own gift. An email is masked, because it is private and
+ * readable over a shoulder; an X handle is shown whole, because "@jack" is already public.
+ * Never on the share page and never on a gift someone received — see GiftSummary.
+ */
+export function recipientLabel(recipient: GiftRecipient): string {
+  return recipient.kind === "x" ? `@${normalizeXUsername(recipient.username)}` : maskEmail(recipient.email);
 }
 
 /** Whole days from now until `iso`, rounded up. Negative once the date has passed. */

@@ -2,20 +2,27 @@ import "server-only";
 
 // Gifts (Postgres + the TimelockGift contract). See docs/GIFTS.md.
 //
-// The recipient's email never lands in a column. Two different hashes are taken of it,
-// for two different jobs:
+// A gift is addressed to an email or to an X username. Both take the SAME two hashes over
+// the same two columns — only the claim check differs — so nothing about the storage or
+// the contract changes when the kind does.
 //
-//   lookupHash(email)                deterministic, peppered with GIFT_EMAIL_PEPPER.
+// The recipient's address or handle never lands in a column. Two different hashes are
+// taken of it, for two different jobs:
+//
+//   lookupHash(recipient)            deterministic, peppered with GIFT_EMAIL_PEPPER.
 //                                    Stored as `recipient_email_hash` and indexed, so
 //                                    "gifts addressed to me" is one indexed lookup
 //                                    instead of a scan. A stolen database dump cannot
 //                                    be run through a wordlist without the pepper.
-//   onChainHash(salt, email)         per-gift salt, goes on-chain as `recipientHash`.
+//   onChainHash(salt, recipient)     per-gift salt, goes on-chain as `recipientHash`.
 //                                    Two gifts to the same person share no on-chain
 //                                    value, so nobody reading Base can link them.
 //
+// Each kind hashes in its own namespace, so an email and a handle can never collide, and
+// every email gift written before X existed keeps hashing to exactly the string it did.
+//
 // Neither hash is ever the authority for a claim: `claim-authorisation` compares the
-// signed-in user's Privy email against the lookup hash server-side, and only then does
+// signed-in user's Privy identity against the lookup hash server-side, and only then does
 // the server sign. The contract trusts that signature, not the hash.
 import { createHash, randomBytes } from "node:crypto";
 import { and, desc, eq, inArray, or } from "drizzle-orm";
@@ -26,7 +33,19 @@ import { serverClient } from "@/lib/server/chain";
 import { getBasket } from "@/lib/server/basketsStore";
 import { getChain } from "@/lib/chains";
 import { curatedBasketById, isBasketInvestable, isBasketShortId, type Basket } from "@/lib/baskets";
-import { maskEmail, normalizeEmail, TIMELOCK_GIFT_ABI, type GiftHolding, type GiftStatus, type GiftSummary, type GiftToken } from "@/lib/gifts";
+import { fetchPrivyEmail, fetchPrivyXUsername } from "@/lib/server/privyAuth";
+import {
+  normalizeEmail,
+  normalizeXUsername,
+  recipientLabel,
+  TIMELOCK_GIFT_ABI,
+  type GiftHolding,
+  type GiftRecipient,
+  type GiftRecipientKind,
+  type GiftStatus,
+  type GiftSummary,
+  type GiftToken,
+} from "@/lib/gifts";
 import { absoluteSiteUrl } from "@/lib/urls";
 
 /**
@@ -39,14 +58,27 @@ const PEPPER = process.env.GIFT_EMAIL_PEPPER ?? "";
 
 const sha256 = (input: string): string => createHash("sha256").update(input, "utf8").digest("hex");
 
-/** The indexed, deterministic hash of a recipient address. Hex, no 0x. */
-export function lookupHash(email: string): string {
-  return sha256(`stax-gift:v1:${PEPPER}:${normalizeEmail(email)}`);
+/**
+ * The recipient reduced to the exact bytes both hashes are taken over.
+ *
+ * The email form is byte-for-byte what it was before X recipients existed, so every gift
+ * already in the table keeps hashing to the value stored against it. X gets its own
+ * ":x:" namespace rather than sharing one, so no handle can ever collide with an address.
+ */
+function hashSubject(recipient: GiftRecipient): string {
+  return recipient.kind === "x"
+    ? `x:${normalizeXUsername(recipient.username)}`
+    : normalizeEmail(recipient.email);
+}
+
+/** The indexed, deterministic hash of a recipient. Hex, no 0x. */
+export function lookupHash(recipient: GiftRecipient): string {
+  return sha256(`stax-gift:v1:${PEPPER}:${hashSubject(recipient)}`);
 }
 
 /** The per-gift hash that goes on-chain. 0x + 32 bytes. */
-export function onChainHash(salt: string, email: string): `0x${string}` {
-  return `0x${sha256(`stax-gift:onchain:v1:${salt}:${normalizeEmail(email)}`)}`;
+export function onChainHash(salt: string, recipient: GiftRecipient): `0x${string}` {
+  return `0x${sha256(`stax-gift:onchain:v1:${salt}:${hashSubject(recipient)}`)}`;
 }
 
 /** A fresh giftId: 0x + 32 random bytes. Also the database row id and the share link. */
@@ -78,13 +110,52 @@ export function firstNameFromEmail(email: string | null | undefined): string | n
   return head[0].toUpperCase() + head.slice(1);
 }
 
+// ── who a gift is for, and whether the caller is them ────────────────────────
+/** A row's recipient kind, with anything unrecognised read as the original 'email'. */
+export function recipientKindOf(row: Pick<GiftRow, "recipientKind">): GiftRecipientKind {
+  return row.recipientKind === "x" ? "x" : "email";
+}
+
+/**
+ * Every identity Privy holds for `userId`, as lookup hashes — their email, their X
+ * handle, or both. This is the whole of "who am I" for gifting, and it is read from the
+ * PRIVY USER RECORD with the app's own credentials. Nothing a request carries reaches it.
+ */
+export async function recipientHashesFor(userId: string): Promise<string[]> {
+  const [email, username] = await Promise.all([fetchPrivyEmail(userId), fetchPrivyXUsername(userId)]);
+  const hashes: string[] = [];
+  if (email) hashes.push(lookupHash({ kind: "email", email }));
+  if (username) hashes.push(lookupHash({ kind: "x", username }));
+  return hashes;
+}
+
+/**
+ * Does the signed-in caller own the identity this gift is addressed to?
+ *
+ * THE security gate for claiming, and the one function both claim routes go through, so
+ * the email path and the X path can never drift apart. The identity is fetched from Privy
+ * server-side on the line below; the request body has no field for one and is never read.
+ * A gift addressed to an email is answered only by `fetchPrivyEmail`, which keeps its
+ * EMAIL_TRUSTED_PROVIDERS guard exactly as it was — adding X weakens nothing.
+ */
+export async function callerOwnsRecipient(userId: string, row: GiftRow): Promise<boolean> {
+  const kind = recipientKindOf(row);
+  const identity =
+    kind === "x" ? await fetchPrivyXUsername(userId) : await fetchPrivyEmail(userId);
+  if (!identity) return false;
+  const recipient: GiftRecipient =
+    kind === "x" ? { kind: "x", username: identity } : { kind: "email", email: identity };
+  return lookupHash(recipient) === row.recipientEmailHash;
+}
+
 // ── writes ───────────────────────────────────────────────────────────────────
 export interface NewGiftInput {
   id: `0x${string}`;
   chain: ChainKey;
   fromUserId: string;
   fromAddress: string;
-  recipientEmail: string;
+  /** Already normalised and validated by `parseGiftRecipient`. */
+  recipient: GiftRecipient;
   recipientSalt: string;
   basketId: string | null;
   basketName: string;
@@ -105,9 +176,11 @@ export async function createGift(input: NewGiftInput): Promise<GiftRow> {
       chain: input.chain,
       fromUserId: input.fromUserId,
       fromAddress: input.fromAddress.toLowerCase(),
-      recipientEmailHash: lookupHash(input.recipientEmail),
+      recipientKind: input.recipient.kind,
+      recipientEmailHash: lookupHash(input.recipient),
       recipientSalt: input.recipientSalt,
-      recipientEmailMasked: maskEmail(input.recipientEmail),
+      // Masked for an email, "@handle" in the clear for X. The giver's eyes only.
+      recipientEmailMasked: recipientLabel(input.recipient),
       basketId: input.basketId,
       basketName: input.basketName,
       holdings: input.holdings,
@@ -158,17 +231,22 @@ export async function getGiftRow(id: string): Promise<GiftRow | null> {
 }
 
 /**
- * Everything the caller is on either side of, newest first. `emailHash` is null when
- * Privy knows no email for them — then they simply have no received gifts.
+ * Everything the caller is on either side of, newest first.
+ *
+ * `recipientHashes` is every identity Privy knows for them — their email, their X handle,
+ * or both — each already run through `lookupHash`. Empty when Privy knows neither, and
+ * then they simply have no received gifts. One indexed `in` covers both kinds, so adding
+ * X costs the query nothing.
  */
 export async function listGiftsFor(
   chain: ChainKey,
   userId: string,
-  emailHash: string | null,
+  recipientHashes: string[],
 ): Promise<{ sent: GiftRow[]; received: GiftRow[] }> {
-  const mine = emailHash
-    ? or(eq(gifts.fromUserId, userId), eq(gifts.recipientEmailHash, emailHash))!
-    : eq(gifts.fromUserId, userId);
+  const mine =
+    recipientHashes.length > 0
+      ? or(eq(gifts.fromUserId, userId), inArray(gifts.recipientEmailHash, recipientHashes))!
+      : eq(gifts.fromUserId, userId);
   const rows = await db
     .select()
     .from(gifts)
@@ -176,12 +254,13 @@ export async function listGiftsFor(
     .orderBy(desc(gifts.createdAt))
     .limit(200);
 
+  const addressedToMe = new Set(recipientHashes);
   const sent: GiftRow[] = [];
   const received: GiftRow[] = [];
   for (const row of rows) {
     // A gift you sent to your own address shows up on both sides, which is honest.
     if (row.fromUserId === userId) sent.push(row);
-    if (emailHash && row.recipientEmailHash === emailHash) received.push(row);
+    if (addressedToMe.has(row.recipientEmailHash)) received.push(row);
   }
   return { sent, received };
 }
@@ -317,7 +396,10 @@ export function toSummary(
     holdings: parsedHoldings(row),
     createTxHash: row.createTxHash,
     claimTxHash: row.claimTxHash,
-    recipientEmailMasked: direction === "sent" ? row.recipientEmailMasked : null,
+    recipientKind: recipientKindOf(row),
+    // The giver's eyes only. A received gift already knows who it is for, and showing it
+    // there would put a stranger's address or handle on someone else's screen.
+    recipientLabel: direction === "sent" ? row.recipientEmailMasked : null,
     fromName: direction === "received" ? firstNameFromEmail(fromEmail) : null,
     claimable: direction === "received" && status === "funded" && unlocked,
     reclaimable: direction === "sent" && status === "funded" && past,

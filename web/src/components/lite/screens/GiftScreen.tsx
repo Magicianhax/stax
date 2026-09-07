@@ -42,11 +42,19 @@ import {
   GIFT_MAX_USD,
   GIFT_MIN_USD,
   GIFT_NOTE_MAX,
-  looksLikeEmail,
-  maskEmail,
+  X_USERNAME_MAX,
+  parseGiftRecipient,
+  recipientLabel,
+  type GiftRecipientKind,
 } from "../gift/types";
 
 type Preset = "1y" | "5y" | "18th" | "custom";
+
+/** The two ways to address a gift, in the order the segmented control shows them. */
+const RECIPIENT_KINDS: { id: GiftRecipientKind; label: string }[] = [
+  { id: "email", label: "Email" },
+  { id: "x", label: "X" },
+];
 
 const PRESETS: { id: Preset; label: string }[] = [
   { id: "1y", label: "In a year" },
@@ -102,8 +110,23 @@ export function GiftScreen({
   const amount = parseFloat(amt);
   const amountOk = Number.isFinite(amount) && amount >= GIFT_MIN_USD && amount <= GIFT_MAX_USD;
 
+  // Who it's for: an email address, or an X username they sign in with instead.
+  // Both fields are kept, so switching back and forth doesn't lose what was typed.
+  const [recipientKind, setRecipientKind] = useState<GiftRecipientKind>("email");
   const [email, setEmail] = useState("");
-  const emailOk = looksLikeEmail(email);
+  const [handle, setHandle] = useState("");
+  // Same reason the amount step holds while the keypad is up: a handle is valid from its
+  // FIRST character ("j" on the way to "jack"), so without this the question would close
+  // itself out from under someone still typing the name.
+  const [recipientFocused, setRecipientFocused] = useState(false);
+  const isX = recipientKind === "x";
+  const typedRecipient = isX ? handle : email;
+  // The very function the API validates with, so the step cannot accept a recipient
+  // the server would then refuse. Null until it is a real address or handle.
+  const recipient = parseGiftRecipient(
+    isX ? { kind: "x", username: handle } : { kind: "email", email },
+  );
+  const recipientOk = recipient !== null;
 
   const [preset, setPreset] = useState<Preset | null>(null);
   const [dob, setDob] = useState("");
@@ -121,16 +144,27 @@ export function GiftScreen({
 
   // Which question is being asked. Tapping an answered step reopens it.
   const [editing, setEditing] = useState<number | null>(null);
-  const answered = [Boolean(basket), amountOk, emailOk, unlockOk];
+  const answered = [Boolean(basket), amountOk, recipientOk, unlockOk];
   const nextStep = answered.findIndex((a) => !a);
   const reachedStep = nextStep === -1 ? 5 : nextStep + 1;
-  // While the amount is being typed the flow holds at step 2. "50" on the way to
-  // "500" is a valid figure for one keystroke, and letting it reveal the next
-  // question would pull the keypad out from under the person mid-number.
-  const current = amountFocused ? Math.min(reachedStep, 2) : reachedStep;
+  // While a field is being typed into the flow holds at its step. "50" on the way to
+  // "500" is a valid figure for one keystroke, and "j" on the way to "jack" is a valid
+  // handle; letting either reveal the next question would pull the field out from under
+  // the person mid-word. Each is released by the step's own Next, never by a blur — a
+  // blur fires before the click it belongs to, and would unmount the button being tapped.
+  const current = amountFocused
+    ? Math.min(reachedStep, 2)
+    : recipientFocused
+      ? Math.min(reachedStep, 3)
+      : reachedStep;
   const openStep = (n: number) => (editing !== null ? editing === n : n === current || (n === 5 && current === 5));
-  const answerStep = (n: number) => {
+  /** Put every field down. What the next step's own focus handler undoes. */
+  const blurFields = () => {
     setAmountFocused(false);
+    setRecipientFocused(false);
+  };
+  const answerStep = (n: number) => {
+    blurFields();
     if (editing === n) setEditing(null);
   };
 
@@ -174,7 +208,7 @@ export function GiftScreen({
         : pad.refused || (Number.isFinite(amount) && amount > GIFT_MAX_USD)
           ? `The largest gift is ${usd(GIFT_MAX_USD)}.`
           : null;
-  const canSend = Boolean(basket) && amountOk && emailOk && unlockOk && ready && giftsOn && !overBalance;
+  const canSend = Boolean(basket) && amountOk && recipientOk && unlockOk && ready && giftsOn && !overBalance;
   // Why the confirm is off, said next to it — the step that holds the problem
   // may have closed and scrolled away by the time they reach the bottom.
   const blocker = !basket
@@ -187,8 +221,10 @@ export function GiftScreen({
           ? `The largest gift is ${usd(GIFT_MAX_USD)}.`
           : overBalance
             ? `That's more than the ${usd(balance)} you have to invest.`
-            : !emailOk
-              ? "Add the email address it's for."
+            : !recipientOk
+              ? isX
+                ? "Add the X username it's for."
+                : "Add the email address it's for."
               : !unlockOk
                 ? "Choose the day they can open it."
                 : null;
@@ -208,7 +244,7 @@ export function GiftScreen({
       {
         basketId: basket.id,
         amountUsd: amount,
-        recipientEmail: email.trim(),
+        recipient,
         unlockAtSeconds: unlockAt,
         note: note.trim() || undefined,
       },
@@ -263,7 +299,7 @@ export function GiftScreen({
           hint="They get the same mix you would."
           answer={basket?.name}
           open={openStep(1)}
-          onEdit={basket ? () => { setAmountFocused(false); setEditing(1); } : undefined}
+          onEdit={basket ? () => { blurFields(); setEditing(1); } : undefined}
         >
           {giftable.length === 0 ? (
             <p style={{ margin: 0, fontSize: 13.5, color: "var(--ink-2)", lineHeight: 1.5 }}>
@@ -346,7 +382,7 @@ export function GiftScreen({
               </span>
               <AmountInput
                 {...pad.field}
-                onFocus={() => setAmountFocused(true)}
+                onFocus={() => { setRecipientFocused(false); setAmountFocused(true); }}
                 onEscape={() => setAmountFocused(false)}
                 placeholder="0"
                 aria-label="Amount to gift"
@@ -376,33 +412,89 @@ export function GiftScreen({
           <Step
             n={3}
             title="Who's it for?"
-            hint="Their email. Only they can open it."
-            answer={emailOk ? maskEmail(email) : undefined}
+            hint={
+              isX ? "Their X username. Only they can open it." : "Their email. Only they can open it."
+            }
+            answer={recipient ? recipientLabel(recipient) : undefined}
             open={openStep(3)}
-            onEdit={emailOk ? () => { setAmountFocused(false); setEditing(3); } : undefined}
+            onEdit={recipientOk ? () => { blurFields(); setEditing(3); } : undefined}
           >
-            <div className="field" style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px" }}>
-              <Icon name="mail" size={18} style={{ color: "var(--ink-3)", flex: "none" }} />
-              <input
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                type="email"
-                inputMode="email"
-                autoComplete="email"
-                autoCapitalize="none"
-                spellCheck={false}
-                onFocus={() => setAmountFocused(false)}
-                placeholder="name@example.com"
-                aria-label="Their email address"
-                style={{ flex: 1, fontSize: 16, width: "100%" }}
+            {/* Email or X — the same gift either way, only the sign-in differs. */}
+            <div className="seg" role="group" aria-label="How to address the gift" style={{ marginBottom: 12 }}>
+              <span
+                className="seg-thumb"
+                style={{ width: "calc((100% - 8px) / 2)", left: 4, transform: `translateX(${isX ? "100%" : "0"})` }}
               />
+              {RECIPIENT_KINDS.map((k) => (
+                <button
+                  key={k.id}
+                  onClick={() => {
+                    haptic.select();
+                    setAmountFocused(false);
+                    setRecipientFocused(true);
+                    setRecipientKind(k.id);
+                  }}
+                  className={`seg-item ${recipientKind === k.id ? "is-on" : ""}`}
+                  style={{ height: 44 }}
+                  aria-pressed={recipientKind === k.id}
+                >
+                  {k.label}
+                </button>
+              ))}
             </div>
+
+            {isX ? (
+              /* The "@" is drawn, not typed: it belongs to every handle, so making
+                 people enter it would only be a character they could get wrong. One
+                 pasted in anyway is stripped rather than argued with. The gap is
+                 tighter than the mail row's, because the "@" is part of the handle and
+                 has to read as "@jack", not as an icon standing next to a word. */
+              <div className="field" style={{ display: "flex", alignItems: "center", gap: 2, padding: "12px 14px" }}>
+                <Icon name="atSign" size={18} style={{ color: "var(--ink-3)", flex: "none" }} />
+                <input
+                  value={handle}
+                  onChange={(e) => setHandle(e.target.value.replace(/^@+/, "").slice(0, X_USERNAME_MAX))}
+                  type="text"
+                  autoComplete="off"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  onFocus={() => { setAmountFocused(false); setRecipientFocused(true); }}
+                  placeholder="username"
+                  aria-label="Their X username"
+                  aria-invalid={(handle.length > 0 && !recipientOk) || undefined}
+                  style={{ flex: 1, fontSize: 16, width: "100%" }}
+                />
+              </div>
+            ) : (
+              <div className="field" style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px" }}>
+                <Icon name="mail" size={18} style={{ color: "var(--ink-3)", flex: "none" }} />
+                <input
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  onFocus={() => { setAmountFocused(false); setRecipientFocused(true); }}
+                  placeholder="name@example.com"
+                  aria-label="Their email address"
+                  aria-invalid={(email.length > 3 && !recipientOk) || undefined}
+                  style={{ flex: 1, fontSize: 16, width: "100%" }}
+                />
+              </div>
+            )}
             <p style={{ margin: "10px 0 0", fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.45 }}>
-              {email.length > 3 && !emailOk
-                ? "That doesn't look like an email address yet."
-                : "They don't need an account yet. They'll sign in with this address to open it."}
+              {typedRecipient.length > (isX ? 0 : 3) && !recipientOk
+                ? isX
+                  ? "Letters, numbers and underscores only — up to 15."
+                  : "That doesn't look like an email address yet."
+                : isX
+                  ? "They don't need an account yet. They'll sign in with that X account to open it."
+                  : "They don't need an account yet. They'll sign in with this address to open it."}
             </p>
-            {emailOk && (
+            {recipientOk && (
               <button className="btn btn-ghost btn-block tap" style={{ marginTop: 14, minHeight: 46 }} onClick={() => answerStep(3)}>
                 Next
               </button>
@@ -418,7 +510,7 @@ export function GiftScreen({
             hint="It stays invested the whole time."
             answer={unlockOk ? unlockDateFromSeconds(unlockAt as number) : undefined}
             open={openStep(4)}
-            onEdit={unlockOk ? () => { setAmountFocused(false); setEditing(4); } : undefined}
+            onEdit={unlockOk ? () => { blurFields(); setEditing(4); } : undefined}
           >
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {PRESETS.map((p) => (
@@ -502,7 +594,7 @@ export function GiftScreen({
               <textarea
                 value={note}
                 onChange={(e) => setNote(e.target.value.slice(0, GIFT_NOTE_MAX))}
-                onFocus={() => setAmountFocused(false)}
+                onFocus={blurFields}
                 rows={3}
                 placeholder="Happy birthday. Leave it alone and let it grow."
                 aria-label="A note for them"
@@ -516,8 +608,9 @@ export function GiftScreen({
         )}
       </div>
 
-      {/* review */}
-      {current >= 5 && basket && (
+      {/* review — step 5 is only reached once the recipient is valid, but saying so
+          here is what lets the card read the answer without a fallback for "nobody". */}
+      {current >= 5 && basket && recipient && (
         <Reveal delay={0.06} style={{ padding: "8px 22px 0" }}>
           <div className="card" style={{ padding: 18 }}>
             <GiftBasketHead name={basket.name} items={items} />
@@ -526,7 +619,8 @@ export function GiftScreen({
             </div>
             {hasCashSlice && <CashSliceNote style={{ marginTop: 12 }} />}
             <div style={{ marginTop: 4 }}>
-              <DetailRow label="For" value={maskEmail(email)} />
+              {/* An X handle in full — "@jack" is public. An email stays masked. */}
+              <DetailRow label="For" value={recipientLabel(recipient)} />
               <DetailRow
                 label="Opens"
                 value={
@@ -594,7 +688,10 @@ export function GiftScreen({
                 lineHeight: 1.45,
               }}
             >
-              {blocker ?? "They'll need to sign in with that email to claim it."}
+              {blocker ??
+                (isX
+                  ? "They'll need to sign in with that X account to open it."
+                  : "They'll need to sign in with that email to claim it.")}
             </p>
           </>
         )}

@@ -1,0 +1,2 @@
+ALTER TABLE "gifts" ADD COLUMN "recipient_kind" text DEFAULT 'email' NOT NULL;--> statement-breakpoint
+ALTER TABLE "gifts" ADD CONSTRAINT "gifts_recipient_kind_check" CHECK ("gifts"."recipient_kind" in ('email', 'x'));

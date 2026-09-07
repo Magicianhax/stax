@@ -1,13 +1,14 @@
 // POST /api/gifts/[id]/claim-authorisation — the security-critical route.
 //
-// TimelockGift cannot know who owns an email address, so it delegates that one question
-// here: an EIP-712 signature over (giftId, to, deadline) by GIFT_SIGNER_PRIVATE_KEY is
-// the contract's only authority for releasing a gift. Everything this route checks is
-// therefore load-bearing:
+// TimelockGift cannot know who owns an email address or an X handle, so it delegates that
+// one question here: an EIP-712 signature over (giftId, to, deadline) by
+// GIFT_SIGNER_PRIVATE_KEY is the contract's only authority for releasing a gift.
+// Everything this route checks is therefore load-bearing:
 //
 //   • the caller has a live Privy session (verifyRequest)
-//   • the email on their PRIVY USER RECORD — fetched server-side, never read from the
-//     request body — hashes to this gift's `recipient_email_hash`
+//   • the identity this gift is addressed to — the email or the X username on their
+//     PRIVY USER RECORD, fetched server-side, never read from the request body — hashes
+//     to this gift's `recipient_email_hash` (callerOwnsRecipient)
 //   • `to` is THEIR OWN smart account, derived from Privy by ownedAddresses, not supplied
 //   • the contract agrees the gift exists, is unclaimed, and has passed its unlock date
 //
@@ -18,15 +19,16 @@ import { giftContractFor } from "@/lib/gifts";
 import { getChain } from "@/lib/chains";
 import { CLAIM_DEADLINE_SECONDS, GIFT_SIGNER_CONFIGURED, signClaim } from "@/lib/server/giftSigner";
 import {
+  callerOwnsRecipient,
   emailsFor,
   getGiftRow,
   isGiftId,
-  lookupHash,
   readOnChainGift,
+  recipientKindOf,
   toSummary,
 } from "@/lib/server/giftsStore";
 import { ownedAddresses } from "@/lib/server/ownedAddresses";
-import { fetchPrivyEmail, verifyRequest } from "@/lib/server/privyAuth";
+import { verifyRequest } from "@/lib/server/privyAuth";
 import { rateLimit } from "@/lib/server/rateLimit";
 import { badRequest, jsonError, serverError, tooManyRequests, unauthorized } from "@/lib/server/respond";
 
@@ -53,11 +55,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const giftContract = giftContractFor(chain);
     if (!giftContract) return jsonError(503, "Gifting isn't switched on for this network yet.");
 
-    // Ownership of the email is the whole gate. It comes from Privy, not from the caller.
-    const email = await fetchPrivyEmail(user.userId);
-    if (!email) return jsonError(403, "Add an email to your account to claim this gift.");
-    if (lookupHash(email) !== row.recipientEmailHash) {
-      return jsonError(403, "This gift is addressed to a different email.");
+    // Ownership of the identity is the whole gate. `callerOwnsRecipient` reads the email
+    // or the X username off the caller's PRIVY USER RECORD with the app credentials and
+    // hashes that. The request body is never consulted and has no field for either.
+    const isX = recipientKindOf(row) === "x";
+    if (!(await callerOwnsRecipient(user.userId, row))) {
+      return jsonError(
+        403,
+        isX
+          ? "This gift is addressed to a different X account. Sign in with that account to open it."
+          : "This gift is addressed to a different email.",
+      );
     }
 
     if (row.status === "claimed") return jsonError(409, "This gift has already been claimed.");

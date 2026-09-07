@@ -7,6 +7,8 @@
 export type {
   GiftSummary as Gift,
   GiftPreview,
+  GiftRecipient,
+  GiftRecipientKind,
   GiftStatus,
   GiftToken,
   CreateGiftRequest,
@@ -21,10 +23,15 @@ export {
   GIFT_MIN_UNLOCK_DAYS,
   GIFT_MAX_UNLOCK_YEARS,
   GIFT_RECLAIM_GRACE_DAYS,
+  X_USERNAME_MAX,
   giftContractFor,
   looksLikeEmail,
+  looksLikeXUsername,
   maskEmail,
   normalizeEmail,
+  normalizeXUsername,
+  parseGiftRecipient,
+  recipientLabel,
 } from "@/lib/gifts";
 
 import type { GiftStatus } from "@/lib/gifts";

@@ -4,8 +4,14 @@ import { feeUsd } from "@/lib/fees";
 import {
   giftCreateCalls,
   isHeldAsCash,
+  looksLikeXUsername,
+  maskEmail,
   mergeGiftTokens,
+  normalizeXUsername,
+  parseGiftRecipient,
+  recipientLabel,
   splitGiftBasket,
+  X_USERNAME_MAX,
   type GiftToken,
 } from "@/lib/gifts";
 
@@ -41,6 +47,109 @@ const TWENTY_PCT_SAFE: BasketItem[] = [
 ];
 
 const cents = (n: number) => Number(n.toFixed(2));
+
+// ── who a gift is for ────────────────────────────────────────────────────────
+// A gift addressed to an X username is claimed by signing in with that X account, and the
+// server checks the handle against its own Privy user record before it signs. These three
+// functions decide what counts as a handle at all, so they are the front door to that
+// check: anything they normalise differently on the screen than on the server would let a
+// gift be addressed to one string and claimed against another.
+
+describe("normalizeXUsername", () => {
+  it("strips a leading @ and lowercases, because X handles are case-insensitive", () => {
+    expect(normalizeXUsername("@Name")).toBe("name");
+    expect(normalizeXUsername("JACK")).toBe("jack");
+    expect(normalizeXUsername("  @Elon_Musk  ")).toBe("elon_musk");
+  });
+
+  it("is idempotent, so a stored handle re-normalises to itself", () => {
+    const once = normalizeXUsername("@Name");
+    expect(normalizeXUsername(once)).toBe(once);
+  });
+
+  it("leaves the inside of a handle alone", () => {
+    // Only the LEADING @ is sugar. One in the middle makes it invalid, not shorter.
+    expect(normalizeXUsername("na@me")).toBe("na@me");
+  });
+});
+
+describe("looksLikeXUsername", () => {
+  it("accepts what X accepts: letters, digits and underscores, up to 15", () => {
+    expect(looksLikeXUsername("jack")).toBe(true);
+    expect(looksLikeXUsername("@Jack")).toBe(true);
+    expect(looksLikeXUsername("a")).toBe(true);
+    expect(looksLikeXUsername("_9")).toBe(true);
+    expect(looksLikeXUsername("a".repeat(X_USERNAME_MAX))).toBe(true);
+  });
+
+  it("rejects 16 characters", () => {
+    expect(looksLikeXUsername("a".repeat(X_USERNAME_MAX + 1))).toBe(false);
+  });
+
+  it("rejects a dot, and everything else outside [A-Za-z0-9_]", () => {
+    expect(looksLikeXUsername("first.last")).toBe(false);
+    expect(looksLikeXUsername("na me")).toBe(false);
+    expect(looksLikeXUsername("na-me")).toBe(false);
+    expect(looksLikeXUsername("na@me")).toBe(false);
+    expect(looksLikeXUsername("")).toBe(false);
+    expect(looksLikeXUsername("@")).toBe(false);
+  });
+
+  it("does not mistake an email address for a handle", () => {
+    expect(looksLikeXUsername("alex@gmail.com")).toBe(false);
+  });
+});
+
+describe("parseGiftRecipient", () => {
+  it("normalises an X handle to the form both hashes are taken over", () => {
+    expect(parseGiftRecipient({ kind: "x", username: "@Name" })).toEqual({ kind: "x", username: "name" });
+  });
+
+  it("normalises an email the same way it always did", () => {
+    expect(parseGiftRecipient({ kind: "email", email: "  Alex@Gmail.com " })).toEqual({
+      kind: "email",
+      email: "alex@gmail.com",
+    });
+  });
+
+  it("branches on the kind rather than guessing from the string", () => {
+    // The same text is a valid handle and an invalid address; only `kind` decides which
+    // question is asked of it. Guessing would let a typo'd email be sent to an X account.
+    expect(parseGiftRecipient({ kind: "x", username: "jack" })).toEqual({ kind: "x", username: "jack" });
+    expect(parseGiftRecipient({ kind: "email", email: "jack" })).toBeNull();
+    expect(parseGiftRecipient({ kind: "x", username: "alex@gmail.com" })).toBeNull();
+    expect(parseGiftRecipient({ kind: "email", email: "alex@gmail.com" })).toEqual({
+      kind: "email",
+      email: "alex@gmail.com",
+    });
+  });
+
+  it("refuses everything looksLikeXUsername refuses", () => {
+    for (const bad of ["", "@", "a".repeat(X_USERNAME_MAX + 1), "first.last", "na me"]) {
+      expect(parseGiftRecipient({ kind: "x", username: bad })).toBeNull();
+    }
+  });
+});
+
+describe("recipientLabel", () => {
+  it("masks an email but shows a handle whole", () => {
+    // "@jack" is already public; an address is not, and the giver may be reading this
+    // with someone looking over their shoulder.
+    expect(recipientLabel({ kind: "email", email: "alex@gmail.com" })).toBe("a•••@gmail.com");
+    expect(recipientLabel({ kind: "x", username: "@Jack" })).toBe("@jack");
+  });
+
+  it("never doubles the @ on a handle that already carries one", () => {
+    expect(recipientLabel({ kind: "x", username: "@jack" })).toBe("@jack");
+    expect(recipientLabel({ kind: "x", username: "jack" })).toBe("@jack");
+  });
+
+  it("leaves the email path exactly as maskEmail had it", () => {
+    for (const email of ["alex@gmail.com", "j.smith@sub.example.co.uk", "Q@x.io"]) {
+      expect(recipientLabel({ kind: "email", email })).toBe(maskEmail(email));
+    }
+  });
+});
 
 describe("isHeldAsCash", () => {
   it("marks the rebasing Aave tier and nothing else", () => {

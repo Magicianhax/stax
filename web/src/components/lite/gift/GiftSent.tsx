@@ -84,7 +84,7 @@ export function GiftSent({
           <Money value={amountUsd} prev={0} size={34} style={{ fontWeight: 700, letterSpacing: "-.02em" }} />
         </div>
         <div style={{ fontSize: 13.5, color: "var(--ink-2)", marginTop: 4 }}>
-          {gift.basketName} · for {gift.recipientEmailMasked}
+          {gift.basketName} · for {gift.recipientLabel}
         </div>
       </Reveal>
 
@@ -97,7 +97,8 @@ export function GiftSent({
           <Icon name="send" size={17} /> Share it
         </button>
         <p style={{ fontSize: 13, color: "var(--ink-2)", margin: "12px 0 0", lineHeight: 1.5, textAlign: "center" }}>
-          They&apos;ll need to sign in with {gift.recipientEmailMasked} to open it. Only they can.
+          They&apos;ll need to sign in with {gift.recipientLabel}{gift.recipientKind === "x" ? " on X" : ""} to open
+          it. Only they can.
         </p>
       </Reveal>
 

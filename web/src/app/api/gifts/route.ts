@@ -22,9 +22,10 @@ import {
   GIFT_NOTE_MAX,
   GIFT_RECLAIM_GRACE_DAYS,
   giftContractFor,
-  looksLikeEmail,
-  maskEmail,
+  parseGiftRecipient,
+  recipientLabel,
   splitGiftBasket,
+  type GiftRecipient,
   type GiftSummary,
 } from "@/lib/gifts";
 import { chainKeyFromRequest } from "@/lib/server/chain";
@@ -34,16 +35,16 @@ import {
   emailsFor,
   giftShareUrl,
   listGiftsFor,
-  lookupHash,
   newGiftId,
   newSalt,
   onChainHash,
+  recipientHashesFor,
   resolveGiftBasket,
   toSummary,
   usdcBalanceUsd,
 } from "@/lib/server/giftsStore";
 import { ownedAddresses } from "@/lib/server/ownedAddresses";
-import { fetchPrivyEmail, verifyRequest } from "@/lib/server/privyAuth";
+import { verifyRequest } from "@/lib/server/privyAuth";
 import { rateLimit } from "@/lib/server/rateLimit";
 import { badRequest, jsonError, serverError, tooManyRequests, unauthorized } from "@/lib/server/respond";
 import { touchUser } from "@/lib/server/users";
@@ -53,13 +54,34 @@ export const runtime = "nodejs";
 
 const DAY_MS = 86_400_000;
 
-const Body = z.object({
-  basketId: z.string().min(1).max(64),
-  amountUsd: z.number().finite().min(GIFT_MIN_USD).max(GIFT_MAX_USD),
-  recipientEmail: z.string().min(6).max(254),
-  unlockAt: z.string().min(4).max(40),
-  note: z.string().max(GIFT_NOTE_MAX * 2).optional(),
-});
+/**
+ * Who the gift is for. A discriminated union rather than two optional fields, so a body
+ * can never arrive carrying both an email and a handle with no rule for which wins.
+ *
+ * The lengths here are only a sanity cap on what is worth parsing — `parseGiftRecipient`
+ * is what actually normalises and validates, and it is the same function the give flow
+ * runs, so the screen and the server agree on what a valid recipient is.
+ */
+const Recipient = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("email"), email: z.string().min(6).max(254) }),
+  // 20, not 15: the cap is on the raw string, which may still carry "@" and whitespace.
+  z.object({ kind: z.literal("x"), username: z.string().min(1).max(20) }),
+]);
+
+const Body = z
+  .object({
+    basketId: z.string().min(1).max(64),
+    amountUsd: z.number().finite().min(GIFT_MIN_USD).max(GIFT_MAX_USD),
+    recipient: Recipient.optional(),
+    /** The pre-X body shape. Still accepted, read as the email kind. */
+    recipientEmail: z.string().min(6).max(254).optional(),
+    unlockAt: z.string().min(4).max(40),
+    note: z.string().max(GIFT_NOTE_MAX * 2).optional(),
+  })
+  .refine((b) => b.recipient !== undefined || b.recipientEmail !== undefined, {
+    message: "A gift needs someone to be for.",
+    path: ["recipient"],
+  });
 
 /**
  * Trim and cap the note to GIFT_NOTE_MAX BYTES, which is what the contract counts.
@@ -102,10 +124,20 @@ export async function POST(req: NextRequest) {
   try {
     body = Body.parse(await req.json());
   } catch {
-    return badRequest("Check the amount, the email and the date, then try again.");
+    return badRequest("Check the amount, who it's for and the date, then try again.");
   }
 
-  if (!looksLikeEmail(body.recipientEmail)) return badRequest("That email address doesn't look right.");
+  // One canonical recipient, whichever shape the body used. A bare `recipientEmail` is
+  // the email kind; everything downstream sees the same normalised value either way.
+  const asked: GiftRecipient = body.recipient ?? { kind: "email", email: body.recipientEmail! };
+  const recipient = parseGiftRecipient(asked);
+  if (!recipient) {
+    return badRequest(
+      asked.kind === "x"
+        ? "That X username doesn't look right. Up to 15 letters, numbers or underscores."
+        : "That email address doesn't look right.",
+    );
+  }
 
   const now = Date.now();
   const unlockAt = new Date(body.unlockAt);
@@ -148,7 +180,7 @@ export async function POST(req: NextRequest) {
       chain,
       fromUserId: user.userId,
       fromAddress: from,
-      recipientEmail: body.recipientEmail,
+      recipient,
       recipientSalt: salt,
       basketId: basket.id,
       basketName: basket.name,
@@ -164,7 +196,7 @@ export async function POST(req: NextRequest) {
         giftId: id,
         chain,
         giftContract,
-        recipientHash: onChainHash(salt, body.recipientEmail),
+        recipientHash: onChainHash(salt, recipient),
         unlockAt: Math.floor(unlockAt.getTime() / 1000),
         reclaimAfter: Math.floor(reclaimAfter.getTime() / 1000),
         unlockAtIso: unlockAt.toISOString(),
@@ -182,7 +214,8 @@ export async function POST(req: NextRequest) {
         cashToken: split.cashToken,
         holdings: split.holdings,
         basketName: basket.name,
-        recipientEmailMasked: maskEmail(body.recipientEmail),
+        recipientKind: recipient.kind,
+        recipientLabel: recipientLabel(recipient),
         shareUrl: giftShareUrl(id),
       },
       { status: 201 },
@@ -202,11 +235,10 @@ export async function GET(req: NextRequest) {
   const chain = chainKeyFromRequest(req);
 
   try {
-    // "Addressed to me" is decided by the email on the Privy user record, never by
-    // anything the request carries.
-    const email = await fetchPrivyEmail(user.userId);
-    const emailHash = email ? lookupHash(email) : null;
-    const { sent, received } = await listGiftsFor(chain, user.userId, emailHash);
+    // "Addressed to me" is decided by the identities on the Privy user record — their
+    // email and their X handle — never by anything the request carries.
+    const hashes = await recipientHashesFor(user.userId);
+    const { sent, received } = await listGiftsFor(chain, user.userId, hashes);
 
     const givers = await emailsFor(received.map((r) => r.fromUserId));
     const now = Date.now();

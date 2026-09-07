@@ -97,7 +97,7 @@ export function GiftDetailSheet({ gift, onClose }: { gift: Gift | null; onClose:
             <DetailRow first label="Worth when sent" value={usd(gift.amountUsd)} />
             <DetailRow
               label={gift.direction === "sent" ? "For" : "From"}
-              value={(gift.direction === "sent" ? gift.recipientEmailMasked : gift.fromName) ?? "—"}
+              value={(gift.direction === "sent" ? gift.recipientLabel : gift.fromName) ?? "—"}
             />
             <DetailRow
               label={

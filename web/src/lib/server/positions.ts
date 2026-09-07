@@ -40,7 +40,7 @@ import {
 } from "@/lib/positions";
 
 const TTL_MS = 60_000;
-/** Shorter cache when the explorer gave us nothing, so the next view retries the manual lots. */
+/** Shorter cache when the provider gave us nothing, so the next view retries the manual lots. */
 const PARTIAL_TTL_MS = 10_000;
 /** Wallet transfers to pull for cost basis (the wallet screen asks for 50; Blockscout caps around 500). */
 const TRANSFER_ROWS = 500;
@@ -169,8 +169,9 @@ interface TxGroup {
 
 /** Wallet transfers grouped by tx, with the fee transfer to the treasury separated out. */
 async function transferGroups(chain: StaxChain, account: `0x${string}`): Promise<{ groups: Map<string, TxGroup>; partial: boolean }> {
-  // The explorer is flaky on wide pages ("Something went wrong" / 429): a second,
-  // small read still catches the recent manual trades rather than none.
+  // The provider is flaky on wide pages ("Something went wrong" / 429): a second,
+  // smaller read is a different cache key, so it still catches the recent manual
+  // trades rather than none.
   let txs = await getWalletTransfers(chain, account, TRANSFER_ROWS);
   if (!txs.length) txs = await getWalletTransfers(chain, account);
   const usdcSymbol = chain.usdc.symbol;

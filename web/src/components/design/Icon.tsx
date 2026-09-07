@@ -24,6 +24,7 @@ import {
   CreditCard,
   Landmark,
   Mail,
+  AtSign,
   Wallet,
   Settings,
   Bell,
@@ -69,6 +70,7 @@ export type IconName =
   | "card"
   | "bank"
   | "mail"
+  | "atSign"
   | "wallet"
   | "settings"
   | "bell"
@@ -122,6 +124,7 @@ const MAP: Record<IconName, LucideIcon> = {
   card: CreditCard,
   bank: Landmark,
   mail: Mail,
+  atSign: AtSign,
   wallet: Wallet,
   settings: Settings,
   bell: Bell,

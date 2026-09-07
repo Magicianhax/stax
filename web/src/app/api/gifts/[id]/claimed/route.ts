@@ -2,8 +2,8 @@
 //
 // Both ways out land here, because on-chain they look the same (`claimed` is set by
 // `claim` and by `reclaim` alike). Which one it was is decided by who is asking:
-//   • the recipient (their Privy email hashes to the gift's) → status `claimed`
-//   • the giver, past the grace period                       → status `reclaimed`
+//   • the recipient (their Privy email or X handle hashes to the gift's) → `claimed`
+//   • the giver, past the grace period                                   → `reclaimed`
 // The contract is checked first either way, so a client cannot mark a gift settled
 // that is still sitting there.
 // → { gift }
@@ -11,16 +11,16 @@ import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { giftContractFor } from "@/lib/gifts";
 import {
+  callerOwnsRecipient,
   emailsFor,
   getGiftRow,
   isGiftId,
-  lookupHash,
   markClaimed,
   markReclaimed,
   readOnChainGift,
   toSummary,
 } from "@/lib/server/giftsStore";
-import { fetchPrivyEmail, verifyRequest } from "@/lib/server/privyAuth";
+import { verifyRequest } from "@/lib/server/privyAuth";
 import { rateLimit } from "@/lib/server/rateLimit";
 import { badRequest, jsonError, serverError, tooManyRequests, unauthorized } from "@/lib/server/respond";
 
@@ -58,8 +58,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (!onChain) return jsonError(409, "We can't see that gift on-chain.");
     if (!onChain.claimed) return jsonError(409, "That gift is still parked. Nothing to record yet.");
 
-    const email = await fetchPrivyEmail(user.userId);
-    const isRecipient = Boolean(email) && lookupHash(email!) === row.recipientEmailHash;
+    // Same server-side identity check the claim attestation used — one function, so the
+    // email path and the X path cannot record a settlement they could not have authorised.
+    const isRecipient = await callerOwnsRecipient(user.userId, row);
     const isGiver = row.fromUserId === user.userId;
     if (!isRecipient && !isGiver) return jsonError(403, "That isn't your gift.");
 

@@ -40,10 +40,13 @@ import {
   giftCreateCalls,
   giftReclaimCall,
   mergeGiftTokens,
+  recipientLabel,
   splitGiftBasket,
   type ClaimAuthorisationResponse,
   type CreateGiftRequest,
   type CreateGiftResponse,
+  type GiftRecipient,
+  type GiftRecipientKind,
   type GiftSummary,
   type GiftToken,
   type GiftsListResponse,
@@ -174,7 +177,8 @@ export function useGifts(): UseGifts {
 export interface GiftDraft {
   basketId: string;
   amountUsd: number;
-  recipientEmail: string;
+  /** An email or an X username. The server normalises and validates it again. */
+  recipient: GiftRecipient;
   unlockAtSeconds: number;
   note?: string;
 }
@@ -182,7 +186,10 @@ export interface GiftDraft {
 export interface SentGift {
   id: string;
   basketName: string;
-  recipientEmailMasked: string;
+  /** Who it went to, as the giver sees it: "a•••@gmail.com" or "@jack". */
+  recipientLabel: string;
+  /** Which identity they'll sign in with to open it. */
+  recipientKind: GiftRecipientKind;
   unlockAtIso: string;
   /** The tokens actually parked, read from the invest receipt. */
   tokens: GiftToken[];
@@ -301,7 +308,9 @@ export function useSendGift(): UseSendGift {
           ? mergeGiftTokens(demoTokens(chain, split.invested, split.investUsd), split.cashToken)
           : (seed?.tokens ?? []);
         const id = `0x${Date.now().toString(16).padStart(64, "d")}`.slice(0, 66) as `0x${string}`;
-        const masked = maskLocally(draft.recipientEmail);
+        // The same display helper the server uses, so the demo's "For" line reads
+        // exactly as the real one does for both kinds of recipient.
+        const label = recipientLabel(draft.recipient);
         demoStore = [
           {
             id,
@@ -319,7 +328,8 @@ export function useSendGift(): UseSendGift {
             holdings: split?.holdings ?? seed?.holdings ?? [],
             createTxHash: null,
             claimTxHash: null,
-            recipientEmailMasked: masked,
+            recipientKind: draft.recipient.kind,
+            recipientLabel: label,
             fromName: null,
             claimable: false,
             reclaimable: false,
@@ -330,7 +340,8 @@ export function useSendGift(): UseSendGift {
         setSent({
           id,
           basketName,
-          recipientEmailMasked: masked,
+          recipientLabel: label,
+          recipientKind: draft.recipient.kind,
           unlockAtIso,
           tokens,
           note: draft.note ?? "",
@@ -350,7 +361,7 @@ export function useSendGift(): UseSendGift {
         const body: CreateGiftRequest = {
           basketId: draft.basketId,
           amountUsd: draft.amountUsd,
-          recipientEmail: draft.recipientEmail,
+          recipient: draft.recipient,
           unlockAt: unlockAtIso,
           note: draft.note,
         };
@@ -469,7 +480,8 @@ export function useSendGift(): UseSendGift {
         setSent({
           id: reserved.giftId,
           basketName: reserved.basketName,
-          recipientEmailMasked: reserved.recipientEmailMasked,
+          recipientLabel: reserved.recipientLabel,
+          recipientKind: reserved.recipientKind,
           unlockAtIso: reserved.unlockAtIso,
           tokens: parked,
           note: reserved.note,
@@ -487,13 +499,6 @@ export function useSendGift(): UseSendGift {
   );
 
   return { phase, error, sent, send, reset };
-}
-
-/** Local mask for the demo, which has no server to do it. */
-function maskLocally(email: string): string {
-  const e = email.trim().toLowerCase();
-  const at = e.lastIndexOf("@");
-  return at <= 0 ? "•••" : `${e.slice(0, 1)}•••@${e.slice(at + 1)}`;
 }
 
 // ── claim / reclaim ───────────────────────────────────────────────────────────

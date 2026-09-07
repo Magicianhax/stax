@@ -1,18 +1,43 @@
 # Gift a basket
 
-Buy a Stax basket for someone else, addressed to their email, locked until a date you
-pick. They claim it when it opens. If they never do, you get it back.
+Buy a Stax basket for someone else, addressed to their email or their X username, locked
+until a date you pick. They claim it when it opens. If they never do, you get it back.
 
 The recipient does not need a wallet, an account, or even to have heard of Stax when you
-send it. They need an email address, and later, that email on a Privy sign-in.
+send it. They need an email address or an X account, and later, that identity on a Privy
+sign-in.
+
+---
+
+## Who a gift is for
+
+A gift carries one of two recipient kinds, and that is the **only** thing that differs
+between them. Same contract, same signature, same hashes, same unlock date.
+
+| `recipient_kind` | Addressed to | Claimed by signing in with |
+| --- | --- | --- |
+| `email` | an email address | that email, through Privy |
+| `x` | an X (Twitter) username | that X account, through Privy |
+
+Both are normalised before anything is hashed: an email is trimmed and lowercased, and an
+X username loses a leading `@` and is lowercased, because X handles are case-insensitive.
+`parseGiftRecipient` in `web/src/lib/gifts.ts` does both, and the give flow and the API
+call the same function, so a recipient the screen accepts is never one the server refuses.
+A username is valid on X's own rule: 1–15 characters of `[A-Za-z0-9_]`.
+
+**An X handle can change hands, and an email address cannot.** X releases and re-issues
+usernames, so a gift addressed to `@name` is claimable by whoever holds `@name` on the day
+it unlocks, which may not be the person the giver had in mind years earlier. There is no
+way to close that window without an identity X does not expose. What bounds it is that a
+gift can be claimed exactly once, and the giver sees the claim on their own gift.
 
 ---
 
 ## The flow
 
-**Give.** You pick a basket, an amount, a recipient email and an unlock date. The tokens
+**Give.** You pick a basket, an amount, a recipient and an unlock date. The tokens
 are bought through the normal executor path, land in your own smart account, and are then
-parked in the `TimelockGift` contract against a hash of the recipient's email.
+parked in the `TimelockGift` contract against a hash of the recipient's email or handle.
 
 **Park.** The contract holds the tokens. Nobody can move them before `unlockAt` — not you,
 not the recipient, not the contract's owner.
@@ -22,9 +47,10 @@ the app. Someone who has never heard of Stax lands on the note, the basket, the 
 the unlock date and your first name, and chooses to open the app from there. No email, no
 addresses.
 
-**Claim.** After `unlockAt`, the recipient signs in with that email and asks Stax for a
-claim authorisation. The server checks their Privy record, signs an EIP-712 attestation,
-and their sponsored user op calls `claim`. The tokens move to their Stax smart account.
+**Claim.** After `unlockAt`, the recipient signs in with that email or that X account and
+asks Stax for a claim authorisation. The server checks their Privy record, signs an EIP-712
+attestation, and their sponsored user op calls `claim`. The tokens move to their Stax smart
+account.
 
 **Reclaim.** If nobody ever claims, then 90 days after `unlockAt` the giver may call
 `reclaim` and take the tokens back. Nothing is ever stranded.
@@ -137,9 +163,13 @@ authorisation, a successful claim submitted by a third party, a replayed claim, 
 before the window, reclaim by a stranger, a successful reclaim, an unknown id, and signer
 rotation.
 
-The money maths has its own suite: `web/src/lib/gifts.test.ts`, twenty cases, run with
-`npm test` in `web/`. It covers `splitGiftBasket`, `mergeGiftTokens`, `giftCreateCalls` and
-the review card's four money lines. It runs in CI as the "Money maths" step and inside
+The money maths and the recipient rules have their own suite: `web/src/lib/gifts.test.ts`,
+run with `npm test` in `web/`. It covers `splitGiftBasket`, `mergeGiftTokens`,
+`giftCreateCalls`, the review card's four money lines, and the recipient front door —
+`normalizeXUsername`, `looksLikeXUsername`, `parseGiftRecipient` and `recipientLabel`. The
+recipient cases matter because the screen and the server run the same functions: anything
+they normalised differently would let a gift be addressed to one string and claimed against
+another. It runs in CI as the "Money maths" step and inside
 `npm run verify`, so a broken money invariant fails a Vercel build the same way a type
 error does. Vitest is configured for node and pure functions only — no jsdom, no
 testing-library, nothing that renders.
@@ -156,14 +186,19 @@ way `splitByWeight` lets the last leg take the dust.
 
 ## The data
 
-`gifts` in `web/src/lib/db/schema.ts`, migrations `0005_icy_strong_guy.sql` and
-`0006_dusty_killraven.sql`.
+`gifts` in `web/src/lib/db/schema.ts`, migrations `0005_icy_strong_guy.sql`,
+`0006_dusty_killraven.sql` and `0007_wakeful_rachel_grey.sql` (which adds
+`recipient_kind`).
 
 The row id **is** the on-chain `giftId` (`0x` + 32 random bytes), which is also the share
 link. One id, three places.
 
-The recipient's email is never stored. Two different hashes are taken of it, for two
-different jobs:
+`recipient_kind` is `'email'` or `'x'`, defaulting to `'email'` so every row written before
+X recipients existed keeps its meaning without a backfill.
+
+The recipient's address or handle is never stored. Both kinds reuse the same two hash
+columns, so nothing about the storage or the contract changes with the kind. Two different
+hashes are taken, for two different jobs:
 
 - **`recipient_email_hash`** is deterministic and peppered with `GIFT_EMAIL_PEPPER`. It is
   indexed on `(chain, recipient_email_hash)`, which makes "gifts addressed to me" a single
@@ -172,8 +207,14 @@ different jobs:
 - **`recipientHash` on-chain** uses `recipient_salt`, which is fresh per gift. Two gifts to
   the same person therefore share no on-chain value, so nobody reading Base can link them.
 
-`recipient_email_masked` (`a•••@gmail.com`) is shown back to the giver only, so they can
-tell two recipients apart without the address being readable over someone's shoulder.
+Each kind hashes inside its own namespace — an X handle goes in as `x:<handle>` — so an
+address and a handle can never collide, and every email gift written before X existed still
+hashes to exactly the string already stored against it.
+
+`recipient_email_masked` is the giver's display line, and it is the one place the two kinds
+look different: an email is masked (`a•••@gmail.com`) because it is private, and a handle is
+stored whole (`@jack`) because it is already public. Shown back to the giver only, so they
+can tell two recipients apart, and never on the public share page.
 
 `holdings` is the basket's split as it was on the day the gift was given, snapshotted onto
 the row rather than looked up later. A gift can sit here for 25 years and a shared basket
@@ -199,7 +240,7 @@ its body with Zod, and is rate limited. Types are exported from `@/lib/gifts`.
 | Route | Auth | What it does |
 | --- | --- | --- |
 | `POST /api/gifts` | yes | Validates, reserves the `pending` row, returns the giftId, hashes, dates, note and allocation. |
-| `GET /api/gifts` | yes | Gifts I sent and gifts addressed to my email, with `claimable` and `reclaimable` precomputed. |
+| `GET /api/gifts` | yes | Gifts I sent and gifts addressed to any identity Privy holds for me, with `claimable` and `reclaimable` precomputed. |
 | `POST /api/gifts/:id/funded` | yes | Marks funded, after re-reading the contract. |
 | `POST /api/gifts/:id/claim-authorisation` | yes | Signs the EIP-712 claim attestation. |
 | `POST /api/gifts/:id/claimed` | yes | Records the settling transaction, claim or reclaim. |
@@ -211,9 +252,13 @@ what `create` does and it works in demo with no round trip. An endpoint nobody c
 drift out of step with the real path precisely because nothing exercised it. If a public
 pricing route is ever wanted, add it back against the same function.
 
-`POST /api/gifts` enforces the amount floor and ceiling, the caller's actual USDC balance,
-the unlock-date window, the email shape and the note cap. The note is capped at 200
-**bytes** on a code-point boundary, because that is what the contract counts.
+`POST /api/gifts` takes the recipient as a discriminated union,
+`recipient: { kind: "email", email } | { kind: "x", username }`, so a body can never arrive
+carrying both with no rule for which wins. A bare `recipientEmail` is still accepted and
+read as the email kind, so an older client keeps working. The route enforces the amount
+floor and ceiling, the caller's actual USDC balance, the unlock-date window, the recipient
+shape and the note cap. The note is capped at 200 **bytes** on a code-point boundary,
+because that is what the contract counts.
 
 `POST /api/gifts/:id/funded` treats the body as a hint and never as the truth. It reads
 `getGift` on chain and refuses unless the gift is really there, was created by this
@@ -239,23 +284,35 @@ home.
 
 ## The security model
 
-The contract cannot know who owns an email address. It delegates that one question to the
-Stax server, and accepts a signature as the answer. That is the only reason the signature
-exists, and it is why `claim-authorisation` is the route to read carefully.
+The contract cannot know who owns an email address or an X handle. It delegates that one
+question to the Stax server, and accepts a signature as the answer. That is the only reason
+the signature exists, and it is why `claim-authorisation` is the route to read carefully.
 
 What the server checks before it signs, in order:
 
 1. The caller has a live Privy session. The user id comes from the verified access token.
-2. Privy has an email on their **user record**, fetched server-side with the app
-   credentials. The request body is never consulted for an email, and there is no field
-   for one.
-3. That email's lookup hash equals the gift's `recipient_email_hash`.
+2. Privy has the identity this gift's `recipient_kind` names on their **user record**,
+   fetched server-side with the app credentials — an email from `fetchPrivyEmail`, or an X
+   username from `fetchPrivyXUsername`. The request body is never consulted for either, and
+   there is no field for one.
+3. That identity's lookup hash equals the gift's `recipient_email_hash`.
 4. The gift is `funded`, not already claimed or reclaimed, and past its unlock date.
 5. `to` is the caller's **own** smart account, derived from Privy by `ownedAddresses`.
    There is no way to ask for the gift to be sent elsewhere.
 6. The contract itself agrees: the gift exists, is unclaimed, and has passed `unlockAt`.
 
 Only then does it sign `Claim(giftId, to, deadline)` with `GIFT_SIGNER_PRIVATE_KEY`.
+
+Steps 2 and 3 are one function, `callerOwnsRecipient` in `web/src/lib/server/giftsStore.ts`,
+and both claim routes go through it, so the email path and the X path cannot drift apart.
+The email half keeps the `EMAIL_TRUSTED_PROVIDERS` guard in `privyAuth.ts` exactly as it
+was: several OAuth providers hand over a profile `email` the holder never proved they
+control, so only Privy's own verified `email` account and providers that verify it are
+trusted. X needs no equivalent, and the difference is worth being precise about — a
+`twitter_oauth` account's `username` is not a claim about a third party, it is what X
+itself returned for the account that just completed the handshake. The residual risk with X
+is not impersonation at claim time but that handles change hands over the years, which is
+the caveat under "Who a gift is for".
 
 The attestation lives ten minutes. It names one destination, so a leaked signature can
 only send the gift where it was already going. It names one gift, so it cannot be reused
