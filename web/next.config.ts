@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs/config";
 
 // Baseline HTTP security headers. The CSP is intentionally limited to
 // `frame-ancestors 'none'` (anti-clickjacking — critical for a money app) so it
@@ -83,4 +84,12 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+// Sentry build plugin. Inert without credentials: builds stay quiet, and source
+// maps are only uploaded when SENTRY_AUTH_TOKEN is present (Vercel env, server-only).
+// Runtime init lives in src/instrumentation*.ts and is skipped without a DSN.
+export default withSentryConfig(nextConfig, {
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  silent: true,
+  sourcemaps: { disable: !process.env.SENTRY_AUTH_TOKEN },
+});
