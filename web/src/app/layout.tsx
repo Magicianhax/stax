@@ -43,6 +43,8 @@ const DEFAULT_TITLE = "Stax · Invest with Vera";
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   applicationName: SITE_NAME,
+  // Base Builder Code — ties the site and app to our Base builder profile.
+  other: { "base:app_id": "6a9e7b1a5538a47d1b071bb2" },
   title: {
     default: DEFAULT_TITLE,
     template: "%s · Stax",
