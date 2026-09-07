@@ -122,7 +122,7 @@ export function HubScreen({
                 position: "relative",
               }}
             >
-              <Icon name="send" size={22} stroke={2.2} />
+              <Icon name="gift" size={22} stroke={2.2} />
             </span>
             <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
               <div style={{ fontSize: 17, fontWeight: 700, letterSpacing: "-.01em" }}>

@@ -57,6 +57,14 @@
   gap: 8px;
   padding: 2px 2px 10px;
   overflow-x: auto;
+  /* Centred over the key grid, and still scrollable when a screen offers more
+     presets than fit: `justify-content` alone would clip the first chip on
+     overflow, so the auto margins on the row's own children do the centring. */
+  justify-content: safe center;
+  scrollbar-width: none;
+}
+.presets::-webkit-scrollbar {
+  display: none;
 }
 
 .grid {

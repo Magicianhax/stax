@@ -32,6 +32,7 @@ import {
   X,
   ArrowLeft,
   Send,
+  Gift,
   Lock,
   SlidersHorizontal,
   Receipt,
@@ -76,6 +77,7 @@ export type IconName =
   | "close"
   | "back"
   | "send"
+  | "gift"
   | "lock"
   | "sliders"
   | "receipt"
@@ -128,6 +130,7 @@ const MAP: Record<IconName, LucideIcon> = {
   close: X,
   back: ArrowLeft,
   send: Send,
+  gift: Gift,
   lock: Lock,
   sliders: SlidersHorizontal,
   receipt: Receipt,

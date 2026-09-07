@@ -64,7 +64,7 @@ export function HomeBanners({ go }: { go: (screen: string, params?: Record<strin
         body: "Invest for someone else, held until a day you pick.",
         art: (
           <span className={s.giftArt} aria-hidden>
-            <Icon name="send" size={24} stroke={2.1} />
+            <Icon name="gift" size={24} stroke={2.1} />
           </span>
         ),
         onOpen: () => go("gift"),

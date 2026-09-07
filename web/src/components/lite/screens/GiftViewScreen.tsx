@@ -137,7 +137,7 @@ export function GiftViewScreen({
       {!empty && !loading && (
         <div style={{ padding: "20px 22px 0" }}>
           <button className="btn btn-ghost btn-block tap" style={{ minHeight: 48 }} onClick={() => go("gift")}>
-            <Icon name="plus" size={17} /> Gift a basket
+            <Icon name="gift" size={17} /> Gift a basket
           </button>
         </div>
       )}
