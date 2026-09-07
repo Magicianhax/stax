@@ -18,7 +18,7 @@ import { assetBySymbol, type StaxChain } from "@/lib/chains";
 import { RampWeightBar } from "../screens/basketPrimitives";
 import { GIFT_PILL_LABEL, pillFor, type Gift, type GiftItem, type GiftPill } from "./types";
 import type { GiftHolding, GiftToken } from "@/lib/gifts";
-import { splitOf, unlockDate, untilLabel } from "./giftFormat";
+import { unlockDate, untilLabel } from "./giftFormat";
 
 /** Heaviest holding first — LogoCluster input. */
 export function clusterOfItems(items: GiftItem[]): { symbol: string }[] {
@@ -172,10 +172,15 @@ const line = (i: number): CSSProperties => ({
  * What the money will buy, before it buys it: dollars by weight. Used only on
  * the give flow's review card, where nothing has been bought yet.
  */
-export function SplitList({ items, amountUsd }: { items: (GiftItem & { heldAsCash?: boolean })[]; amountUsd: number }) {
+export function SplitList({
+  rows,
+}: {
+  /** Already priced — see `reviewRows`, which knows the fee only hits the bought part. */
+  rows: (GiftItem & { heldAsCash?: boolean; amountUsd: number })[];
+}) {
   return (
     <div>
-      {splitOf(items, amountUsd).map((l, i) => (
+      {rows.map((l, i) => (
         <div key={l.symbol} style={line(i)}>
           <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500 }}>
             {toTile(l.symbol).name}

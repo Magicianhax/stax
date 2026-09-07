@@ -183,7 +183,6 @@ its body with Zod, and is rate limited. Types are exported from `@/lib/gifts`.
 
 | Route | Auth | What it does |
 | --- | --- | --- |
-| `POST /api/gifts/quote` | public | Allocation preview for a basket and an amount. No writes. |
 | `POST /api/gifts` | yes | Validates, reserves the `pending` row, returns the giftId, hashes, dates, note and allocation. |
 | `GET /api/gifts` | yes | Gifts I sent and gifts addressed to my email, with `claimable` and `reclaimable` precomputed. |
 | `POST /api/gifts/:id/funded` | yes | Marks funded, after re-reading the contract. |
@@ -191,11 +190,11 @@ its body with Zod, and is rate limited. Types are exported from `@/lib/gifts`.
 | `POST /api/gifts/:id/claimed` | yes | Records the settling transaction, claim or reclaim. |
 | `GET /api/gifts/preview?id=` | public | The share-link landing payload. |
 
-`POST /api/gifts/quote` is not on the give screen's path any more: `splitGiftBasket` is
-client-safe, so the review card runs the very function the server will, which means the
-preview cannot disagree with what `create` does and it works in demo with no round trip.
-The route stays for callers outside the browser and is the documented way to price a gift
-without an account.
+There is deliberately no pricing endpoint. `splitGiftBasket` is client-safe, so the review
+card runs the very function the server runs, which means the preview cannot disagree with
+what `create` does and it works in demo with no round trip. An endpoint nobody called would
+drift out of step with the real path precisely because nothing exercised it. If a public
+pricing route is ever wanted, add it back against the same function.
 
 `POST /api/gifts` enforces the amount floor and ceiling, the caller's actual USDC balance,
 the unlock-date window, the email shape and the note cap. The note is capped at 200

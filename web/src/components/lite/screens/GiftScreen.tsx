@@ -29,6 +29,7 @@ import { GiftSent } from "../gift/GiftSent";
 import {
   addYears,
   fromDateInput,
+  reviewRows,
   todayAnchor,
   toDateInput,
   unlockDateFromSeconds,
@@ -467,7 +468,7 @@ export function GiftScreen({
           <div className="card" style={{ padding: 18 }}>
             <GiftBasketHead name={basket.name} items={items} />
             <div style={{ marginTop: 14, paddingTop: 4, borderTop: "1px solid var(--line-2)" }}>
-              <SplitList items={items} amountUsd={amount - fee} />
+              <SplitList rows={reviewRows(items, split.investUsd, split.cashUsd, fee)} />
             </div>
             {hasCashSlice && <CashSliceNote style={{ marginTop: 12 }} />}
             <div style={{ marginTop: 4 }}>

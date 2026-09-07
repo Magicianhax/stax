@@ -9,8 +9,6 @@ export type {
   GiftPreview,
   GiftStatus,
   GiftToken,
-  GiftQuoteRequest,
-  GiftQuoteResponse,
   CreateGiftRequest,
   CreateGiftResponse,
   GiftsListResponse,
@@ -35,11 +33,6 @@ import type { GiftStatus } from "@/lib/gifts";
 export interface GiftItem {
   symbol: string;
   weightPct: number;
-}
-
-/** A holding with the dollars behind it — the split preview on the review card. */
-export interface GiftSplitLeg extends GiftItem {
-  amountUsd: number;
 }
 
 /**

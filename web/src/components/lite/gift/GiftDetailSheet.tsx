@@ -10,7 +10,7 @@ import { usd, txUrl } from "@/lib/format";
 import { useChain } from "@/lib/chains/active";
 import { haptic } from "@/lib/haptics";
 import { CashSliceNote, DetailRow, GiftTokenHead, SplitList, StatusPill, TokenList } from "./giftPrimitives";
-import { giftShareUrl, unlockDate, untilLabel } from "./giftFormat";
+import { giftShareUrl, splitOf, unlockDate, untilLabel } from "./giftFormat";
 import { pillFor, type Gift } from "./types";
 
 export function GiftDetailSheet({ gift, onClose }: { gift: Gift | null; onClose: () => void }) {
@@ -86,7 +86,7 @@ export function GiftDetailSheet({ gift, onClose }: { gift: Gift | null; onClose:
                 {gift.tokens.length > 0 ? (
                   <TokenList tokens={gift.tokens} chain={chain} />
                 ) : (
-                  <SplitList items={gift.holdings} amountUsd={gift.amountUsd} />
+                  <SplitList rows={splitOf(gift.holdings, gift.amountUsd)} />
                 )}
               </div>
               {gift.holdings.some((h) => h.heldAsCash) && <CashSliceNote style={{ marginTop: 12 }} />}

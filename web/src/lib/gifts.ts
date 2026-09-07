@@ -4,7 +4,8 @@
 // (lib/server/giftsStore.ts) so a browser can never brute-force a recipient.
 //
 // The flow, end to end (docs/GIFTS.md has the long version):
-//   1. POST /api/gifts/quote      preview the split, no writes, no auth
+//   1. splitGiftBasket()          preview the split locally — the SAME function the
+//                                 server runs, so the preview cannot disagree with step 2
 //   2. POST /api/gifts            reserve the gift row + giftId, get the allocation back
 //   3. the normal invest path     tokens land in the GIVER's smart account
 //   4. approve + TimelockGift.create   one batched sponsored user op, tokens parked
@@ -104,19 +105,6 @@ export interface GiftSummary {
   reclaimable: boolean;
   /** Absolute link the giver shares with the recipient. Only on gifts the caller sent. */
   shareUrl: string | null;
-}
-
-// POST /api/gifts/quote — public preview of the split. No writes.
-export interface GiftQuoteRequest {
-  basketId: string;
-  amountUsd: number;
-}
-export interface GiftQuoteResponse {
-  basket: { id: string; name: string; tagline: string; icon: string; color: string; riskScore: number };
-  /** The full economic split, every item — the giver's money really does go here. */
-  allocation: AllocateResult;
-  /** The same split with the slices that will be parked as USDC marked. */
-  holdings: GiftHolding[];
 }
 
 // POST /api/gifts — reserve the gift. Nothing is on-chain yet.

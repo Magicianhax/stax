@@ -10,7 +10,7 @@
 // Email masking, validation and the countdown wording that the API also uses
 // live in `@/lib/gifts` (gift-chain owns them); only what is UI-only is here.
 import { absoluteSiteUrl } from "@/lib/urls";
-import type { GiftItem, GiftSplitLeg } from "./types";
+import type { GiftItem } from "./types";
 
 const DAY = 86_400_000;
 
@@ -88,16 +88,42 @@ export function isUnlocked(iso: string, nowMs: number = Date.now()): boolean {
 }
 
 /**
- * The dollars behind each holding, weights applied to the amount. The heaviest
- * holding absorbs the rounding so the legs always add back to the total.
+ * The dollars behind each holding. Weights are normalised over the items given,
+ * rather than assumed to sum to 100, so this is also correct for a subset of a
+ * basket. The heaviest holding absorbs the rounding, so the legs always add back
+ * to the total exactly.
  */
-export function splitOf(items: GiftItem[], amountUsd: number): GiftSplitLeg[] {
+export function splitOf<T extends GiftItem>(items: T[], amountUsd: number): (T & { amountUsd: number })[] {
   if (items.length === 0) return [];
+  const total = items.reduce((sum, i) => sum + Math.max(0, i.weightPct), 0) || 1;
   const order = [...items].sort((a, b) => b.weightPct - a.weightPct);
-  const legs = order.map((i) => ({ ...i, amountUsd: Math.round(((amountUsd * i.weightPct) / 100) * 100) / 100 }));
+  const legs = order.map((i) => ({ ...i, amountUsd: Math.round(((amountUsd * i.weightPct) / total) * 100) / 100 }));
   const drift = Math.round((amountUsd - legs.reduce((s, l) => s + l.amountUsd, 0)) * 100) / 100;
   legs[0] = { ...legs[0], amountUsd: Math.round((legs[0].amountUsd + drift) * 100) / 100 };
   return legs;
+}
+
+/**
+ * The review card's rows for a gift being composed.
+ *
+ * The fee is skimmed on the invest leg ONLY, so it cannot be spread evenly over
+ * every row: the safe slice is parked whole. Splitting the two groups against
+ * their own totals is what makes each row agree with the "Invested for them" and
+ * "Set aside as dollars" lines underneath, instead of quietly understating the
+ * cash row by the fee's share of it.
+ */
+export function reviewRows(
+  holdings: (GiftItem & { heldAsCash?: boolean })[],
+  investUsd: number,
+  cashUsd: number,
+  fee: number,
+): (GiftItem & { heldAsCash?: boolean; amountUsd: number })[] {
+  const cash = splitOf(holdings.filter((h) => h.heldAsCash), cashUsd);
+  const bought = splitOf(
+    holdings.filter((h) => !h.heldAsCash),
+    Math.round((investUsd - fee) * 100) / 100,
+  );
+  return [...cash, ...bought].sort((a, b) => b.weightPct - a.weightPct);
 }
 
 /**
