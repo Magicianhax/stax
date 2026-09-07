@@ -29,7 +29,17 @@ export {
 
 import type { GiftStatus } from "@/lib/gifts";
 
-/** A holding as the give flow knows it, before anything is bought. */
+/**
+ * A holding as the give flow knows it, before anything is bought.
+ *
+ * Deliberately NOT `BasketItem`: that carries a `reason` written for someone
+ * investing for themselves, and at least one of them is false for a gift. Safe
+ * Dollars reads "a calm cushion that still earns a little", but a gifted safe
+ * slice is parked as plain dollars and earns nothing until it is claimed. If a
+ * reason line is ever wanted here, source it from something gift-aware and
+ * replace it whenever `heldAsCash` is true — `CashSliceNote` is the honest
+ * version of that sentence.
+ */
 export interface GiftItem {
   symbol: string;
   weightPct: number;
