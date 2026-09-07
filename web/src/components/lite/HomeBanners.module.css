@@ -3,11 +3,26 @@
 
 .frame {
   position: relative;
-  display: grid;
+}
+
+/* The viewport clips the track; the track slides. Slides sit side by side so a
+   drag can show two at once — a cross-fade cannot follow a finger. */
+.viewport {
+  overflow: hidden;
+  border-radius: var(--rr);
+  /* the card's own radius, so the neighbouring slide is clipped cleanly */
+}
+.track {
+  display: flex;
+  will-change: transform;
+  transition: transform 0.42s var(--ease-drawer);
+}
+.track[data-dragging="true"] {
+  transition: none; /* while a finger is down the track IS the finger */
 }
 
 .slide {
-  grid-area: 1 / 1;
+  flex: 0 0 100%;
   width: 100%;
   text-align: left;
   padding: 18px;
@@ -18,18 +33,8 @@
      `.card` rule would otherwise win on source order. */
   position: relative;
   overflow: hidden;
-  opacity: 0;
-  transform: scale(0.995);
-  transition:
-    opacity 0.5s var(--ease-out),
-    transform 0.5s var(--ease-out);
-  pointer-events: none;
 }
-.slide[data-on="true"] {
-  opacity: 1;
-  transform: none;
-  pointer-events: auto;
-}
+
 
 /* ambient sheen — sits behind, never blocks the press */
 .wash {
@@ -117,9 +122,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .slide {
-    transition: opacity 0.2s linear;
-    transform: none;
+  .track {
+    transition: none;
   }
   .fill {
     animation: none;
