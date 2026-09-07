@@ -5,6 +5,7 @@ import { syncExecutorEvents } from "@/lib/server/indexer";
 import { CADENCE_SECONDS, type AutopilotConfig } from "@/lib/autopilot";
 import { claimDueAutopilots, releaseAutopilot } from "@/lib/server/autopilotStore";
 import { runAutopilot } from "@/lib/server/autopilotExecutor";
+import { isPermanent } from "@/lib/autopilotRetry";
 
 // Scheduled, autonomous runs — never cache. Allow up to 5 min for a batch.
 // Every due config is claimed atomically (claimed_at stamped), then grouped by
@@ -43,23 +44,48 @@ function nextSlotAfter(cfg: AutopilotConfig, now: number): number {
   return next;
 }
 
-type RunRow = { id: string; chain: ChainKey; ok: boolean; txHash?: string; reason?: string };
+type RunRow = { id: string; chain: ChainKey; ok: boolean; txHash?: string; reason?: string; attempts?: number };
+
+/** Retry a failed run this many extra times inside the same invocation. */
+const RETRY_ATTEMPTS = 2;
+const RETRY_BACKOFF_MS = [4000, 12_000];
+/** When a run failed for a passing reason, come back this soon rather than next slot. */
+const RETRY_SOON_SECONDS = 15 * 60;
 
 async function runGroup(cfgs: AutopilotConfig[], now: number): Promise<RunRow[]> {
   const rows: RunRow[] = [];
   for (const cfg of cfgs) {
-    try {
-      const r = await runAutopilot(cfg, { nowSeconds: now });
-      rows.push({ id: cfg.id, chain: cfg.chain, ...r });
-    } catch (e) {
-      rows.push({ id: cfg.id, chain: cfg.chain, ok: false, reason: e instanceof Error ? e.message : "run failed" });
-    } finally {
+    let row: RunRow = { id: cfg.id, chain: cfg.chain, ok: false, reason: "run failed" };
+    let attempts = 0;
+    // A failed run used to advance straight to the next slot, so a weekly plan
+    // that hit a bad minute simply skipped the week, silently. Try again here,
+    // then leave it due again shortly rather than a whole cadence away.
+    for (let attempt = 0; attempt <= RETRY_ATTEMPTS; attempt++) {
+      attempts = attempt + 1;
       try {
-        await releaseAutopilot(cfg.id, nextSlotAfter(cfg, now));
+        const r = await runAutopilot(cfg, { nowSeconds: Math.floor(Date.now() / 1000) });
+        row = { id: cfg.id, chain: cfg.chain, ...r };
       } catch (e) {
-        // Left claimed: the 30-minute claim TTL lets the next cron pick it up.
-        console.error("[autopilot] release failed:", cfg.id, e instanceof Error ? e.message : e);
+        row = { id: cfg.id, chain: cfg.chain, ok: false, reason: e instanceof Error ? e.message : "run failed" };
       }
+      if (row.ok || isPermanent(row.reason)) break;
+      if (attempt < RETRY_ATTEMPTS) {
+        console.warn(`[autopilot] ${cfg.id} attempt ${attempts} failed: ${row.reason} — retrying`);
+        await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS[attempt] ?? 4000));
+      }
+    }
+    rows.push({ ...row, attempts });
+
+    try {
+      // Transient failure ⇒ due again soon, never later than the next slot, so a
+      // more frequent cron picks it up and a daily one behaves exactly as before.
+      const slot = nextSlotAfter(cfg, now);
+      const soon = Math.floor(Date.now() / 1000) + RETRY_SOON_SECONDS;
+      const next = row.ok || isPermanent(row.reason) ? slot : Math.min(soon, slot);
+      await releaseAutopilot(cfg.id, next);
+    } catch (e) {
+      // Left claimed: the 30-minute claim TTL lets the next cron pick it up.
+      console.error("[autopilot] release failed:", cfg.id, e instanceof Error ? e.message : e);
     }
   }
   return rows;
