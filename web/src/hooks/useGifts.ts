@@ -34,6 +34,7 @@ import { useDemo } from "@/components/demo/DemoProvider";
 import { useRefreshBalances } from "@/hooks/useBalances";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { DEMO_GIFTS } from "@/lib/demo/demoData";
+import { giftShareUrl } from "@/components/lite/gift/giftFormat";
 import {
   giftClaimCall,
   giftContractFor,
@@ -206,6 +207,8 @@ export interface SentGift {
   /** The tokens actually parked, read from the invest receipt. */
   tokens: GiftToken[];
   note: string;
+  /** The link to hand over. Built by the server; never re-derived here. */
+  shareUrl: string;
 }
 
 /**
@@ -335,11 +338,19 @@ export function useSendGift(): UseSendGift {
             fromName: null,
             claimable: false,
             reclaimable: false,
-            shareUrl: null,
+            shareUrl: giftShareUrl(id),
           },
           ...demoGifts(),
         ];
-        setSent({ id, basketName, recipientEmailMasked: masked, unlockAtIso, tokens, note: draft.note ?? "" });
+        setSent({
+          id,
+          basketName,
+          recipientEmailMasked: masked,
+          unlockAtIso,
+          tokens,
+          note: draft.note ?? "",
+          shareUrl: giftShareUrl(id),
+        });
         setPhase("done");
         void qc.invalidateQueries({ queryKey: ["gifts"] });
         return;
@@ -452,6 +463,7 @@ export function useSendGift(): UseSendGift {
           unlockAtIso: reserved.unlockAtIso,
           tokens,
           note: reserved.note,
+          shareUrl: reserved.shareUrl,
         });
         setPhase("done");
         void qc.invalidateQueries({ queryKey: ["gifts"] });

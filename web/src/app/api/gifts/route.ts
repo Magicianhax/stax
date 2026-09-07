@@ -29,6 +29,7 @@ import { chainKeyFromRequest } from "@/lib/server/chain";
 import {
   createGift,
   emailsFor,
+  giftShareUrl,
   listGiftsFor,
   lookupHash,
   newGiftId,
@@ -43,7 +44,6 @@ import { fetchPrivyEmail, verifyRequest } from "@/lib/server/privyAuth";
 import { rateLimit } from "@/lib/server/rateLimit";
 import { badRequest, jsonError, serverError, tooManyRequests, unauthorized } from "@/lib/server/respond";
 import { touchUser } from "@/lib/server/users";
-import { absoluteAppUrl } from "@/lib/urls";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -134,6 +134,7 @@ export async function POST(req: NextRequest) {
       recipientSalt: salt,
       basketId: basket.id,
       basketName: basket.name,
+      holdings: basket.items.map((i) => ({ symbol: i.symbol, weightPct: i.weightPct })),
       amountUsd: body.amountUsd,
       note: note || null,
       unlockAt,
@@ -154,7 +155,7 @@ export async function POST(req: NextRequest) {
         allocation: basketToAllocation(basket, body.amountUsd),
         basketName: basket.name,
         recipientEmailMasked: maskEmail(body.recipientEmail),
-        shareUrl: absoluteAppUrl(`?gift=${id}`),
+        shareUrl: giftShareUrl(id),
       },
       { status: 201 },
     );

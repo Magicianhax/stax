@@ -17,8 +17,10 @@ parked in the `TimelockGift` contract against a hash of the recipient's email.
 **Park.** The contract holds the tokens. Nobody can move them before `unlockAt` — not you,
 not the recipient, not the contract's owner.
 
-**Link.** You get a share link, `/app?gift=<giftId>`. It resolves to a public preview: the
-basket, the amount, your note, the unlock date, your first name. No email, no addresses.
+**Link.** You get a share link, `/gift/<giftId>`, on the marketing site rather than inside
+the app. Someone who has never heard of Stax lands on the note, the basket, the amount,
+the unlock date and your first name, and chooses to open the app from there. No email, no
+addresses.
 
 **Claim.** After `unlockAt`, the recipient signs in with that email and asks Stax for a
 claim authorisation. The server checks their Privy record, signs an EIP-712 attestation,
@@ -108,7 +110,8 @@ rotation.
 
 ## The data
 
-`gifts` in `web/src/lib/db/schema.ts`, migration `0005_icy_strong_guy.sql`.
+`gifts` in `web/src/lib/db/schema.ts`, migrations `0005_icy_strong_guy.sql` and
+`0006_dusty_killraven.sql`.
 
 The row id **is** the on-chain `giftId` (`0x` + 32 random bytes), which is also the share
 link. One id, three places.
@@ -125,6 +128,12 @@ different jobs:
 
 `recipient_email_masked` (`a•••@gmail.com`) is shown back to the giver only, so they can
 tell two recipients apart without the address being readable over someone's shoulder.
+
+`holdings` is the basket's split as it was on the day the gift was given, snapshotted onto
+the row rather than looked up later. A gift can sit here for 25 years and a shared basket
+can be deleted long before it opens, so a lookup would eventually draw an empty page.
+Weights are not sensitive — a curated basket's are already public in `lib/baskets.ts` — so
+they ride along on the public preview and draw its asset tiles. Amounts never do.
 
 `status` walks `pending` → `funded` → (`claimed` | `reclaimed`). `failed` is a gift whose
 parking transaction never landed. A `pending` gift is invisible to the public preview: it

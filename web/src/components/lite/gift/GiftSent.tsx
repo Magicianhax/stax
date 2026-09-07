@@ -11,7 +11,7 @@ import { usd } from "@/lib/format";
 import { useChain } from "@/lib/chains/active";
 import { haptic } from "@/lib/haptics";
 import { clusterOfTokens, DetailRow, TokenList } from "./giftPrimitives";
-import { giftShareUrl, unlockDate, untilLabel } from "./giftFormat";
+import { unlockDate, untilLabel } from "./giftFormat";
 import type { SentGift } from "@/hooks/useGifts";
 
 export function GiftSent({
@@ -29,7 +29,7 @@ export function GiftSent({
   const chain = useChain();
   const { notify } = useToast();
   const [copied, setCopied] = useState(false);
-  const url = giftShareUrl(gift.id);
+  const url = gift.shareUrl;
 
   const copy = async () => {
     haptic.light();

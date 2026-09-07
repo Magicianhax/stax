@@ -340,6 +340,12 @@ export const gifts = pgTable(
     /** Curated id ("base:big-tech") or a stored `baskets.id`. No FK, same reasoning as autopilots. */
     basketId: text("basket_id"),
     basketName: text("basket_name").notNull(),
+    /**
+     * The basket's holdings as they were on the day it was given: [{ symbol, weightPct }].
+     * A snapshot rather than a lookup, because a gift can sit here for 25 years and a
+     * shared basket can be deleted long before it opens. Public — weights are not secret.
+     */
+    holdings: jsonb("holdings"),
     amountUsd: numeric("amount_usd").notNull(),
     note: text("note"),
     unlockAt: timestamp("unlock_at", { withTimezone: true }).notNull(),

@@ -43,3 +43,14 @@ export function absoluteAppUrl(query = ""): string {
   const origin = typeof window !== "undefined" ? window.location.origin : SITE_ORIGIN || "https://www.stax.best";
   return `${origin}/app${query}`;
 }
+
+/**
+ * Absolute marketing-site URL for links handed to someone who isn't here yet (a gift
+ * share link, an email). Unlike `siteUrl` this never returns a bare path, because a
+ * relative link pasted into a message goes nowhere.
+ */
+export function absoluteSiteUrl(path = "/"): string {
+  if (SITE_ORIGIN) return `${SITE_ORIGIN}${path}`;
+  const origin = typeof window !== "undefined" ? window.location.origin : "https://www.stax.best";
+  return `${origin}${path}`;
+}

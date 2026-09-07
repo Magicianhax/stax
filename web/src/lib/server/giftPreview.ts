@@ -9,11 +9,12 @@ import "server-only";
 // Both go through here, so the two can never disagree about what is safe to show.
 //
 // Safe to render to anyone: basket name, amount, note, unlock date, the giver's first
-// name. No email, no addresses, no token amounts, no transaction hashes. A gift nobody
+// name, and the basket's split so the page can draw its asset tiles. No email, no
+// addresses, no token amounts, no transaction hashes. A gift nobody
 // funded reads as null, exactly like an id that never existed.
 import type { ChainKey } from "@/lib/chains";
 import type { GiftPreview, GiftStatus } from "@/lib/gifts";
-import { emailsFor, firstNameFromEmail, getGiftRow, isGiftId } from "@/lib/server/giftsStore";
+import { emailsFor, firstNameFromEmail, getGiftRow, isGiftId, parsedHoldings } from "@/lib/server/giftsStore";
 
 /** The public preview for `id`, or null when there is nothing a stranger may see. */
 export async function loadGiftPreview(id: string | null | undefined, now = Date.now()): Promise<GiftPreview | null> {
@@ -33,5 +34,6 @@ export async function loadGiftPreview(id: string | null | undefined, now = Date.
     fromName: firstNameFromEmail(givers.get(row.fromUserId) ?? null),
     status,
     claimable: status === "funded" && row.unlockAt.getTime() <= now,
+    holdings: parsedHoldings(row),
   };
 }

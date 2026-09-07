@@ -9,7 +9,7 @@
 //
 // Email masking, validation and the countdown wording that the API also uses
 // live in `@/lib/gifts` (gift-chain owns them); only what is UI-only is here.
-import { SITE_ORIGIN } from "@/lib/urls";
+import { absoluteSiteUrl } from "@/lib/urls";
 import type { GiftItem, GiftSplitLeg } from "./types";
 
 const DAY = 86_400_000;
@@ -101,12 +101,10 @@ export function splitOf(items: GiftItem[], amountUsd: number): GiftSplitLeg[] {
 }
 
 /**
- * The link the giver shares. The gift page is public and has to open for
- * someone who has never heard of Stax, so it lives on the marketing site rather
- * than behind the app shell.
+ * The link the giver shares. `GiftSummary.shareUrl` is the authority and the
+ * server builds the same string; this exists only for the demo, which has no
+ * server, and as a fallback so a copy button is never dead.
  */
 export function giftShareUrl(id: string): string {
-  const origin =
-    SITE_ORIGIN || (typeof window !== "undefined" ? window.location.origin : "https://www.stax.best");
-  return `${origin}/gift/${id}`;
+  return absoluteSiteUrl(`/gift/${id}`);
 }

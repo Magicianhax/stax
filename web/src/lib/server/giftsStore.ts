@@ -26,8 +26,8 @@ import { serverClient } from "@/lib/server/chain";
 import { getBasket } from "@/lib/server/basketsStore";
 import { getChain } from "@/lib/chains";
 import { curatedBasketById, isBasketInvestable, isBasketShortId, type Basket } from "@/lib/baskets";
-import { maskEmail, normalizeEmail, TIMELOCK_GIFT_ABI, type GiftStatus, type GiftSummary, type GiftToken } from "@/lib/gifts";
-import { absoluteAppUrl } from "@/lib/urls";
+import { maskEmail, normalizeEmail, TIMELOCK_GIFT_ABI, type GiftHolding, type GiftStatus, type GiftSummary, type GiftToken } from "@/lib/gifts";
+import { absoluteSiteUrl } from "@/lib/urls";
 
 /**
  * Server-side pepper for the lookup hash. Optional: without it the lookup hash is a plain
@@ -88,6 +88,8 @@ export interface NewGiftInput {
   recipientSalt: string;
   basketId: string | null;
   basketName: string;
+  /** The basket's split on the day it was given — a snapshot, not a lookup. */
+  holdings: GiftHolding[];
   amountUsd: number;
   note: string | null;
   unlockAt: Date;
@@ -108,6 +110,7 @@ export async function createGift(input: NewGiftInput): Promise<GiftRow> {
       recipientEmailMasked: maskEmail(input.recipientEmail),
       basketId: input.basketId,
       basketName: input.basketName,
+      holdings: input.holdings,
       amountUsd: String(input.amountUsd),
       note: input.note,
       unlockAt: input.unlockAt,
@@ -271,8 +274,21 @@ export async function resolveGiftBasket(chain: ChainKey, basketId: string): Prom
 }
 
 // ── presentation ─────────────────────────────────────────────────────────────
+/**
+ * The link a giver hands to their recipient. It points at the PUBLIC share page, not
+ * into the app: someone who has never heard of Stax should land on the note, the amount
+ * and the unlock date, and choose to open the app from there.
+ */
+export function giftShareUrl(id: string): string {
+  return absoluteSiteUrl(`/gift/${id}`);
+}
 function parsedTokens(row: GiftRow): GiftToken[] {
   return Array.isArray(row.tokens) ? (row.tokens as GiftToken[]) : [];
+}
+
+/** The snapshotted split. Empty for a row written before the column existed. */
+export function parsedHoldings(row: GiftRow): GiftHolding[] {
+  return Array.isArray(row.holdings) ? (row.holdings as GiftHolding[]) : [];
 }
 
 /** The row as the app shows it, from the caller's side of the gift. */
@@ -298,12 +314,13 @@ export function toSummary(
     reclaimAfter: row.reclaimAfter.toISOString(),
     createdAt: row.createdAt.toISOString(),
     tokens: parsedTokens(row),
+    holdings: parsedHoldings(row),
     createTxHash: row.createTxHash,
     claimTxHash: row.claimTxHash,
     recipientEmailMasked: direction === "sent" ? row.recipientEmailMasked : null,
     fromName: direction === "received" ? firstNameFromEmail(fromEmail) : null,
     claimable: direction === "received" && status === "funded" && unlocked,
     reclaimable: direction === "sent" && status === "funded" && past,
-    shareUrl: direction === "sent" ? absoluteAppUrl(`?gift=${row.id}`) : null,
+    shareUrl: direction === "sent" ? giftShareUrl(row.id) : null,
   };
 }

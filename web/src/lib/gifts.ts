@@ -54,6 +54,16 @@ export interface GiftToken {
   amount: string;
 }
 
+/**
+ * The basket's split as it was on the day the gift was given, snapshotted onto the row.
+ * Weights are not sensitive — a curated basket's are already public in lib/baskets.ts —
+ * so these ride along on the PUBLIC preview and draw its asset tiles. Amounts never do.
+ */
+export interface GiftHolding {
+  symbol: string;
+  weightPct: number;
+}
+
 /** A gift as the app shows it. `direction` says which side of it the caller is on. */
 export interface GiftSummary {
   /** The on-chain giftId — 0x + 32 bytes. Also the database row id and the share link. */
@@ -70,6 +80,8 @@ export interface GiftSummary {
   reclaimAfter: string;
   createdAt: string;
   tokens: GiftToken[];
+  /** The basket's split as given. Empty only for rows written before the snapshot existed. */
+  holdings: GiftHolding[];
   createTxHash: string | null;
   claimTxHash: string | null;
   /** Masked recipient ("a•••@gmail.com"). Only on gifts the caller sent. */
@@ -168,6 +180,8 @@ export interface GiftPreview {
   fromName: string | null;
   status: GiftStatus;
   claimable: boolean;
+  /** What the basket holds, for the public page's asset tiles. Never any amounts. */
+  holdings: GiftHolding[];
 }
 
 // ── display helpers ──────────────────────────────────────────────────────────
