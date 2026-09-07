@@ -100,6 +100,15 @@ contract TimelockGift is EIP712, ReentrancyGuard, Ownable {
     /// @notice Park `tokens`/`amounts` for whoever proves ownership of `recipientHash`'s email.
     /// The caller must have approved this contract for every amount — batchable with the
     /// approvals in a single ERC-4337 UserOp, so the giver sees one gasless confirmation.
+    ///
+    /// @dev NEVER park a rebasing or fee-on-transfer token. Amounts here are RECORDED, not
+    /// measured: `claim` and `reclaim` pay back exactly what was written down, never the live
+    /// balance. A rebasing token's yield over a hold of up to 25 years would therefore be
+    /// stranded here with no way out, and a fee-on-transfer token would pay out more than
+    /// arrived. Stax parks the Aave "Safe Dollars" slice as plain USDC for this reason (see
+    /// `splitGiftBasket` in web/src/lib/gifts.ts and docs/GIFTS.md). Measuring by balance
+    /// delta would not fix it either: one balance is shared by every gift, so per-gift
+    /// yield cannot be attributed without scaled-balance accounting.
     /// @param giftId Server-generated random 32 bytes; also the row id in the Stax database.
     /// @param recipientHash Hash of the recipient's email plus a per-gift salt. Never an email.
     /// @param unlockAt When the gift becomes claimable. Must be in the future.

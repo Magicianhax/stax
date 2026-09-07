@@ -4,7 +4,6 @@
 //
 //   useGiftsEnabled() is the contract live on this chain at all?
 //   useGifts()        the two lists ("You sent" / "For you") + how many are ready
-//   useGiftQuote()    the split preview and the fee line on the review card
 //   useSendGift()     collect → buy → park → recorded, with a phase the UI follows
 //   useClaimGift()    the recipient opens it
 //   useReclaimGift()  the giver takes an unclaimed one back
@@ -40,10 +39,10 @@ import {
   giftContractFor,
   giftCreateCalls,
   giftReclaimCall,
+  splitGiftBasket,
   type ClaimAuthorisationResponse,
   type CreateGiftRequest,
   type CreateGiftResponse,
-  type GiftQuoteResponse,
   type GiftSummary,
   type GiftToken,
   type GiftsListResponse,
@@ -168,26 +167,6 @@ export function useGifts(): UseGifts {
   };
 }
 
-// ── quote ─────────────────────────────────────────────────────────────────────
-
-/**
- * The split preview on the review card, from `POST /api/gifts/quote` (public, no
- * writes). Demo answers locally from the basket's own fixed weights, which is
- * exactly what the endpoint returns for a curated basket.
- */
-export function useGiftQuote(basketId: string | undefined, amountUsd: number) {
-  const demo = useDemo();
-  const chain = useChain();
-  const valid = Boolean(basketId) && Number.isFinite(amountUsd) && amountUsd > 0;
-
-  return useQuery<GiftQuoteResponse | null>({
-    queryKey: ["gift-quote", chain.key, basketId, amountUsd, demo ? "demo" : "live"],
-    enabled: valid && !demo,
-    staleTime: 60_000,
-    queryFn: () => postJson<GiftQuoteResponse>("/api/gifts/quote", { basketId, amountUsd }),
-  });
-}
-
 // ── send ──────────────────────────────────────────────────────────────────────
 
 /** What the give flow hands over. `unlockAt` is unix seconds; the API wants ISO. */
@@ -280,6 +259,27 @@ function tokensFromReceipt(logs: readonly Log[], chain: StaxChain): GiftToken[] 
   return tokens;
 }
 
+/**
+ * Everything a gift parks: what the invest step bought, plus the safe slice held
+ * as plain USDC. Folded by address so a duplicate can never be approved twice or
+ * paid out twice.
+ *
+ * This mirrors the fold inside `giftCreateCalls`, and exists because the same
+ * list has to reach two places — the contract call and the `funded` report the
+ * server matches against it. Building it once and passing it to both is what
+ * stops them disagreeing, so `cashToken` is folded in HERE and must not be
+ * handed to `giftCreateCalls` as well.
+ */
+function mergeGiftTokens(tokens: GiftToken[], cashToken: GiftToken | null): GiftToken[] {
+  const merged: GiftToken[] = [];
+  for (const token of cashToken ? [...tokens, cashToken] : tokens) {
+    const seen = merged.find((m) => m.address.toLowerCase() === token.address.toLowerCase());
+    if (seen) seen.amount = (BigInt(seen.amount) + BigInt(token.amount)).toString();
+    else merged.push({ ...token });
+  }
+  return merged;
+}
+
 export function useSendGift(): UseSendGift {
   const demo = useDemo();
   const chain = useChain();
@@ -314,7 +314,12 @@ export function useSendGift(): UseSendGift {
         await sleep(600);
         const seed = demoGifts().find((g) => g.basketId === draft.basketId);
         const basketName = display?.basketName ?? seed?.basketName ?? "Your basket";
-        const tokens = display ? demoTokens(chain, display.items, draft.amountUsd) : (seed?.tokens ?? []);
+        // The demo splits the basket the same way the server does, so a Safe
+        // Dollars slice shows up as parked cash here too rather than as an aToken.
+        const split = display ? splitGiftBasket(chain.key, display.items, draft.amountUsd) : null;
+        const tokens = split
+          ? mergeGiftTokens(demoTokens(chain, split.invested, split.investUsd), split.cashToken)
+          : (seed?.tokens ?? []);
         const id = `0x${Date.now().toString(16).padStart(64, "d")}`.slice(0, 66) as `0x${string}`;
         const masked = maskLocally(draft.recipientEmail);
         demoStore = [
@@ -331,7 +336,7 @@ export function useSendGift(): UseSendGift {
             reclaimAfter: new Date((draft.unlockAtSeconds + 90 * 86_400) * 1000).toISOString(),
             createdAt: new Date().toISOString(),
             tokens,
-            holdings: display?.items ?? seed?.holdings ?? [],
+            holdings: split?.holdings ?? seed?.holdings ?? [],
             createTxHash: null,
             claimTxHash: null,
             recipientEmailMasked: masked,
@@ -371,20 +376,33 @@ export function useSendGift(): UseSendGift {
         };
         const reserved = await postJson<CreateGiftResponse>("/api/gifts", body);
 
-        // 2. Buy the basket through the normal executor path. The tokens land in
-        //    the giver's own smart account — the executor has no recipient.
+        // 2. Buy the investable part through the normal executor path. The tokens
+        //    land in the giver's own smart account — the executor has no recipient.
+        //
+        //    `allocation` excludes any Aave "Safe Dollars" slice (that is parked as
+        //    plain USDC instead, so 25 years of rebasing interest can't be stranded
+        //    in the contract), and its weights are renormalised over what remains.
+        //    So the amount sent here MUST be `investUsd`, not the gift's full
+        //    `amountUsd` — sending the full amount would silently spend the cash
+        //    slice's dollars on stocks with no error anywhere.
+        const provider = asViemProvider(await wallet.getEthereumProvider());
+        let tokens: GiftToken[] = [];
+
+        if (reserved.allocation && reserved.investUsd > 0) {
         setPhase("buying");
         const plan = await postJson<InvestPlanResult>("/api/invest-plan", {
           address,
           allocation: reserved.allocation,
-          amountUsd: draft.amountUsd,
+          amountUsd: reserved.investUsd,
         });
         if (plan.chain !== chain.key || plan.executor.toLowerCase() !== chain.contracts.executor.toLowerCase()) {
           throw new Error("That plan was built for a different network. Please try again.");
         }
         const usdcTotal = BigInt(plan.usdcTotal);
         const investCalls: Call[] = [];
-        const feeRaw = BigInt(Math.round(draft.amountUsd * 1_000_000)) - usdcTotal;
+        // The fee is skimmed on the invest leg only, so it is sized against
+        // `investUsd`. The cash slice pays none.
+        const feeRaw = BigInt(Math.round(reserved.investUsd * 1_000_000)) - usdcTotal;
         if (feeRaw > BigInt(0)) {
           investCalls.push({
             to: chain.usdc.address,
@@ -424,16 +442,24 @@ export function useSendGift(): UseSendGift {
             ],
           }),
         });
-        const provider = asViemProvider(await wallet.getEthereumProvider());
         const investReceipt = await sendSponsoredCalls(provider, investCalls, chain);
 
         // 3. What actually got bought, from the receipt's own events.
-        const tokens = tokensFromReceipt(investReceipt.receipt.logs, chain);
+        tokens = tokensFromReceipt(investReceipt.receipt.logs, chain);
         if (tokens.length === 0) {
           throw new Error("The basket was bought, but we couldn't read what landed. Check your holdings before trying again.");
         }
+        }
 
-        // 4. Park them against the recipient's hash.
+        // 4. Everything that gets parked: what was bought, plus the cash slice.
+        //    Merged once here and used for BOTH the contract call and the report
+        //    to the server, so the two can never disagree about what was parked.
+        const parked = mergeGiftTokens(tokens, reserved.cashToken);
+        if (parked.length === 0) {
+          throw new Error("There was nothing to put aside. Nothing has been taken — please try again.");
+        }
+
+        // 5. Park them against the recipient's hash.
         setPhase("parking");
         const parkReceipt = await sendSponsoredCalls(
           provider,
@@ -443,17 +469,20 @@ export function useSendGift(): UseSendGift {
             recipientHash: reserved.recipientHash,
             unlockAt: reserved.unlockAt,
             reclaimAfter: reserved.reclaimAfter,
-            tokens,
+            // Already merged above, so the cash slice must NOT be passed again
+            // here — giftCreateCalls would fold it in a second time.
+            tokens: parked,
             note: reserved.note,
           }),
           chain,
         );
 
-        // 5. Tell the server, which re-reads the contract before believing it.
+        // 6. Tell the server, which re-reads the contract before believing it.
+        //    The body must list exactly what the contract holds, cash row included.
         setPhase("recording");
         await postJson(`/api/gifts/${reserved.giftId}/funded`, {
           txHash: parkReceipt.receipt.transactionHash,
-          tokens,
+          tokens: parked,
         });
 
         setSent({
@@ -461,7 +490,7 @@ export function useSendGift(): UseSendGift {
           basketName: reserved.basketName,
           recipientEmailMasked: reserved.recipientEmailMasked,
           unlockAtIso: reserved.unlockAtIso,
-          tokens,
+          tokens: parked,
           note: reserved.note,
           shareUrl: reserved.shareUrl,
         });

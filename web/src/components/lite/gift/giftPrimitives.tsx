@@ -17,7 +17,7 @@ import { toTile } from "@/lib/displayAssets";
 import { assetBySymbol, type StaxChain } from "@/lib/chains";
 import { RampWeightBar } from "../screens/basketPrimitives";
 import { GIFT_PILL_LABEL, pillFor, type Gift, type GiftItem, type GiftPill } from "./types";
-import type { GiftToken } from "@/lib/gifts";
+import type { GiftHolding, GiftToken } from "@/lib/gifts";
 import { splitOf, unlockDate, untilLabel } from "./giftFormat";
 
 /** Heaviest holding first — LogoCluster input. */
@@ -172,14 +172,19 @@ const line = (i: number): CSSProperties => ({
  * What the money will buy, before it buys it: dollars by weight. Used only on
  * the give flow's review card, where nothing has been bought yet.
  */
-export function SplitList({ items, amountUsd }: { items: GiftItem[]; amountUsd: number }) {
+export function SplitList({ items, amountUsd }: { items: (GiftItem & { heldAsCash?: boolean })[]; amountUsd: number }) {
   return (
     <div>
       {splitOf(items, amountUsd).map((l, i) => (
         <div key={l.symbol} style={line(i)}>
-          <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500 }}>{toTile(l.symbol).name}</span>
+          <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500 }}>
+            {toTile(l.symbol).name}
+            {(l as GiftHolding).heldAsCash && (
+              <span style={{ color: "var(--ink-2)", fontWeight: 500 }}> · as dollars</span>
+            )}
+          </span>
           <span className="tnum" style={{ fontSize: 12.5, color: "var(--ink-2)", flex: "none" }}>
-            {l.weightPct}%
+            {Math.round(l.weightPct)}%
           </span>
           <span className="tnum" style={{ fontSize: 14, fontWeight: 700, flex: "none", minWidth: 62, textAlign: "right" }}>
             {usd(l.amountUsd)}
@@ -211,6 +216,21 @@ export function TokenList({ tokens, chain }: { tokens: GiftToken[]; chain: StaxC
         );
       })}
     </div>
+  );
+}
+
+/**
+ * Why part of a basket sits as dollars. Aave's Safe Dollars rebase, and a gift
+ * pays back the amount it recorded rather than the live balance, so parking the
+ * aToken for up to 25 years would strand everything it earned. The dollars are
+ * parked instead and the recipient can put them to work once they claim.
+ */
+export function CashSliceNote({ style }: { style?: CSSProperties }) {
+  return (
+    <p style={{ margin: 0, fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.5, ...style }}>
+      The safe part is set aside as dollars rather than lent out, so nothing it earns can get stuck. It&apos;s
+      fully theirs, and they can put it to work the moment they claim.
+    </p>
   );
 }
 

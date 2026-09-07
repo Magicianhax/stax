@@ -8,7 +8,7 @@ import { z } from "zod";
 import { basketToAllocation, colorFor } from "@/lib/baskets";
 import { chainKeyFromRequest } from "@/lib/server/chain";
 import { resolveGiftBasket } from "@/lib/server/giftsStore";
-import { GIFT_MAX_USD, GIFT_MIN_USD, giftContractFor } from "@/lib/gifts";
+import { GIFT_MAX_USD, GIFT_MIN_USD, giftContractFor, splitGiftBasket } from "@/lib/gifts";
 import { clientIp, rateLimit } from "@/lib/server/rateLimit";
 import { badRequest, jsonError, serverError, tooManyRequests } from "@/lib/server/respond";
 
@@ -47,7 +47,11 @@ export async function POST(req: NextRequest) {
         color: basket.color || colorFor(basket.id),
         riskScore: basket.riskScore,
       },
+      // The full economic split — the giver's money really does go to every one of these.
       allocation: basketToAllocation(basket, body.amountUsd),
+      // The same list, with any slice that will be parked as USDC rather than as its
+      // rebasing on-chain form marked, so the review card can say so.
+      holdings: splitGiftBasket(chain, basket.items, body.amountUsd).holdings,
     });
   } catch (err) {
     return serverError("gifts-quote", err);

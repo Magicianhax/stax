@@ -12,7 +12,7 @@
 // lib/server/giftsStore.ts for why there are two different hashes.
 import type { NextRequest } from "next/server";
 import { z } from "zod";
-import { basketToAllocation } from "@/lib/baskets";
+import { basketToAllocation, riskScoreFor } from "@/lib/baskets";
 import { getChain } from "@/lib/chains";
 import {
   GIFT_MAX_USD,
@@ -24,6 +24,7 @@ import {
   giftContractFor,
   looksLikeEmail,
   maskEmail,
+  splitGiftBasket,
   type GiftSummary,
 } from "@/lib/gifts";
 import { chainKeyFromRequest } from "@/lib/server/chain";
@@ -133,6 +134,10 @@ export async function POST(req: NextRequest) {
       return badRequest("That's more than your available cash. Add money or lower the amount.");
     }
 
+    // Aave "Safe Dollars" rebases and TimelockGift pays back the amount it recorded, so
+    // that slice is parked as plain USDC instead of the aToken. See splitGiftBasket.
+    const split = splitGiftBasket(chain, basket.items, body.amountUsd);
+
     const id = newGiftId();
     const salt = newSalt();
     const note = capNote(body.note);
@@ -147,7 +152,7 @@ export async function POST(req: NextRequest) {
       recipientSalt: salt,
       basketId: basket.id,
       basketName: basket.name,
-      holdings: basket.items.map((i) => ({ symbol: i.symbol, weightPct: i.weightPct })),
+      holdings: split.holdings,
       amountUsd: body.amountUsd,
       note: note || null,
       unlockAt,
@@ -165,7 +170,17 @@ export async function POST(req: NextRequest) {
         unlockAtIso: unlockAt.toISOString(),
         reclaimAfterIso: reclaimAfter.toISOString(),
         note,
-        allocation: basketToAllocation(basket, body.amountUsd),
+        allocation:
+          split.invested.length > 0
+            ? basketToAllocation(
+                { ...basket, items: split.invested, riskScore: riskScoreFor(getChain(chain), split.invested) },
+                split.investUsd,
+              )
+            : null,
+        investUsd: split.investUsd,
+        cashUsd: split.cashUsd,
+        cashToken: split.cashToken,
+        holdings: split.holdings,
         basketName: basket.name,
         recipientEmailMasked: maskEmail(body.recipientEmail),
         shareUrl: giftShareUrl(id),

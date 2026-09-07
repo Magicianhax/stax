@@ -2,6 +2,7 @@
 export * from "./types";
 export * from "./giftFormat";
 export {
+  CashSliceNote,
   clusterOfGift,
   clusterOfItems,
   clusterOfTokens,

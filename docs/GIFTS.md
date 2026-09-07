@@ -93,9 +93,36 @@ giver, and a time before `reclaimAfter`.
 `recipientHash` is recorded for the giver's audit trail and for indexers. The contract
 never checks it, because only the server can link an email to a person.
 
-Fee-on-transfer tokens would break the accounting, because `create` records the amount it
-asked for rather than the balance delta. No such token is in the Stax asset set. If one is
-ever added, `create` must measure the delta instead.
+### Why the safe slice is parked as cash
+
+`create` **records** the amounts it is given; `claim` and `reclaim` pay back exactly those,
+never the live balance. That is a problem for one asset already in the set.
+
+Aave "Safe Dollars" (`aUSDC`, aBasUSDC) rebases: its balance grows as interest accrues, and
+the curated **Safe Growth** basket holds it at 40%. Park the aToken and every cent it earns
+while it waits — up to 25 years of it — sits in the contract forever, because there is no
+rescue function and the payout is fixed at the recorded amount.
+
+So a gift never parks the aToken. The safe slice is held as **plain USDC**: the invest step
+buys only the other legs, and the dollars for this one go straight into `create`. The
+recipient can supply them to Aave themselves the moment they claim. Nothing is stranded,
+every basket stays giftable, and the contract needs no new powers.
+
+Two alternatives were considered and rejected. Refusing to gift baskets that hold aUSDC
+would make a curated basket ungiftable for an implementation detail. Paying out by balance
+delta does not work either: one token balance is shared by every gift in the contract, so
+per-gift yield cannot be attributed without scaled-balance accounting, which is a great
+deal of machinery and a new class of bug for a slice that earns a few percent.
+
+The split lives in `splitGiftBasket` in `web/src/lib/gifts.ts`, and it is arithmetic on raw
+6-decimal USDC so `investUsd + cashUsd` always equals the gift amount exactly.
+`POST /api/gifts` returns `investUsd` (pass that to `/api/invest-plan`, not the gift's full
+amount), `cashToken` (the USDC to park, already in raw units), and `holdings` with the cash
+slices marked `heldAsCash`. `giftCreateCalls` folds `cashToken` into its token list itself,
+so a caller cannot forget it and park a gift missing its safe slice.
+
+The same rule covers fee-on-transfer tokens, which would pay out more than arrived. None is
+in the Stax asset set. Any future rebasing venue belongs in `isHeldAsCash`.
 
 ### Tests
 

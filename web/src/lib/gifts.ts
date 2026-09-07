@@ -12,6 +12,8 @@
 //   6. …later: POST /api/gifts/:id/claim-authorisation → TimelockGift.claim
 import { encodeFunctionData } from "viem";
 import { ERC20_ABI } from "@/lib/abis";
+import { getChain } from "@/lib/chains";
+import type { BasketItem } from "@/lib/baskets";
 import type { ChainKey } from "@/lib/chains/types";
 import type { AllocateResult } from "@/lib/invest-types";
 
@@ -62,6 +64,14 @@ export interface GiftToken {
 export interface GiftHolding {
   symbol: string;
   weightPct: number;
+  /**
+   * True for a slice parked as plain USDC rather than in its usual on-chain form.
+   * Today that means the Aave "Safe Dollars" tier: aUSDC rebases, and TimelockGift pays
+   * out the amount it recorded rather than the live balance, so parking the aToken would
+   * strand every cent of interest it earned while it waited. The recipient can move it
+   * into Aave themselves once they have claimed it.
+   */
+  heldAsCash?: boolean;
 }
 
 /** A gift as the app shows it. `direction` says which side of it the caller is on. */
@@ -103,7 +113,10 @@ export interface GiftQuoteRequest {
 }
 export interface GiftQuoteResponse {
   basket: { id: string; name: string; tagline: string; icon: string; color: string; riskScore: number };
+  /** The full economic split, every item — the giver's money really does go here. */
   allocation: AllocateResult;
+  /** The same split with the slices that will be parked as USDC marked. */
+  holdings: GiftHolding[];
 }
 
 // POST /api/gifts — reserve the gift. Nothing is on-chain yet.
@@ -130,8 +143,22 @@ export interface CreateGiftResponse {
   reclaimAfterIso: string;
   /** Pass this string to `create` unchanged — the server has already trimmed and capped it. */
   note: string;
-  /** Feed this straight into the normal invest path (POST /api/invest-plan). */
-  allocation: AllocateResult;
+  /**
+   * Feed this straight into the normal invest path (POST /api/invest-plan), passing
+   * `investUsd` as the amount — NOT the gift's full `amountUsd`. It holds only the legs
+   * that are actually bought; any Aave "Safe Dollars" slice has been taken out of it and
+   * is parked as USDC instead (see `cashToken`). Null when the basket is all safe dollars
+   * and there is nothing to buy at all — skip the invest step entirely in that case.
+   */
+  allocation: AllocateResult | null;
+  /** Dollars going through the executor. Pass THIS to /api/invest-plan, not `amountUsd`. */
+  investUsd: number;
+  /** Dollars parked straight as USDC. `investUsd + cashUsd === amountUsd`. */
+  cashUsd: number;
+  /** The USDC slice to park, already in raw 6-decimal units. Null when there is none. */
+  cashToken: GiftToken | null;
+  /** The full split as shown to people, with the cash-held slices marked. */
+  holdings: GiftHolding[];
   basketName: string;
   recipientEmailMasked: string;
   shareUrl: string;
@@ -226,6 +253,75 @@ export function unlockLabel(iso: string, now = Date.now()): string {
   return `opens in ${Math.round(days / 365)} years`;
 }
 
+// ── the safe-dollars split ───────────────────────────────────────────────────
+/**
+ * Aave's "Safe Dollars" (aUSDC) is a REBASING token: its balance grows as interest
+ * accrues. TimelockGift records the amount handed to `create` and pays exactly that back
+ * at claim or reclaim, so anything a parked aToken earned while it waited — up to 25
+ * years of it — would sit in the contract forever with no way out.
+ *
+ * So a gift never parks the aToken. The safe slice is held as plain USDC: the invest step
+ * buys only the other legs, and the dollars for this one go straight into the gift. The
+ * recipient can supply them to Aave themselves the moment they claim. Nothing is stranded,
+ * every basket stays giftable, and the contract needs no rescue hatch.
+ *
+ * Everything is computed in raw 6-decimal USDC so the two halves always add back up to
+ * the gift's amount exactly, with no float drift.
+ */
+export interface GiftSplit {
+  /** What the executor buys. Weights renormalised to 100. Empty when the basket is all cash. */
+  invested: BasketItem[];
+  /** Dollars going through the executor. */
+  investUsd: number;
+  /** Dollars parked straight as USDC. */
+  cashUsd: number;
+  /** The USDC to park, raw 6-decimal units. Null when the basket holds no safe tier. */
+  cashToken: GiftToken | null;
+  /** The whole basket as shown to people, cash-held slices marked. */
+  holdings: GiftHolding[];
+}
+
+/** True for an asset a gift must park as USDC rather than in its own on-chain form. */
+export function isHeldAsCash(chain: ChainKey, symbol: string): boolean {
+  const asset = getChain(chain).assets.all.find((a) => a.symbol === symbol);
+  // `aave_v3` is the only rebasing venue in the registry today. Any future one belongs here.
+  return asset?.via === "aave_v3";
+}
+
+/** Split a basket into the part the executor buys and the part parked as USDC. */
+export function splitGiftBasket(chain: ChainKey, items: BasketItem[], amountUsd: number): GiftSplit {
+  const staxChain = getChain(chain);
+  const decimals = staxChain.usdc.decimals;
+  const totalWeight = items.reduce((sum, i) => sum + Math.max(0, i.weightPct), 0) || 1;
+
+  const cashItems = items.filter((i) => isHeldAsCash(chain, i.symbol));
+  const boughtItems = items.filter((i) => !isHeldAsCash(chain, i.symbol));
+  const cashWeight = cashItems.reduce((sum, i) => sum + Math.max(0, i.weightPct), 0);
+
+  // Integer maths end to end: the cash slice is floored and the invested slice takes the
+  // remainder, so the two always sum back to exactly `amountUsd`.
+  const totalRaw = BigInt(Math.round(amountUsd * 10 ** decimals));
+  const cashRaw = (totalRaw * BigInt(Math.round((cashWeight / totalWeight) * 10_000))) / BigInt(10_000);
+  const investRaw = totalRaw - cashRaw;
+  const toUsd = (raw: bigint) => Number(raw) / 10 ** decimals;
+
+  const boughtWeight = boughtItems.reduce((sum, i) => sum + Math.max(0, i.weightPct), 0) || 1;
+  return {
+    invested: boughtItems.map((i) => ({ ...i, weightPct: (i.weightPct / boughtWeight) * 100 })),
+    investUsd: toUsd(investRaw),
+    cashUsd: toUsd(cashRaw),
+    cashToken:
+      cashRaw > BigInt(0)
+        ? { symbol: staxChain.usdc.symbol, address: staxChain.usdc.address, amount: cashRaw.toString() }
+        : null,
+    holdings: items.map((i) => ({
+      symbol: i.symbol,
+      weightPct: i.weightPct,
+      ...(isHeldAsCash(chain, i.symbol) ? { heldAsCash: true } : {}),
+    })),
+  };
+}
+
 // ── call builders ────────────────────────────────────────────────────────────
 // The exact batches to hand `sendSponsoredCalls`. Encoding lives here rather than in a
 // screen so the ABI, the argument order and the bigint conversions have one home. Shape
@@ -240,6 +336,10 @@ export interface GiftCall {
  * Step 4 of giving: one approval per parked token, then `create`. Send this AFTER the
  * normal invest user op has landed, with `tokens` read from that receipt's `LegFilled`
  * events — the bought amounts are not knowable before execution.
+ *
+ * Pass `cashToken` straight from CreateGiftResponse. It is merged in here rather than left
+ * to the caller, because forgetting it would park a gift missing its whole safe slice while
+ * still charging the giver for it. A basket with no safe tier simply passes null.
  */
 export function giftCreateCalls(input: {
   giftContract: `0x${string}`;
@@ -248,10 +348,22 @@ export function giftCreateCalls(input: {
   /** Unix seconds, straight from CreateGiftResponse. */
   unlockAt: number;
   reclaimAfter: number;
+  /** What the invest step actually bought, from its `LegFilled` events. */
   tokens: GiftToken[];
+  /** The USDC slice held as cash, from CreateGiftResponse. */
+  cashToken?: GiftToken | null;
   note: string;
 }): GiftCall[] {
-  const approvals: GiftCall[] = input.tokens.map((t) => ({
+  // One entry per token address: `create` rejects nothing here, but a duplicate address
+  // would need two approvals and pay out twice, so fold them into a single amount.
+  const merged: GiftToken[] = [];
+  for (const token of [...input.tokens, ...(input.cashToken ? [input.cashToken] : [])]) {
+    const seen = merged.find((m) => m.address.toLowerCase() === token.address.toLowerCase());
+    if (seen) seen.amount = (BigInt(seen.amount) + BigInt(token.amount)).toString();
+    else merged.push({ ...token });
+  }
+
+  const approvals: GiftCall[] = merged.map((t) => ({
     to: t.address,
     data: encodeFunctionData({ abi: ERC20_ABI, functionName: "approve", args: [input.giftContract, BigInt(t.amount)] }),
   }));
@@ -267,8 +379,8 @@ export function giftCreateCalls(input: {
           input.recipientHash,
           BigInt(input.unlockAt),
           BigInt(input.reclaimAfter),
-          input.tokens.map((t) => t.address),
-          input.tokens.map((t) => BigInt(t.amount)),
+          merged.map((t) => t.address),
+          merged.map((t) => BigInt(t.amount)),
           input.note,
         ],
       }),

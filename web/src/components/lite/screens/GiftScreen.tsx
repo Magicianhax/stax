@@ -14,15 +14,16 @@ import { HoldButton, Reveal } from "@/components/motion";
 import { useBaskets } from "@/hooks/useBaskets";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { useUsdcBalance } from "@/hooks/useBalances";
-import { useGiftQuote, useGiftsEnabled, useSendGift } from "@/hooks/useGifts";
+import { useGiftsEnabled, useSendGift } from "@/hooks/useGifts";
 import { isBasketInvestable, riskWord, type Basket } from "@/lib/baskets";
+import { splitGiftBasket } from "@/lib/gifts";
 import { feeUsd } from "@/lib/fees";
 import { usd } from "@/lib/format";
 import { haptic } from "@/lib/haptics";
 import { iconBtn } from "./primitives";
 import { useChainReady } from "../useChainReady";
 import { BasketRailTile } from "./basketPrimitives";
-import { GiftBasketHead, DetailRow, SplitList, Step } from "../gift/giftPrimitives";
+import { CashSliceNote, GiftBasketHead, DetailRow, SplitList, Step } from "../gift/giftPrimitives";
 import { GiftPlacing } from "../gift/GiftPlacing";
 import { GiftSent } from "../gift/GiftSent";
 import {
@@ -119,13 +120,16 @@ export function GiftScreen({
     if (editing === n) setEditing(null);
   };
 
-  // The split preview. The server's quote is authoritative; until it answers (and
-  // in demo, which never calls it) the basket's own fixed weights say the same
-  // thing, because that is exactly what the endpoint computes from.
-  const quote = useGiftQuote(basket?.id, amountOk ? amount : 0);
-  const items = quote.data?.allocation.allocations ?? basket?.items ?? [];
-  const fee = feeUsd(amountOk ? amount : 0);
-  const invested = Math.round(((amountOk ? amount : 0) - fee) * 100) / 100;
+  // The split, computed with `splitGiftBasket` — the very function the server
+  // runs, exported client-safe, so the review card cannot disagree with what the
+  // create call will do. It also marks the slices parked as plain dollars.
+  const split = splitGiftBasket(chain.key, basket?.items ?? [], amountOk ? amount : 0);
+  const items = split.holdings;
+  const hasCashSlice = items.some((i) => i.heldAsCash);
+  // The platform fee is skimmed on the invest leg only, so a basket with a safe
+  // slice pays it on part of the gift, not all of it.
+  const fee = feeUsd(split.investUsd);
+  const invested = Math.round((split.investUsd - fee) * 100) / 100;
 
   const overBalance = amountOk && amount > balance;
   const canSend = Boolean(basket) && amountOk && emailOk && unlockOk && ready && giftsOn && !overBalance;
@@ -463,8 +467,9 @@ export function GiftScreen({
           <div className="card" style={{ padding: 18 }}>
             <GiftBasketHead name={basket.name} items={items} />
             <div style={{ marginTop: 14, paddingTop: 4, borderTop: "1px solid var(--line-2)" }}>
-              <SplitList items={items} amountUsd={invested} />
+              <SplitList items={items} amountUsd={amount - fee} />
             </div>
+            {hasCashSlice && <CashSliceNote style={{ marginTop: 12 }} />}
             <div style={{ marginTop: 4 }}>
               <DetailRow label="For" value={maskEmail(email)} />
               <DetailRow
@@ -486,6 +491,7 @@ export function GiftScreen({
               {/* The split above adds up to what actually goes in, so the money
                   lines have to agree with it: invested + fee = what you pay. */}
               <DetailRow label="Invested for them" value={usd(invested)} />
+              {hasCashSlice && <DetailRow label="Set aside as dollars" value={usd(split.cashUsd)} />}
               <DetailRow label="Fee" value={`${usd(fee)} · gas on us`} />
               <DetailRow label="You pay" value={usd(amount)} />
             </div>
