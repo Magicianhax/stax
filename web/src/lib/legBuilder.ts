@@ -37,7 +37,6 @@ import type { Asset, AssetRoute, RouteHop, StaxChain } from "./chains/types";
 import type { Allocation } from "./allocation-schema";
 
 const ZERO = BigInt(0);
-const ONE = BigInt(1);
 const Q96 = BigInt(2) ** BigInt(96);
 const Q192 = Q96 * Q96;
 const BPS = BigInt(10000);
