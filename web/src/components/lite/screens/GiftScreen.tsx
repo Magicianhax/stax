@@ -9,7 +9,8 @@
 // mid-flight, so a back-swipe can't strand a half-sent gift — which matters more
 // here than anywhere else, because giving is two transactions (docs/GIFTS.md).
 import { useMemo, useState } from "react";
-import { Icon, ChainLaunching } from "@/components/design";
+import { Icon, ChainLaunching, AmountInput, Keypad } from "@/components/design";
+import { useAmountKeypad } from "@/hooks/useAmountKeypad";
 import { HoldButton, Reveal } from "@/components/motion";
 import { useBaskets } from "@/hooks/useBaskets";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
@@ -90,7 +91,14 @@ export function GiftScreen({
   const [pickedId, setPickedId] = useState<string | undefined>(basketId);
   const basket: Basket | undefined = byId(pickedId);
 
-  const [amt, setAmt] = useState("");
+  // Amount entry is the shared keypad. Its ceiling is the smaller of the gift
+  // limit and the cash on hand, so a key that would break either is refused
+  // rather than typed and then argued with. No ceiling until the balance lands.
+  const pad = useAmountKeypad({ max: bal ? Math.min(GIFT_MAX_USD, balance) : GIFT_MAX_USD });
+  const amt = pad.value;
+  // Ours is up only while the amount field has focus; the email and note fields
+  // on the steps either side want the OS keyboard instead.
+  const [amountFocused, setAmountFocused] = useState(false);
   const amount = parseFloat(amt);
   const amountOk = Number.isFinite(amount) && amount >= GIFT_MIN_USD && amount <= GIFT_MAX_USD;
 
@@ -115,9 +123,14 @@ export function GiftScreen({
   const [editing, setEditing] = useState<number | null>(null);
   const answered = [Boolean(basket), amountOk, emailOk, unlockOk];
   const nextStep = answered.findIndex((a) => !a);
-  const current = nextStep === -1 ? 5 : nextStep + 1;
+  const reachedStep = nextStep === -1 ? 5 : nextStep + 1;
+  // While the amount is being typed the flow holds at step 2. "50" on the way to
+  // "500" is a valid figure for one keystroke, and letting it reveal the next
+  // question would pull the keypad out from under the person mid-number.
+  const current = amountFocused ? Math.min(reachedStep, 2) : reachedStep;
   const openStep = (n: number) => (editing !== null ? editing === n : n === current || (n === 5 && current === 5));
   const answerStep = (n: number) => {
+    setAmountFocused(false);
     if (editing === n) setEditing(null);
   };
 
@@ -147,6 +160,20 @@ export function GiftScreen({
   const cash = cashCents / 100;
 
   const overBalance = amountOk && amount > balance;
+  // The pad is up from the moment the amount takes focus until something else
+  // takes it — Escape, Next, or another field. Focus alone is too fragile a
+  // signal: tapping a key must not be able to close the thing you are tapping.
+  const padOpen = amountFocused && Boolean(basket);
+  // One sentence under the amount, covering both a value that does not fit and
+  // a key the ceiling just refused.
+  const amountNote =
+    overBalance || (pad.refused && amount > balance - 1e-9)
+      ? `That's more than the ${usd(balance)} you have to invest.`
+      : Number.isFinite(amount) && amount > 0 && amount < GIFT_MIN_USD
+        ? `The smallest gift is ${usd(GIFT_MIN_USD)} — below that the trading costs eat it.`
+        : pad.refused || (Number.isFinite(amount) && amount > GIFT_MAX_USD)
+          ? `The largest gift is ${usd(GIFT_MAX_USD)}.`
+          : null;
   const canSend = Boolean(basket) && amountOk && emailOk && unlockOk && ready && giftsOn && !overBalance;
   // Why the confirm is off, said next to it — the step that holds the problem
   // may have closed and scrolled away by the time they reach the bottom.
@@ -236,7 +263,7 @@ export function GiftScreen({
           hint="They get the same mix you would."
           answer={basket?.name}
           open={openStep(1)}
-          onEdit={basket ? () => setEditing(1) : undefined}
+          onEdit={basket ? () => { setAmountFocused(false); setEditing(1); } : undefined}
         >
           {giftable.length === 0 ? (
             <p style={{ margin: 0, fontSize: 13.5, color: "var(--ink-2)", lineHeight: 1.5 }}>
@@ -297,41 +324,26 @@ export function GiftScreen({
               <span className="tnum" style={{ fontSize: 28, fontWeight: 700, color: "var(--ink-3)" }}>
                 $
               </span>
-              <input
-                value={amt}
-                onChange={(e) => setAmt(e.target.value.replace(/[^0-9.]/g, ""))}
-                inputMode="decimal"
+              <AmountInput
+                {...pad.field}
+                onFocus={() => setAmountFocused(true)}
+                onEscape={() => setAmountFocused(false)}
                 placeholder="0"
                 aria-label="Amount to gift"
+                aria-invalid={amountNote !== null || undefined}
+                aria-describedby={amountNote ? "gift-amount-error" : undefined}
                 className="tnum"
                 style={{ flex: 1, fontSize: 28, fontWeight: 700, letterSpacing: "-.02em", width: "100%" }}
               />
             </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-              {GIFT_AMOUNTS.map((q) => (
-                <button
-                  key={q}
-                  className={`chip tap tnum ${amount === q ? "is-on" : ""}`}
-                  style={{ height: 40 }}
-                  onClick={() => {
-                    haptic.select();
-                    setAmt(String(q));
-                  }}
-                >
-                  ${q}
-                </button>
-              ))}
-            </div>
-            {(overBalance || (Number.isFinite(amount) && amount > 0 && !amountOk)) && (
-              <p role="status" style={{ margin: "12px 0 0", fontSize: 13, color: "var(--neg)", fontWeight: 600, lineHeight: 1.45 }}>
-                {overBalance
-                  ? `That's more than the ${usd(balance)} you have to invest.`
-                  : amount < GIFT_MIN_USD
-                    ? `The smallest gift is ${usd(GIFT_MIN_USD)} — below that the trading costs eat it.`
-                    : `The largest gift is ${usd(GIFT_MAX_USD)}.`}
+            {/* Quick amounts live in the keypad frame, where they stay reachable
+                with the keys up. */}
+            {amountNote && (
+              <p id="gift-amount-error" role="status" style={{ margin: "12px 0 0", fontSize: 13, color: "var(--neg)", fontWeight: 600, lineHeight: 1.45 }}>
+                {amountNote}
               </p>
             )}
-            {amountOk && !overBalance && (
+            {!padOpen && amountOk && !overBalance && (
               <button className="btn btn-ghost btn-block tap" style={{ marginTop: 14, minHeight: 46 }} onClick={() => answerStep(2)}>
                 Next
               </button>
@@ -347,7 +359,7 @@ export function GiftScreen({
             hint="Their email. Only they can open it."
             answer={emailOk ? maskEmail(email) : undefined}
             open={openStep(3)}
-            onEdit={emailOk ? () => setEditing(3) : undefined}
+            onEdit={emailOk ? () => { setAmountFocused(false); setEditing(3); } : undefined}
           >
             <div className="field" style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px" }}>
               <Icon name="mail" size={18} style={{ color: "var(--ink-3)", flex: "none" }} />
@@ -359,6 +371,7 @@ export function GiftScreen({
                 autoComplete="email"
                 autoCapitalize="none"
                 spellCheck={false}
+                onFocus={() => setAmountFocused(false)}
                 placeholder="name@example.com"
                 aria-label="Their email address"
                 style={{ flex: 1, fontSize: 16, width: "100%" }}
@@ -385,7 +398,7 @@ export function GiftScreen({
             hint="It stays invested the whole time."
             answer={unlockOk ? unlockDateFromSeconds(unlockAt as number) : undefined}
             open={openStep(4)}
-            onEdit={unlockOk ? () => setEditing(4) : undefined}
+            onEdit={unlockOk ? () => { setAmountFocused(false); setEditing(4); } : undefined}
           >
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {PRESETS.map((p) => (
@@ -469,6 +482,7 @@ export function GiftScreen({
               <textarea
                 value={note}
                 onChange={(e) => setNote(e.target.value.slice(0, GIFT_NOTE_MAX))}
+                onFocus={() => setAmountFocused(false)}
                 rows={3}
                 placeholder="Happy birthday. Leave it alone and let it grow."
                 aria-label="A note for them"
@@ -524,8 +538,10 @@ export function GiftScreen({
         </Reveal>
       )}
 
-      {/* pinned confirm */}
+      {/* Pinned confirm — stands down while the keypad has the bottom edge; you
+          cannot send a gift whose amount you are still typing. */}
       <div
+        hidden={padOpen}
         style={{
           position: "sticky",
           bottom: 0,
@@ -563,6 +579,26 @@ export function GiftScreen({
           </>
         )}
       </div>
+
+      <Keypad
+        {...pad.keypad}
+        open={padOpen}
+        presets={[...GIFT_AMOUNTS]}
+        footer={
+          <button
+            className="btn btn-primary btn-block tap"
+            style={{ minHeight: 52 }}
+            disabled={!amountOk || overBalance}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              setAmountFocused(false);
+              answerStep(2);
+            }}
+          >
+            Next
+          </button>
+        }
+      />
     </div>
   );
 }

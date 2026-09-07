@@ -6,7 +6,8 @@
 import { useState } from "react";
 import { useUsdcBalance } from "@/hooks/useBalances";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
-import { Icon, VeraOrb, ChainLaunching } from "@/components/design";
+import { Icon, VeraOrb, ChainLaunching, AmountInput, Keypad } from "@/components/design";
+import { useAmountKeypad, toAmountString } from "@/hooks/useAmountKeypad";
 import { usd } from "@/lib/format";
 import { iconBtn, VeraTag } from "./primitives";
 import { useChainReady } from "../useChainReady";
@@ -38,17 +39,52 @@ export function GoalScreen({
   // The user's own edits win once they type.
   const [edited, setEdited] = useState<string | null>(null);
   const suggested = balance >= 300 ? "300" : String(Math.floor(balance / 10) * 10 || Math.floor(balance));
-  const amt = edited ?? suggested;
-  const setAmt = (v: string) => setEdited(v);
+  // The keypad owns the edited value; the suggestion stands until they touch it.
+  // The cash on hand is the ceiling, but only once the balance has loaded.
+  const pad = useAmountKeypad({ max: bal ? balance : undefined });
+  const amt = edited === null ? suggested : pad.value;
+  const setAmt = (v: string) => {
+    setEdited(v);
+    pad.setValue(v);
+  };
+  // The goal text needs the OS keyboard, so ours is up only while the amount
+  // has focus. It starts down: this screen is about the sentence, not the sum.
+  const [padOpen, setPadOpen] = useState(false);
 
   const amount = parseFloat(amt);
   // More than the cash on hand: say so inline, right under the amount, and hold
   // the button rather than letting the plan fail later at the allocate step.
   const over = amount > balance + 1e-6;
+  // The keypad refuses a key that would go over; the same line explains why.
+  const overNote = over || pad.refused;
   const canBuild = goal.trim().length > 3 && amount > 0 && !over;
 
+  // The primary action, rendered either at the bottom of the screen or inside
+  // the keypad frame — one definition, so the two placements cannot drift.
+  const action = ready ? (
+    <button
+      className="btn btn-primary btn-block btn-lg tap"
+      disabled={!canBuild}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => go("thinking", { goal: goal.trim(), amt: amount })}
+    >
+      <VeraOrb size={26} /> Build my plan
+    </button>
+  ) : (
+    // Contracts not deployed on this network yet: say so calmly, offer the one
+    // thing that does work (browsing prices) instead of a dead button.
+    <ChainLaunching
+      chain={chain}
+      action={
+        <button className="btn btn-ghost btn-block tap" onClick={() => go("market")}>
+          Browse the market
+        </button>
+      }
+    />
+  );
+
   return (
-    <div className="screen screen-pad-top" style={{ paddingBottom: 20 }}>
+    <div className="screen screen-pad-top" style={{ paddingBottom: padOpen ? 0 : 20 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 22px 0" }}>
         <button onClick={() => go("home")} style={iconBtn} className="tap" aria-label="Close">
           <Icon name="close" size={20} />
@@ -80,19 +116,27 @@ export function GoalScreen({
               alignItems: "center",
               gap: 6,
               padding: "12px 16px",
-              ...(over ? { boxShadow: "var(--glass-shadow), var(--glass-hi), inset 0 0 0 1.5px var(--neg)" } : {}),
+              ...(overNote ? { boxShadow: "var(--glass-shadow), var(--glass-hi), inset 0 0 0 1.5px var(--neg)" } : {}),
             }}
           >
             <span className="tnum" style={{ fontSize: 30, fontWeight: 700, color: "var(--ink-3)" }}>
               $
             </span>
-            <input
+            <AmountInput
+              {...pad.field}
               value={amt}
-              onChange={(e) => setAmt(e.target.value.replace(/[^0-9.]/g, ""))}
-              inputMode="decimal"
+              onChange={setAmt}
+              onFocus={() => {
+                // Focusing the amount adopts the suggestion as an edited value,
+                // so the first keystroke edits the number that is on screen.
+                if (edited === null) pad.setValue(suggested);
+                setEdited((e) => e ?? suggested);
+                setPadOpen(true);
+              }}
+              onEscape={() => setPadOpen(false)}
               aria-label="Amount to invest"
-              aria-invalid={over || undefined}
-              aria-describedby={over ? "goal-amount-error" : undefined}
+              aria-invalid={overNote || undefined}
+              aria-describedby={overNote ? "goal-amount-error" : undefined}
               className="tnum"
               style={{
                 flex: 1,
@@ -104,7 +148,7 @@ export function GoalScreen({
             />
             <span className="caption" style={{ fontWeight: 500 }}>of {usd(balance)}</span>
           </div>
-          {over && (
+          {overNote && (
             <p id="goal-amount-error" role="alert" style={{ margin: "8px 4px 0", fontSize: 13, fontWeight: 500, color: "var(--neg)", lineHeight: 1.45 }}>
               That’s more than the {usd(balance)} you have to invest. Add cash, or start smaller.
             </p>
@@ -120,6 +164,7 @@ export function GoalScreen({
             <textarea
               value={goal}
               onChange={(e) => setGoal(e.target.value)}
+              onFocus={() => setPadOpen(false)}
               rows={3}
               aria-label="Your goal"
               placeholder="e.g. Grow this over a few years, mostly big names, but keep some safe…"
@@ -148,28 +193,31 @@ export function GoalScreen({
         </div>
       </div>
 
-      <div style={{ padding: "12px 22px calc(18px + env(safe-area-inset-bottom))" }}>
-        {ready ? (
-          <button
-            className="btn btn-primary btn-block btn-lg tap"
-            disabled={!canBuild}
-            onClick={() => go("thinking", { goal: goal.trim(), amt: amount })}
-          >
-            <VeraOrb size={26} /> Build my plan
-          </button>
-        ) : (
-          // Contracts not deployed on this network yet: say so calmly, offer the
-          // one thing that does work (browsing prices) instead of a dead button.
-          <ChainLaunching
-            chain={chain}
-            action={
-              <button className="btn btn-ghost btn-block tap" onClick={() => go("market")}>
-                Browse the market
-              </button>
-            }
-          />
-        )}
-      </div>
+      {/* The action stays at the bottom, and moves into the keypad frame while
+          the keys are up so it never sits behind them. */}
+      {!padOpen && (
+        <div style={{ padding: "12px 22px calc(18px + env(safe-area-inset-bottom))" }}>{action}</div>
+      )}
+      <Keypad
+        {...pad.keypad}
+        onChange={setAmt}
+        open={padOpen}
+        presets={[100, 300, 500]}
+        extra={
+          balance > 0 ? (
+            <button
+              type="button"
+              className="chip tap"
+              style={{ flex: "none", height: 38 }}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setAmt(toAmountString(balance))}
+            >
+              Max
+            </button>
+          ) : undefined
+        }
+        footer={action}
+      />
     </div>
   );
 }

@@ -19,7 +19,8 @@ import { usePrice } from "@/hooks/usePrices";
 import { useMarketHistory } from "@/hooks/useMarket";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { displayFor } from "@/lib/displayAssets";
-import { Icon, AssetTile, useMarketStatus } from "@/components/design";
+import { Icon, AssetTile, useMarketStatus, AmountInput, Keypad } from "@/components/design";
+import { useAmountKeypad } from "@/hooks/useAmountKeypad";
 import { describeNextChange } from "@/lib/marketHours";
 import { usd, tokenQty, fromUnits } from "@/lib/format";
 import { feeUsd, feeOf } from "@/lib/fees";
@@ -71,12 +72,18 @@ export function TradeScreen({
   const holding = port?.holdings.find((h) => h.asset.symbol === asset.symbol);
 
   const [side, setSide] = useState<"buy" | "sell">(initialSide);
-  const [amt, setAmt] = useState(draft?.amt ?? "");
+  // The amount is the shared keypad state: one rule set, and the cash on hand is
+  // its ceiling — a digit that would spend money you don't have is refused, not
+  // typed and then complained about. The ceiling only applies once the balance
+  // has actually loaded, or an empty first render would refuse every key.
+  const pad = useAmountKeypad({ max: bal ? balance : undefined, initial: draft?.amt });
+  const amt = pad.value;
+  const setAmt = pad.setValue;
   const [tol, setTol] = useState(draft?.tol ?? 1);
   const [advanced, setAdvanced] = useState(false);
   const [review, setReview] = useState(false);
 
-  const n = parseFloat(amt) || 0;
+  const n = pad.amount;
   const { data: quote, isFetching } = useQuote(side === "buy" ? asset : null, n);
 
   // Sell side: share of the held position to sell. No default — "All" is a chip.
@@ -90,6 +97,10 @@ export function TradeScreen({
   );
 
   const over = side === "buy" && n > balance + 1e-6;
+  // What the line under the amount says. `over` is a value that no longer fits
+  // (a restored draft); `pad.refused` is a key the ceiling just turned down —
+  // the amount itself is still legal, so this must not gate the button.
+  const overNote = over || (side === "buy" && pad.refused);
   const canBuy =
     side === "buy" && !coming && n > 0 && !over && !!quote && quote.expectedOutRaw > BigInt(0) && !!address;
   const canSell =
@@ -172,6 +183,39 @@ export function TradeScreen({
   const sellEmpty = side === "sell" && (!sellable || !holding || heldRaw <= BigInt(0));
   const canReview = side === "buy" ? canBuy : canSell;
 
+  // Every amount change clears a stale swap error along with it, so the screen
+  // never shows a failure for a trade the person has already edited away.
+  const onAmount = (next: string) => {
+    setAmt(next);
+    if (swap.error) swap.reset();
+  };
+
+  // The primary action, rendered inside the keypad frame on buy and pinned at
+  // the bottom on sell. Same markup either way.
+  const action = (
+    <>
+      <div
+        className="tnum"
+        style={{ textAlign: "center", marginBottom: 12, fontSize: 12.5, color: "var(--ink-3)" }}
+      >
+        {side === "buy"
+          ? `${n > 0 ? usd(fee) : usd(feeUsd(100))} fee · no network cost`
+          : "No fee · no network cost"}
+      </div>
+      <button
+        className="btn btn-primary btn-block btn-lg tap"
+        disabled={!canReview || swap.busy}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => {
+          haptic.light();
+          setReview(true);
+        }}
+      >
+        {side === "buy" ? `Review buy${n ? ` · ${usd(n)}` : ""}` : "Review sell"}
+      </button>
+    </>
+  );
+
   const tolerance = (
     <div style={{ padding: "14px 22px 0" }}>
       <div className="card" style={{ padding: "4px 16px" }}>
@@ -234,7 +278,9 @@ export function TradeScreen({
   );
 
   return (
-    <div className="screen screen-pad-top" style={{ paddingBottom: 20 }}>
+    // The keypad is the last child and docks itself; it must sit flush with the
+    // bottom edge, so the buy screen gives up the tail padding.
+    <div className="screen screen-pad-top" style={{ paddingBottom: side === "buy" && !sellEmpty ? 0 : 20 }}>
       {/* one-line header: back · tile · name · price · change */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 22px 0" }}>
         <button onClick={() => go(-1)} style={iconBtn} className="tap" aria-label="Back">
@@ -403,31 +449,22 @@ export function TradeScreen({
               >
                 $
               </span>
-              <input
-                inputMode="decimal"
+              <AmountInput
+                {...pad.field}
+                onChange={onAmount}
                 autoFocus
-                placeholder="0"
-                value={amt}
-                onChange={(e) => {
-                  // digits + a single decimal point only
-                  const v = e.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
-                  setAmt(v);
-                  if (swap.error) swap.reset();
-                }}
+                autoWidth
                 aria-label="Amount to buy in dollars"
+                aria-invalid={over || undefined}
+                aria-describedby="trade-amount-note"
                 className="tnum"
                 style={{
                   fontSize: 56,
                   fontWeight: 700,
                   letterSpacing: "-.04em",
                   color: amt ? "var(--ink)" : "var(--ink-3)",
-                  border: "none",
-                  background: "transparent",
-                  outline: "none",
                   padding: 0,
                   textAlign: "left",
-                  width: `${Math.max(1, (amt || "0").length)}ch`,
-                  caretColor: "var(--primary)",
                 }}
               />
             </div>
@@ -441,10 +478,12 @@ export function TradeScreen({
                     : ""}
             </div>
             <div
+              id="trade-amount-note"
+              role={overNote ? "status" : undefined}
               className="tnum"
-              style={{ fontSize: 12.5, color: over ? "var(--neg)" : "var(--ink-3)", marginTop: 4 }}
+              style={{ fontSize: 12.5, color: overNote ? "var(--neg)" : "var(--ink-3)", marginTop: 4 }}
             >
-              {over ? `That’s more than the ${usd(balance)} you have` : `${usd(balance)} available`}
+              {overNote ? `That’s more than the ${usd(balance)} you have` : `${usd(balance)} available`}
             </div>
             {coming && (
               <div role="status" style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 10, lineHeight: 1.5 }}>
@@ -453,30 +492,8 @@ export function TradeScreen({
             )}
           </div>
 
-          {/* quick amounts */}
-          <div style={{ display: "flex", gap: 8, padding: "18px 22px 0", justifyContent: "center" }}>
-            {[25, 50, 100].map((q) => (
-              <button
-                key={q}
-                className={`chip tap ${amt === String(q) ? "is-dark" : ""}`}
-                onClick={() => {
-                  haptic.select();
-                  setAmt(String(q));
-                }}
-              >
-                ${q}
-              </button>
-            ))}
-            <button
-              className="chip tap"
-              onClick={() => {
-                haptic.select();
-                setAmt(String(Math.floor(balance * 100) / 100));
-              }}
-            >
-              Max
-            </button>
-          </div>
+          {/* Quick amounts moved into the keypad frame, where they stay reachable
+              with the keys up (see the dock at the bottom of this screen). */}
           {tolerance}
         </>
       )}
@@ -501,29 +518,35 @@ export function TradeScreen({
         </div>
       )}
 
-      {!sellEmpty && (
-        <>
-          <div style={{ flex: 1 }} />
-          <div style={{ padding: "12px 22px calc(18px + env(safe-area-inset-bottom))" }}>
-            <div
-              className="tnum"
-              style={{ textAlign: "center", marginBottom: 12, fontSize: 12.5, color: "var(--ink-3)" }}
-            >
-              {side === "buy"
-                ? `${n > 0 ? usd(fee) : usd(feeUsd(100))} fee · no network cost`
-                : "No fee · no network cost"}
-            </div>
+      {/* Buy: the action lives inside the keypad frame so it is reachable without
+          dismissing the keys. Sell has no amount to type — it is a share of the
+          position — so it keeps its own pinned action. */}
+      {!sellEmpty && side === "buy" && (
+        <Keypad
+          {...pad.keypad}
+          onChange={onAmount}
+          presets={[25, 50, 100]}
+          extra={
             <button
-              className="btn btn-primary btn-block btn-lg tap"
-              disabled={!canReview || swap.busy}
+              type="button"
+              className="chip tap"
+              style={{ flex: "none", height: 38 }}
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
-                haptic.light();
-                setReview(true);
+                haptic.select();
+                onAmount(String(Math.floor(balance * 100) / 100));
               }}
             >
-              {side === "buy" ? `Review buy${n ? ` · ${usd(n)}` : ""}` : "Review sell"}
+              Max
             </button>
-          </div>
+          }
+          footer={action}
+        />
+      )}
+      {!sellEmpty && side === "sell" && (
+        <>
+          <div style={{ flex: 1 }} />
+          <div style={{ padding: "12px 22px calc(18px + env(safe-area-inset-bottom))" }}>{action}</div>
         </>
       )}
 

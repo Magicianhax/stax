@@ -69,6 +69,16 @@ export type {
   UseDragDismissResult,
 } from "../../hooks/useDragDismiss";
 
+// Amount keypad (money entry: Trade / Send / Goal / Gift)
+export {
+  Keypad,
+  AmountInput,
+  handleAmountKeyDown,
+  CLEAR_HOLD_MS,
+  type KeypadProps,
+  type AmountInputProps,
+} from "./Keypad";
+
 // Navigation
 export { TabBar, type TabBarProps, type TabId } from "./TabBar";
 

@@ -46,6 +46,7 @@ import {
   Copy,
   ClipboardPaste,
   QrCode,
+  Delete,
   type LucideIcon,
 } from "lucide-react";
 
@@ -88,7 +89,8 @@ export type IconName =
   | "globe"
   | "copy"
   | "qr"
-  | "paste";
+  | "paste"
+  | "backspace";
 
 export interface IconProps {
   name: IconName;
@@ -140,6 +142,7 @@ const MAP: Record<IconName, LucideIcon> = {
   copy: Copy,
   qr: QrCode,
   paste: ClipboardPaste,
+  backspace: Delete,
 };
 
 export function Icon({ name, size = 22, stroke = 1.8, style, className }: IconProps) {

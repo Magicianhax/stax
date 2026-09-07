@@ -9,7 +9,8 @@ import { isAddress, parseUnits } from "viem";
 import { useUsdcBalance, usePortfolio } from "@/hooks/useBalances";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { useTransfer } from "@/hooks/useTransfer";
-import { Icon } from "@/components/design";
+import { Icon, AmountInput, Keypad } from "@/components/design";
+import { useAmountKeypad, toAmountString } from "@/hooks/useAmountKeypad";
 import { TokenLogo } from "@/components/lite/TokenLogo";
 import { useChain } from "@/lib/chains/active";
 import { usd, tokenQty, fromUnits, shortAddress, txUrl } from "@/lib/format";
@@ -66,9 +67,15 @@ export function SendScreen({
   });
   const asset = assets[Math.min(sel, assets.length - 1)];
 
-  const [amount, setAmount] = useState("");
+  // Amount entry is the shared keypad: same rules everywhere, and the token's
+  // own balance is the ceiling. Token decimals are capped at 6 for entry — no
+  // one types eighteen places, and the raw amount is parsed from the string.
+  const entryDecimals = Math.min(asset.decimals, 6);
   const [to, setTo] = useState("");
   const [confirming, setConfirming] = useState(false);
+  // The pad shares the bottom edge with the address field's own OS keyboard, so
+  // it is up only while the amount has focus.
+  const [padOpen, setPadOpen] = useState(false);
 
   // Paste: reads the clipboard when the browser allows it (secure context +
   // permission). Hidden where readText doesn't exist; a denied read just puts
@@ -94,7 +101,14 @@ export function SendScreen({
   };
 
   const balanceNum = fromUnits(asset.raw, asset.decimals);
-  const amountNum = Number(amount) || 0;
+  const pad = useAmountKeypad({
+    // No ceiling until there is a balance to measure against, or the first
+    // render (before the balance query lands) would refuse every key.
+    max: balanceNum > 0 ? balanceNum : undefined,
+    decimals: entryDecimals,
+  });
+  const amount = pad.value;
+  const amountNum = pad.amount;
   const amountRaw = (() => {
     try {
       return amount ? parseUnits(amount, asset.decimals) : BigInt(0);
@@ -108,9 +122,16 @@ export function SendScreen({
   // Only complain once there's something address-shaped to judge.
   const addrError = to.trim().length >= 6 && !addrValid;
   const overBalance = amountRaw > asset.raw;
+  // The keypad refuses a key that would spend more than the balance; the note
+  // explains the silence. It never gates the button — the amount is still legal.
+  const overNote = overBalance || pad.refused;
   const canReview = amountRaw > BigInt(0) && !overBalance && addrValid;
 
-  const setMax = () => setAmount(String(balanceNum));
+  // Editing the amount reopens the form: a confirm step that survived an edit
+  // would be confirming a number the person has already changed.
+  const onAmount = (next: string) => { pad.setValue(next); setConfirming(false); };
+
+  const setMax = () => pad.setValue(toAmountString(balanceNum, { decimals: entryDecimals }));
 
   const onSend = () => {
     void transfer.send({
@@ -152,6 +173,38 @@ export function SendScreen({
     );
   }
 
+  // The primary action, rendered either after the form or inside the keypad
+  // frame — same markup, so the two placements can never drift apart.
+  const action = (
+    <>
+      {!confirming ? (
+        <button
+          className="btn btn-primary btn-block btn-lg tap"
+          disabled={!canReview}
+          style={{ opacity: canReview ? 1 : 0.5 }}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => setConfirming(true)}
+        >
+          Review
+        </button>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ textAlign: "center", fontSize: 14, color: "var(--ink-2)" }}>
+            Send <b className="tnum" style={{ color: "var(--ink)" }}>{amountNum.toLocaleString("en-US", { maximumFractionDigits: 6 })} {asset.symbol}</b>
+            {" to "}
+            <b className="mono" style={{ color: "var(--ink)" }}>{shortAddress(to.trim())}</b>
+          </div>
+          <button className="btn btn-primary btn-block btn-lg tap" disabled={transfer.busy} onClick={onSend}>
+            {transfer.busy ? <Spinner small /> : "Send now"}
+          </button>
+          {!transfer.busy && (
+            <button className="btn btn-ghost btn-block tap" onClick={() => setConfirming(false)}>Edit</button>
+          )}
+        </div>
+      )}
+    </>
+  );
+
   // ── compose ─────────────────────────────────────────────────────────────────
   return (
     <div className="screen screen-pad-top" style={{ display: "flex", flexDirection: "column" }}>
@@ -174,7 +227,7 @@ export function SendScreen({
             return (
               <button
                 key={a.symbol}
-                onClick={() => { setSel(i); setAmount(""); setConfirming(false); }}
+                onClick={() => { setSel(i); pad.setValue(""); setConfirming(false); }}
                 className="tap"
                 style={{
                   flex: "none",
@@ -206,17 +259,19 @@ export function SendScreen({
         <div className="label-eyebrow" style={{ marginBottom: 8 }}>Amount</div>
         <div className="card" style={{ padding: "16px 18px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <input
-              inputMode="decimal"
-              placeholder="0"
-              value={amount}
-              onChange={(e) => { setAmount(e.target.value.replace(/[^0-9.]/g, "")); setConfirming(false); }}
+            <AmountInput
+              {...pad.field}
+              onChange={onAmount}
+              onFocus={() => setPadOpen(true)}
+              onEscape={() => setPadOpen(false)}
               aria-label={`Amount of ${asset.symbol} to send`}
+              aria-invalid={overBalance || undefined}
+              aria-describedby={overNote ? "send-amount-error" : undefined}
               className="tnum"
-              style={{ flex: 1, minWidth: 0, border: "none", background: "transparent", outline: "none", fontSize: 34, fontWeight: 700, letterSpacing: "-.03em", color: "var(--ink)" }}
+              style={{ flex: 1, minWidth: 0, fontSize: 34, fontWeight: 700, letterSpacing: "-.03em", color: "var(--ink)" }}
             />
             <span style={{ fontWeight: 700, fontSize: 16, color: "var(--ink-2)" }}>{asset.symbol}</span>
-            <button onClick={setMax} className="tap" style={{ minHeight: 40, padding: "0 13px", borderRadius: 11, background: "var(--surface-2)", color: "var(--primary)", fontWeight: 700, fontSize: 13 }}>
+            <button onClick={setMax} onMouseDown={(e) => e.preventDefault()} className="tap" style={{ minHeight: 40, padding: "0 13px", borderRadius: 11, background: "var(--surface-2)", color: "var(--primary)", fontWeight: 700, fontSize: 13 }}>
               Max
             </button>
           </div>
@@ -225,8 +280,8 @@ export function SendScreen({
             <span className="tnum">Balance {tokenQty(asset.raw, asset.decimals)} {asset.symbol}</span>
           </div>
         </div>
-        {overBalance && (
-          <div style={{ marginTop: 8, fontSize: 13, color: "var(--neg)", fontWeight: 500 }}>
+        {overNote && (
+          <div id="send-amount-error" role="status" style={{ marginTop: 8, fontSize: 13, color: "var(--neg)", fontWeight: 500 }}>
             That’s more than your {asset.symbol} balance.
           </div>
         )}
@@ -251,6 +306,7 @@ export function SendScreen({
             aria-describedby={addrError ? "send-to-error" : undefined}
             value={to}
             onChange={(e) => { setTo(e.target.value); setConfirming(false); }}
+            onFocus={() => setPadOpen(false)}
             spellCheck={false}
             autoCapitalize="off"
             autoCorrect="off"
@@ -295,33 +351,12 @@ export function SendScreen({
         )}
       </div>
 
-      {/* pinned action */}
-      <div style={{ padding: "20px 22px calc(18px + env(safe-area-inset-bottom))" }}>
-        {!confirming ? (
-          <button
-            className="btn btn-primary btn-block btn-lg tap"
-            disabled={!canReview}
-            style={{ opacity: canReview ? 1 : 0.5 }}
-            onClick={() => setConfirming(true)}
-          >
-            Review
-          </button>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <div style={{ textAlign: "center", fontSize: 14, color: "var(--ink-2)" }}>
-              Send <b className="tnum" style={{ color: "var(--ink)" }}>{amountNum.toLocaleString("en-US", { maximumFractionDigits: 6 })} {asset.symbol}</b>
-              {" to "}
-              <b className="mono" style={{ color: "var(--ink)" }}>{shortAddress(to.trim())}</b>
-            </div>
-            <button className="btn btn-primary btn-block btn-lg tap" disabled={transfer.busy} onClick={onSend}>
-              {transfer.busy ? <Spinner small /> : "Send now"}
-            </button>
-            {!transfer.busy && (
-              <button className="btn btn-ghost btn-block tap" onClick={() => setConfirming(false)}>Edit</button>
-            )}
-          </div>
-        )}
-      </div>
+      {/* The action follows the form, and moves into the keypad frame while the
+          keys are up so it stays reachable without dismissing them. */}
+      {!padOpen && (
+        <div style={{ padding: "20px 22px calc(18px + env(safe-area-inset-bottom))" }}>{action}</div>
+      )}
+      <Keypad {...pad.keypad} onChange={onAmount} open={padOpen} footer={action} />
     </div>
   );
 }
