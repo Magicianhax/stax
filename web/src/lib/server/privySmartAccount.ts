@@ -17,6 +17,7 @@ import { toSimpleSmartAccount } from "permissionless/accounts";
 import { createPimlicoClient } from "permissionless/clients/pimlico";
 import { PrivyClient } from "@privy-io/node";
 import { createViemAccount } from "@privy-io/node/viem";
+import { tagUserOps } from "@/lib/builderCode";
 import type { StaxChain } from "@/lib/chains/types";
 import { serverClient } from "@/lib/server/chain";
 
@@ -71,6 +72,10 @@ export async function getServerSmartAccountClient(chain: StaxChain, walletId: st
     owner: ownerAccount,
     entryPoint: ENTRY_POINT,
   });
+  // Autopilot sends from here rather than through lib/aa.ts, so it needs the
+  // same ERC-8021 tag or its volume goes unattributed — and Autopilot is the
+  // half that runs forever without anyone opening the app.
+  tagUserOps(account, chain.key);
 
   const smartAccountClient = createSmartAccountClient({
     account,
