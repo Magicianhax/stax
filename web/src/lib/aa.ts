@@ -23,6 +23,7 @@ import { entryPoint07Address } from "viem/account-abstraction";
 import { createSmartAccountClient } from "permissionless";
 import { toSimpleSmartAccount } from "permissionless/accounts";
 import { createPimlicoClient } from "permissionless/clients/pimlico";
+import { tagUserOps } from "./builderCode";
 import { getPublicClient } from "./wagmi";
 import { authHeader, chainHeader } from "./authedFetch";
 import type { ChainKey, StaxChain } from "./chains";
@@ -81,6 +82,8 @@ async function buildClient(provider: EIP1193Provider, chain: StaxChain) {
     owner: provider,
     entryPoint: ENTRY_POINT,
   });
+  // ERC-8021: credit Stax for the volume it sends (see builderCode.ts).
+  tagUserOps(account, chain.key);
   const owner = account.address;
 
   const smartAccountClient = createSmartAccountClient({
