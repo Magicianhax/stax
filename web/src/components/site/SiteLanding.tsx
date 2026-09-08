@@ -33,7 +33,7 @@ import { Assets } from "@/components/site/sections/Assets";
 import { Faq } from "@/components/site/sections/Faq";
 import { Closing } from "@/components/site/sections/Closing";
 import { CookieNotice } from "@/components/site/CookieNotice";
-import { captureRef } from "@/lib/referral";
+import { captureInvite, captureRef } from "@/lib/referral";
 import { appUrl } from "@/lib/urls";
 
 // Runs before hydration so a dark-system visitor never sees a light flash.
@@ -51,6 +51,7 @@ export function SiteLanding() {
   // A `?ref=CODE` (beta referral) is kept for the join and stripped from the URL.
   useEffect(() => {
     captureRef();
+    captureInvite();
     const url = new URL(window.location.href);
     const basket = url.searchParams.get("basket");
     if (basket) window.location.replace(appUrl(`?basket=${encodeURIComponent(basket)}`));

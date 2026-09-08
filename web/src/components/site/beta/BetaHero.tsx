@@ -7,7 +7,7 @@
 // minimum time on the page before the sign-in opens. No captcha.
 import { useEffect, useRef, useState } from "react";
 import { useLogin, useModalStatus, usePrivy } from "@privy-io/react-auth";
-import { useBetaAccess, useBetaJoin, useBetaStats } from "@/hooks/useBetaAccess";
+import { useBetaAccess, useBetaJoin, useBetaStats, useRedeemInvite } from "@/hooks/useBetaAccess";
 import { DotField } from "@/components/site/ui/DotField";
 import { NumberTicker } from "@/components/site/ui/NumberTicker";
 import { Reveal } from "@/components/site/ui/Reveal";
@@ -26,6 +26,7 @@ export function BetaHero() {
   const { joining, joinError, retryJoin } = useBetaJoin(access, {
     honeypot: () => honeypot.current?.value ?? "",
   });
+  const { redeem, redeeming, redeemError, clearError } = useRedeemInvite(access);
   const mountedAt = useRef(0);
   const delay = useRef<number | null>(null);
   useEffect(() => {
@@ -110,7 +111,13 @@ export function BetaHero() {
 
         {ready && authenticated && (
           <div className={s.cardCol}>
-            <BetaCard access={access} joining={loading || joining} error={cardError} onRetry={onRetry} />
+            <BetaCard
+              access={access}
+              joining={loading || joining}
+              error={cardError}
+              onRetry={onRetry}
+              invite={{ redeem, redeeming, error: redeemError, clearError }}
+            />
           </div>
         )}
       </div>

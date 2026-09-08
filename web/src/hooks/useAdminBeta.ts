@@ -4,6 +4,8 @@
 //
 //   GET  /api/admin/beta?status=&q=&cursor=&limit=  → { rows, next, stats }
 //   POST /api/admin/beta  { action, ... }            → { ok: true, changed }
+//   GET  /api/admin/beta/codes                       → { codes }
+//   POST /api/admin/beta/codes  { action, ... }      → { ok: true, created | changed }
 //
 // The list is a keyset-paginated infinite query keyed by (status, q). Row
 // mutations (approve / block / unblock / note) patch every cached page
@@ -23,11 +25,17 @@ import type {
   AdminListResponse,
   AdminRow,
   AdminStats,
+  InviteAdminAction,
+  InviteCode,
+  InviteCreateResponse,
+  InviteDisableResponse,
+  InviteListResponse,
   WaitlistStatus,
 } from "@/lib/beta";
 
 // Shapes are shared with the server (lib/beta.ts); re-exported for the UI.
 export type { AdminAction, AdminActionResponse, AdminListResponse, AdminRow, AdminStats };
+export type { InviteCode, InviteCreateResponse, InviteDisableResponse, InviteListResponse };
 export type AdminStatus = WaitlistStatus;
 export type AdminFilter = "all" | AdminStatus;
 export type AdminActionResult = AdminActionResponse;
@@ -42,6 +50,7 @@ export class AdminError extends Error {
 
 export const PAGE_SIZE = 50;
 const KEY = ["admin-beta"] as const;
+const CODES_KEY = ["admin-beta-codes"] as const;
 
 /** Normalise a timestamp (unix seconds per the contract; ms / ISO tolerated) to epoch ms. */
 export function toMs(v: number | string | null | undefined): number | null {
@@ -223,4 +232,57 @@ export function useAdminBetaActions() {
   });
 
   return { setStatus, setNote, approveTop, add };
+}
+
+// ── Invite codes ─────────────────────────────────────────────────────────────
+// Its own cache key: nothing an admin does to the waitlist changes a code, and
+// nothing they do to a code changes a waitlist row until someone redeems it.
+
+export async function fetchInviteCodes(): Promise<InviteListResponse> {
+  const res = await authedFetch("/api/admin/beta/codes", { cache: "no-store" });
+  if (!res.ok) throw await readError(res);
+  return (await res.json()) as InviteListResponse;
+}
+
+async function postInviteAction<T>(body: InviteAdminAction): Promise<T> {
+  const res = await authedFetch("/api/admin/beta/codes", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw await readError(res);
+  return (await res.json()) as T;
+}
+
+export function useInviteCodes(enabled = true) {
+  const query = useQuery({
+    queryKey: CODES_KEY,
+    queryFn: fetchInviteCodes,
+    enabled,
+    staleTime: 15_000,
+    retry: (count, err) => !(err instanceof AdminError && err.status < 500) && count < 1,
+  });
+
+  const codes = query.data?.codes ?? [];
+  const forbidden = query.error instanceof AdminError && query.error.status === 403;
+
+  return { ...query, codes, forbidden };
+}
+
+export function useInviteCodeActions() {
+  const qc = useQueryClient();
+  const settle = () => qc.invalidateQueries({ queryKey: CODES_KEY });
+
+  const create = useMutation({
+    mutationFn: (vars: { count: number; maxUses?: number; label?: string; expiresInDays?: number }) =>
+      postInviteAction<InviteCreateResponse>({ action: "create", ...vars }),
+    onSuccess: settle,
+  });
+
+  const disable = useMutation({
+    mutationFn: (codes: string[]) => postInviteAction<InviteDisableResponse>({ action: "disable", codes }),
+    onSuccess: settle,
+  });
+
+  return { create, disable };
 }

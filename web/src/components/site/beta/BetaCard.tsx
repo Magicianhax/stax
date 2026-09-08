@@ -2,9 +2,9 @@
 
 // The waitlist card on /beta, rendered once the person is signed in. One
 // component, five states: joining (first sign-in, the join request is in
-// flight), waiting (position, link, share, count), approved ("You're in"),
-// blocked (one calm line), error (what failed + retry).
-import { useEffect, useRef, useState } from "react";
+// flight), waiting (position, link, share, count, and a way past the queue),
+// approved ("You're in"), blocked (one calm line), error (what failed + retry).
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ArrowRight, Check, Copy } from "lucide-react";
 import type { Access } from "@/lib/beta";
 import { copyText } from "@/lib/referral";
@@ -21,11 +21,14 @@ export function BetaCard({
   joining,
   error,
   onRetry,
+  invite,
 }: {
   access: Access | null;
   joining: boolean;
   error: string | null;
   onRetry: () => void;
+  /** Redeeming an invite code, when the page is wired for it. */
+  invite?: InviteRedeemProps;
 }) {
   if (error) {
     return (
@@ -89,7 +92,82 @@ export function BetaCard({
       <p className={s.friends}>
         {access.referrals.toLocaleString("en-US")} {access.referrals === 1 ? "friend" : "friends"} joined
       </p>
+
+      {invite && <InviteRedeem {...invite} />}
     </div>
+  );
+}
+
+export interface InviteRedeemProps {
+  redeem: (code: string) => Promise<unknown>;
+  redeeming: boolean;
+  error: string | null;
+  clearError: () => void;
+}
+
+/**
+ * The way past the queue, for someone holding a code.
+ *
+ * Folded away behind a link rather than sitting open: almost nobody has a code,
+ * and an empty field above the referral link would read as one more thing they
+ * have failed to fill in. Whoever does have one is looking for exactly this.
+ */
+function InviteRedeem({ redeem, redeeming, error, clearError }: InviteRedeemProps) {
+  const [open, setOpen] = useState(false);
+  const [code, setCode] = useState("");
+  const field = useRef<HTMLInputElement | null>(null);
+
+  const onSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    const value = code.trim();
+    if (!value || redeeming) return;
+    void redeem(value).catch(() => field.current?.select());
+  };
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        className={s.inviteToggle}
+        onClick={() => {
+          setOpen(true);
+          window.setTimeout(() => field.current?.focus(), 0);
+        }}
+      >
+        Have an invite code?
+      </button>
+    );
+  }
+
+  return (
+    <form className={s.invite} onSubmit={onSubmit}>
+      <div className={s.linkRow}>
+        <input
+          ref={field}
+          className={s.inviteField}
+          value={code}
+          onChange={(e) => {
+            setCode(e.target.value);
+            if (error) clearError();
+          }}
+          placeholder="Invite code"
+          aria-label="Invite code"
+          autoComplete="off"
+          autoCapitalize="none"
+          spellCheck={false}
+          maxLength={32}
+          disabled={redeeming}
+        />
+        <button type="submit" className={s.copyBtn} disabled={redeeming || code.trim() === ""}>
+          {redeeming ? "Checking…" : "Redeem"}
+        </button>
+      </div>
+      {error && (
+        <p className={s.inviteError} role="alert">
+          {error}
+        </p>
+      )}
+    </form>
   );
 }
 

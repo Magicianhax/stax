@@ -2,8 +2,14 @@
 
 import { useEffect, useState } from "react";
 import type { AdminRow } from "@/hooks/useAdminBeta";
-import { toMs } from "@/hooks/useAdminBeta";
+import { AdminError, toMs } from "@/hooks/useAdminBeta";
 import { shortAddress as short } from "@/lib/format";
+
+/** What to show the admin when a mutation or a query fails. */
+export function errMessage(err: unknown): string {
+  if (err instanceof AdminError) return err.message;
+  return "Something went wrong. Please try again.";
+}
 
 export function useDebounced<T>(value: T, ms: number): T {
   const [v, setV] = useState(value);

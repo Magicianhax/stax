@@ -10,12 +10,15 @@
 //                    POST /api/beta/join with the smart-account address if it
 //                    resolves within ~2 s, else the owner wallet, plus the
 //                    stored `?ref=`. Writes the returned Access into the cache.
+//   useRedeemInvite() spends an invite code: POST /api/beta/redeem, and on
+//                    success writes the returned Access straight into the cache,
+//                    so the card flips to "You're in" without a refetch.
 //   useBetaStats()   the public counts for the landing/beta page.
 import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePrivy } from "@privy-io/react-auth";
 import { authedFetch } from "@/lib/authedFetch";
-import { clearRef, getRef } from "@/lib/referral";
+import { clearInvite, clearRef, getInvite, getRef } from "@/lib/referral";
 import { useActiveWallet } from "@/hooks/useActiveWallet";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { useDemo } from "@/components/demo/DemoProvider";
@@ -153,6 +156,61 @@ export function useBetaJoin(
       mutate(smart ?? walletRef.current?.address);
       started.current = userId;
     },
+  };
+}
+
+/**
+ * Spend an invite code for the signed-in user.
+ *
+ * A code stored from an invite link is redeemed once, automatically, as soon as
+ * the person turns out to be waiting: they followed a link that promised to let
+ * them in, so making them find a field and paste it back would be theatre. Typed
+ * codes go through the same mutation.
+ */
+export function useRedeemInvite(access: Access | null): {
+  redeem: (code: string) => Promise<Access>;
+  redeeming: boolean;
+  redeemError: string | null;
+  clearError: () => void;
+} {
+  const qc = useQueryClient();
+  const { user } = usePrivy();
+  const demo = useDemo();
+  const userId = user?.id ?? null;
+
+  const mutation = useMutation({
+    mutationFn: async (code: string): Promise<Access> =>
+      readJson<Access>(
+        await authedFetch("/api/beta/redeem", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ code }),
+        }),
+      ),
+    onSuccess: (data) => {
+      clearInvite();
+      qc.setQueryData(accessKey(userId), data);
+    },
+  });
+
+  // One automatic attempt per stored code. A failure clears it too: a code that
+  // is spent or wrong should not be retried on every visit, and the person can
+  // still type one in.
+  const tried = useRef<string | null>(null);
+  const { mutate } = mutation;
+  useEffect(() => {
+    if (demo || !userId || access?.status !== "waiting") return;
+    const code = getInvite();
+    if (!code || tried.current === code) return;
+    tried.current = code;
+    mutate(code, { onError: () => clearInvite() });
+  }, [demo, userId, access, mutate]);
+
+  return {
+    redeem: (code: string) => mutation.mutateAsync(code),
+    redeeming: mutation.isPending,
+    redeemError: mutation.error ? mutation.error.message : null,
+    clearError: () => mutation.reset(),
   };
 }
 

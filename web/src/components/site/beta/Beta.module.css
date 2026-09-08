@@ -292,6 +292,73 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Invite code: closed by default, because almost nobody has one. */
+.inviteToggle {
+  align-self: center;
+  margin: -6px 0 0;
+  padding: 6px 4px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--s-ink-3);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: color 160ms var(--s-ease);
+}
+.inviteToggle:hover {
+  color: var(--s-ink);
+}
+
+.invite {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.inviteField {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 48px;
+  padding: 0 14px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--s-paper) 70%, transparent);
+  border: 1px solid var(--s-line);
+  font: inherit;
+  font-family: var(--s-mono);
+  font-size: 14.5px;
+  letter-spacing: 0.02em;
+  color: var(--s-ink);
+  text-align: left;
+}
+.inviteField::placeholder {
+  font-family: var(--s-sans, inherit);
+  letter-spacing: normal;
+  color: var(--s-ink-3);
+}
+.inviteField:focus-visible {
+  outline: 2px solid var(--s-primary);
+  outline-offset: 1px;
+}
+.inviteField:disabled {
+  opacity: 0.6;
+}
+
+.inviteError {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--s-neg);
+  text-align: left;
+}
+
+.copyBtn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 /* Loading / error inside the card. */
 .pending {
   display: flex;

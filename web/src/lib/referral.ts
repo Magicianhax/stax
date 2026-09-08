@@ -3,6 +3,9 @@
 //   captureRef()      read `?ref=CODE` off the current URL, keep it in
 //                     localStorage["stax.ref"], strip it from the address bar
 //   getRef()/clearRef() the stored code, consumed once by POST /api/beta/join
+//   captureInvite()   the same for `?code=CODE`, an invite that skips the queue.
+//                     It has to survive the sign-in round trip, which is why it
+//                     is stashed rather than read straight off the URL.
 //   betaShareText(url) the prefilled post for the share row
 //   shareLinks(url)   X / WhatsApp / Telegram intent URLs for that text
 //
@@ -12,37 +15,63 @@
 import { useSyncExternalStore } from "react";
 
 const KEY = "stax.ref";
+const INVITE_KEY = "stax.invite";
 const SHAPE = /^[A-Za-z0-9]{4,16}$/;
 
-export function captureRef(): void {
+function capture(param: string, key: string): void {
   if (typeof window === "undefined") return;
   try {
     const url = new URL(window.location.href);
-    const ref = url.searchParams.get("ref");
-    if (!ref) return;
-    url.searchParams.delete("ref");
+    const value = url.searchParams.get(param);
+    if (!value) return;
+    url.searchParams.delete(param);
     window.history.replaceState(window.history.state, "", url.toString());
-    if (SHAPE.test(ref)) window.localStorage.setItem(KEY, ref);
+    if (SHAPE.test(value)) window.localStorage.setItem(key, value);
   } catch {
     // URL or storage unavailable (private mode); nothing to keep.
   }
 }
 
-export function getRef(): string | null {
+function stored(key: string): string | null {
   try {
-    const v = window.localStorage.getItem(KEY);
+    const v = window.localStorage.getItem(key);
     return v && SHAPE.test(v) ? v : null;
   } catch {
     return null;
   }
 }
 
-export function clearRef(): void {
+function forget(key: string): void {
   try {
-    window.localStorage.removeItem(KEY);
+    window.localStorage.removeItem(key);
   } catch {
     // ignore
   }
+}
+
+export function captureRef(): void {
+  capture("ref", KEY);
+}
+
+export function getRef(): string | null {
+  return stored(KEY);
+}
+
+export function clearRef(): void {
+  forget(KEY);
+}
+
+/** `?code=` on the beta page or an invite link: the code that skips the queue. */
+export function captureInvite(): void {
+  capture("code", INVITE_KEY);
+}
+
+export function getInvite(): string | null {
+  return stored(INVITE_KEY);
+}
+
+export function clearInvite(): void {
+  forget(INVITE_KEY);
 }
 
 export function betaShareText(url: string): string {

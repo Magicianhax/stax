@@ -19,14 +19,29 @@ nothing is gated and the beta pages still work (so we can switch it off in one e
 | `status` | text check in ('waiting','approved','blocked') default 'waiting' | |
 | `ref_code` | text unique | 8-char base62, uppercase-free (no 0/O/1/l ambiguity) |
 | `referred_by` | text nullable | another row's `ref_code`, set once at join, never changed |
-| `source` | text nullable | 'beta-page' \| 'admin' \| 'import' |
+| `source` | text nullable | 'beta-page' \| 'admin' \| 'import' \| 'invite' |
+| `invite_code` | text nullable | the invite code that let this row skip the queue, if one did |
 | `note` | text nullable | admin note |
 | `created_at`, `approved_at`, `blocked_at` | timestamptz | |
 
 Indexes: `(status, created_at)`, `(referred_by)`, `lower(email)`.
 
 `waitlist_events` (audit): `id bigserial`, `waitlist_id`, `actor` ('system'|'admin:<userId>'), `action`
-('joined','approved','blocked','unblocked','note','imported'), `meta jsonb`, `created_at`.
+('joined','approved','blocked','unblocked','note','imported','invited'), `meta jsonb`, `created_at`.
+
+`invite_codes`
+| column | type | notes |
+|---|---|---|
+| `code` | text pk | 10 chars from the unambiguous alphabet (no 0/o, 1/l/i) |
+| `label` | text nullable | what the batch was for, in the admin's words |
+| `max_uses` | integer not null default 1 check >= 1 | more than 1 makes the code shareable |
+| `uses` | integer not null default 0 check >= 0 | incremented by the conditional claim, never decremented |
+| `expires_at` | timestamptz nullable | null = never |
+| `created_by` | text not null | Privy user id of the admin who minted it |
+| `disabled_at` | timestamptz nullable | an admin turned it off; a spent code is not disabled, it is spent |
+| `created_at` | timestamptz | |
+
+A code is **live** when it is not disabled, not expired, and `uses < max_uses`.
 
 **Position** = rank of a waiting row ordered by `(referrals desc, created_at asc)` where
 `referrals = count(waitlist where referred_by = row.ref_code and status != 'blocked')`. Computed
@@ -40,9 +55,21 @@ in SQL with a window function; never stored.
   own, pulls `email` from Privy linked accounts (`privy.users().get(userId)`; cache in `users.email`),
   logs `joined`. Returns `Access`. 60/min per user.
 - `GET /api/me/access` (auth) → `Access = { beta: boolean, status: 'none'|'waiting'|'approved'|'blocked', position: number|null, waiting: number, refCode: string|null, referrals: number, referralUrl: string|null, joinedAt: number|null }`. `beta` = flag on. `status 'none'` = not on the list. Cache-Control no-store.
+- `POST /api/beta/redeem` (auth) body `{ code }` → `Access`. Joins the caller if they are not on the
+  list yet, then claims one use of the code with a single conditional UPDATE (`uses < max_uses`,
+  not disabled, not expired) and flips their row to `approved` with `invite_code` set, logging
+  `invited`. Two people racing for the last use of a shared code cannot both win. A blocked account
+  is never let in: a code is a queue jump, not an appeal. 10/min per user, because guessing a code
+  is the only attack there is. 400 with a plain message when the code is unknown, spent or expired.
 - `GET /api/beta/stats` (public, 60 s cache) → `{ waiting, approved, total }` for the landing/beta page.
 - Admin (auth + `requireAdmin`): `GET /api/admin/beta?status=&q=&cursor=&limit=` → `{ rows: AdminRow[], next: cursor|null, stats }` where `AdminRow = { id, userId, address, email, status, refCode, referredBy, referrals, position, source, note, createdAt, approvedAt }` (search `q` over email/address/refCode/userId); `POST /api/admin/beta` body one of
   `{ action: 'approve'|'block'|'unblock', ids: string[] }`, `{ action: 'approveTop', n: number }` (top N waiting by position), `{ action: 'add', entries: [{ address?: string, email?: string, note?: string }] }` (creates approved rows with `source: 'admin'`), `{ action: 'note', id, note }` → `{ ok: true, changed: number }`. Every action logs a `waitlist_events` row with `actor = 'admin:<userId>'`.
+- Admin invite codes (auth + `requireAdmin`): `GET /api/admin/beta/codes` → `{ codes: InviteCode[] }`
+  where `InviteCode = { code, label, maxUses, uses, live, expiresAt, disabledAt, createdAt, url }`
+  (newest first; this is the only endpoint that returns codes in the clear, because it is how an
+  admin reads a code they are about to hand over); `POST /api/admin/beta/codes` body one of
+  `{ action: 'create', count, maxUses?, label?, expiresInDays? }` → `{ ok, created }`, or
+  `{ action: 'disable', codes: string[] }` → `{ ok, changed }`.
 - `requireAdmin(user)`: allowed when `user.userId ∈ ADMIN_USER_IDS` (comma list) OR the user's Privy email ∈ `ADMIN_EMAILS` (comma list, lowercased). 403 otherwise. Both env vars server-only.
 - `requireApproved(user)` (server guard, only when the flag is on): 403 `{ error: "Stax is in private beta. You're on the list." , status }` unless the caller's row is `approved`. Applied in: `POST /api/invest-plan`, `POST /api/swap-quote`, `POST /api/autopilot`, `POST /api/autopilot/run`, `POST /api/allocate`. Read-only routes stay open.
 
@@ -56,7 +83,13 @@ in SQL with a window function; never stored.
   (X post prefilled: "I'm on the list for Stax, real stocks in one sentence. Skip the line: <link>"),
   "each friend who joins moves you up", and their referral count. Approved users see "You're in" +
   "Open Stax". Blocked users see a calm "This account can't join right now." `?ref=CODE` on `/`
-  or `/beta` is stored in `localStorage["stax.ref"]` until used.
+  or `/beta` is stored in `localStorage["stax.ref"]` until used. A waiting person also gets a folded
+  "Have an invite code?" field: it is closed by default because almost nobody has one, and an empty
+  field would read as one more thing they had failed to fill in. `?code=CODE` on `/` or `/beta` is
+  stored in `localStorage["stax.invite"]` and redeemed automatically, once, as soon as the person
+  turns out to be waiting — they followed a link that promised to let them in, so making them find
+  the field and paste it back would be theatre. A failed automatic attempt clears the stored code
+  so it is not retried on every visit.
 - `/app` gate: in `LiteApp` (real mode only, never demo), after Privy auth resolve
   `GET /api/me/access`; while loading show the existing splash; if `beta && status !== 'approved'`
   render `BetaGateScreen` full-screen inside the app shell: the same card as `/beta` (position,

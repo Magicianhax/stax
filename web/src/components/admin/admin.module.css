@@ -596,6 +596,83 @@
 .hint.err {
   color: var(--neg);
 }
+.fieldRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* ── Invite codes ───────────────────────────────────────────────────────── */
+.codesHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.codesHead .fieldLabel {
+  margin-bottom: 0;
+}
+.linkBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  margin-right: -10px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex: none;
+  color: color-mix(in srgb, var(--primary) 72%, var(--ink));
+  transition: background 0.18s var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .linkBtn:hover {
+    background: var(--surface);
+  }
+}
+.codeRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px 5px 10px;
+  border-radius: 12px;
+  color: var(--ink);
+}
+/* The batch just minted is the reason the sheet is open. */
+.codeRow.fresh {
+  background: var(--primary-soft);
+}
+.codeRow .iconBtn {
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+}
+.codeMain {
+  min-width: 0;
+  flex: 1;
+}
+.codeTop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.codeText {
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.codeSub {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* ── Gate cards (signed out / forbidden) ────────────────────────────────── */
 .gate {
@@ -625,6 +702,7 @@
   .sheet,
   .bulk,
   .iconBtn,
+  .linkBtn,
   .tab {
     transition: none;
     animation: none;

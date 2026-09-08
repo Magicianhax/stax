@@ -9,7 +9,6 @@ import { Icon } from "@/components/design/Icon";
 import { useToast } from "@/components/design/Toast";
 import { useTheme } from "@/hooks/useTheme";
 import {
-  AdminError,
   useAdminBetaActions,
   useAdminBetaList,
   type AdminFilter,
@@ -22,7 +21,8 @@ import { BulkBar } from "./BulkBar";
 import { ApproveTopSheet } from "./ApproveTopSheet";
 import { AddAddressesSheet } from "./AddAddressesSheet";
 import { NoteSheet } from "./NoteSheet";
-import { downloadText, rowsToCsv, useDebounced } from "./util";
+import { InviteCodesSheet } from "./InviteCodesSheet";
+import { downloadText, errMessage, rowsToCsv, useDebounced } from "./util";
 import s from "./admin.module.css";
 
 const TABS: { id: AdminFilter; label: string }[] = [
@@ -31,11 +31,6 @@ const TABS: { id: AdminFilter; label: string }[] = [
   { id: "approved", label: "Approved" },
   { id: "blocked", label: "Blocked" },
 ];
-
-function errMessage(err: unknown): string {
-  if (err instanceof AdminError) return err.message;
-  return "Something went wrong. Please try again.";
-}
 
 function ThemeButton() {
   const { colorMode, toggle } = useTheme();
@@ -107,6 +102,7 @@ export function AdminBetaBody({ enabled }: { enabled: boolean }) {
   const [pending, setPending] = useState<Set<string>>(() => new Set());
   const [topOpen, setTopOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [codesOpen, setCodesOpen] = useState(false);
   const [noteRow, setNoteRow] = useState<AdminRow | null>(null);
 
   // Selection only makes sense within one list: changing the filter or the
@@ -258,6 +254,10 @@ export function AdminBetaBody({ enabled }: { enabled: boolean }) {
             >
               Export CSV
             </button>
+            <button type="button" className={`btn btn-ghost ${s.btnSm} tap`} onClick={() => setCodesOpen(true)}>
+              <Icon name="gift" size={16} stroke={2.2} />
+              Invite codes
+            </button>
             <button type="button" className={`btn btn-ghost ${s.btnSm} tap`} onClick={() => setAddOpen(true)}>
               <Icon name="plus" size={16} stroke={2.4} />
               Add people
@@ -369,6 +369,7 @@ export function AdminBetaBody({ enabled }: { enabled: boolean }) {
 
       <ApproveTopSheet open={topOpen} onClose={() => setTopOpen(false)} onConfirm={onApproveTop} />
       <AddAddressesSheet open={addOpen} onClose={() => setAddOpen(false)} onConfirm={onAdd} />
+      <InviteCodesSheet open={codesOpen} onClose={() => setCodesOpen(false)} />
       <NoteSheet row={noteRow} onClose={() => setNoteRow(null)} onConfirm={onNoteConfirm} />
     </>
   );

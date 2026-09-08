@@ -5,7 +5,7 @@
 import { useEffect } from "react";
 import { useMediaQuery } from "@/components/site/ui/useMediaQuery";
 import { Nav } from "@/components/site/Nav";
-import { captureRef } from "@/lib/referral";
+import { captureInvite, captureRef } from "@/lib/referral";
 import { BetaHero } from "./BetaHero";
 
 const MODE_SCRIPT =
@@ -16,6 +16,7 @@ export function BetaPage() {
 
   useEffect(() => {
     captureRef();
+    captureInvite();
   }, []);
 
   return (
