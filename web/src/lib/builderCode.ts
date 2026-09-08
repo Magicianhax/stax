@@ -8,10 +8,16 @@
 //
 // Schema 0, the canonical one, laid out in the order the bytes appear:
 //
-//   [codesLength: 1 byte][codes: ASCII, comma delimited][schemaId: 0x00][marker: 16 bytes]
+//   [codes: ASCII, comma delimited][codesLength: 1 byte][schemaId: 0x00][marker: 16 bytes]
 //
-// Parsers work backwards from the end of the calldata, which is why the marker
-// is last. Base's own worked example is pinned in the tests.
+// Every field is ordered for a parser reading BACKWARDS from the end of the
+// calldata, which is the only direction that works when the suffix sits behind
+// arguments of unknown length: marker, then schema, then the length, and only
+// then does it know how far back the codes reach. Putting the length first —
+// as one widely copied write-up of the spec does — leaves it unfindable.
+//
+// The test pins this against the exact string Base's own dashboard generates for
+// our code, which is the only authority worth trusting here.
 import { concatHex, type Hex } from "viem";
 
 /** 0x8021 eight times. The fixed tail every parser looks for first. */
@@ -51,7 +57,7 @@ export function attributionSuffix(codes: string[]): Hex | null {
 
   const hex = (n: number) => n.toString(16).padStart(2, "0");
   const body = Array.from(bytes, hex).join("");
-  return `0x${hex(bytes.length)}${body}${SCHEMA_ID}${MARKER}`;
+  return `0x${body}${hex(bytes.length)}${SCHEMA_ID}${MARKER}`;
 }
 
 /**

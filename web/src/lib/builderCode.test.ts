@@ -4,24 +4,29 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { attributionSuffix, tagUserOps, type Encoder } from "./builderCode";
 
 describe("attributionSuffix", () => {
-  it("reproduces the example from the ERC-8021 spec", () => {
-    expect(attributionSuffix(["baseapp"])).toBe("0x07626173656170700080218021802180218021802180218021");
+  it("reproduces the string Base's dashboard generates for our code", () => {
+    // Copied from dashboard.base.org → Builder Codes → Encoded String. This is the
+    // authority: a write-up of the spec had the length byte first, which is not
+    // what Base emits and not what a backwards parser could ever find.
+    expect(attributionSuffix(["bc_wmmxuw6h"])).toBe(
+      "0x62635f776d6d78757736680b0080218021802180218021802180218021",
+    );
   });
 
-  it("lays the bytes out as length, codes, schema, marker", () => {
+  it("lays the bytes out as codes, length, schema, marker", () => {
     const suffix = attributionSuffix(["bc_wmmxuw6h"])!;
-    expect(suffix.slice(2, 4)).toBe("0b"); // 11 characters
-    expect(Buffer.from(suffix.slice(4, 4 + 22), "hex").toString("ascii")).toBe("bc_wmmxuw6h");
+    expect(Buffer.from(suffix.slice(2, 24), "hex").toString("ascii")).toBe("bc_wmmxuw6h");
+    expect(suffix.slice(24, 26)).toBe("0b"); // 11 characters
     expect(suffix.slice(26, 28)).toBe("00"); // schema 0
     expect(suffix.slice(28)).toBe("8021".repeat(8));
-    // 1 + 11 + 1 + 16 bytes.
+    // 11 + 1 + 1 + 16 bytes.
     expect((suffix.length - 2) / 2).toBe(29);
   });
 
   it("joins several codes with a comma", () => {
     const suffix = attributionSuffix(["stax", "relay"])!;
-    expect(suffix.slice(2, 4)).toBe("0a"); // "stax,relay"
-    expect(Buffer.from(suffix.slice(4, 24), "hex").toString("ascii")).toBe("stax,relay");
+    expect(Buffer.from(suffix.slice(2, 22), "hex").toString("ascii")).toBe("stax,relay");
+    expect(suffix.slice(22, 24)).toBe("0a");
   });
 
   it("returns null rather than throwing on anything it cannot encode", () => {
@@ -35,7 +40,7 @@ describe("attributionSuffix", () => {
 
   it("still encodes a code exactly at the one-byte limit", () => {
     const suffix = attributionSuffix(["a".repeat(255)])!;
-    expect(suffix.slice(2, 4)).toBe("ff");
+    expect(suffix.slice(2 + 255 * 2, 2 + 255 * 2 + 2)).toBe("ff");
   });
 });
 
