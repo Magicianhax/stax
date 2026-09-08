@@ -19,6 +19,7 @@ import { createWalletClient, custom, parseUnits, type Hex } from "viem";
 import { authedFetch } from "@/lib/authedFetch";
 import { ERC20_ABI } from "@/lib/abis";
 import { BASE } from "@/lib/chains/base";
+import { builderCodeSuffix } from "@/lib/builderCode";
 import { getPublicClient } from "@/lib/wagmi";
 import { fromUnits } from "@/lib/format";
 import { useDemo } from "@/components/demo/DemoProvider";
@@ -393,11 +394,18 @@ export function useExternalWalletTransfer(): ExternalWalletTransfer {
         });
 
         // 3. USDC.transfer(recipient, amount) — plain ERC-20 move, no approval needed.
+        //    The ERC-8021 tag rides along here too: this is the one transaction the
+        //    app builds that the person's own wallet signs and pays for, and it is
+        //    still volume the app caused. USDC ignores the trailing bytes the way
+        //    every Solidity dispatcher does, and they cost the sender a few hundred
+        //    gas. Undefined when no builder code is configured, which viem treats
+        //    as no suffix at all.
         const hash = await client.writeContract({
           address: BASE.usdc.address,
           abi: ERC20_ABI,
           functionName: "transfer",
           args: [recipient, amountRaw],
+          dataSuffix: builderCodeSuffix(BASE.key) ?? undefined,
         });
         setTxHash(hash);
 
