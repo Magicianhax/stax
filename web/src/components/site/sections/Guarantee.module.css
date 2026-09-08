@@ -91,117 +91,81 @@
   stroke: var(--s-accent);
 }
 
-/* ── the contracts: a 12-column table on the container's own tracks ──────── */
-.table {
-  margin-top: 64px;
-  border-top: 1px solid var(--s-line);
-}
-.chainHead,
-.row {
+/* ── the refusals: four promises on the container's own 12 tracks ────────── */
+.refusals {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   column-gap: 24px;
-  align-items: baseline;
-  border-bottom: 1px solid var(--s-line);
+  row-gap: 28px;
+  margin-top: 64px;
 }
-.chainHead {
-  padding: 18px 0 10px;
-}
-.chainHead > :nth-child(1) {
-  grid-column: span 4;
-}
-.chainHead > :nth-child(2) {
-  grid-column: span 6;
-}
-.chainHead > :nth-child(3) {
-  grid-column: span 2;
-}
-.chainCell {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 15px;
+.eyebrow {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 13px;
   font-weight: 700;
-  color: var(--s-ink);
-}
-.chainLogo {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  display: block;
-}
-.chainNote {
-  font-size: 13.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   color: var(--s-ink-3);
 }
-.row {
+.refusal {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--s-line);
   position: relative;
-  min-height: 60px;
-  padding: 14px 0;
-  color: var(--s-ink);
 }
-.row > :nth-child(1) {
-  grid-column: span 4;
-}
-.row > :nth-child(2) {
-  grid-column: span 6;
-}
-.row > :nth-child(3) {
-  grid-column: span 2;
-}
-/* the highlight bleeds 12px past the text so it reads as a row, not a smear */
-.row::before {
+/* A short accent stub on the rule: the refusal is the guarantee, not a footnote. */
+.refusal::before {
   content: "";
   position: absolute;
-  inset: 4px -12px;
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--s-primary) 9%, transparent);
-  opacity: 0;
-  transition: opacity 0.18s var(--s-ease);
-  pointer-events: none;
+  top: -1px;
+  left: 0;
+  width: 34px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--s-accent-2);
 }
-.rowStatic {
-  color: var(--s-ink-2);
+:global(.site[data-mode="dark"]) .refusal::before {
+  background: var(--s-accent);
 }
-.name {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  font-size: 15px;
+.refusalTitle {
+  margin: 0;
+  font-size: 17px;
   font-weight: 700;
+  letter-spacing: -0.014em;
   line-height: 1.25;
+  color: var(--s-ink);
+  text-wrap: balance;
 }
-.does {
-  margin-top: 3px;
-  font-size: 13.5px;
-  font-weight: 500;
+.refusalNote {
+  margin: 8px 0 0;
+  font-size: 14.5px;
+  line-height: 1.5;
   color: var(--s-ink-2);
+  max-width: 34ch;
 }
-.addr {
-  font-family: var(--s-mono);
-  font-size: 13px;
-  letter-spacing: -0.01em;
-  color: var(--s-ink-2);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  transition: color 0.18s var(--s-ease);
+
+.verified {
+  grid-column: 1 / -1;
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: var(--s-ink-3);
 }
-.addrShort {
-  display: none;
-}
-.link {
+.verifiedLink {
   display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 4px;
-  min-width: 0;
-  font-size: 14px;
+  gap: 6px;
   font-weight: 700;
   color: var(--s-ink-2);
-  white-space: nowrap;
+  text-decoration: none;
   transition: color 0.18s var(--s-ease);
+}
+.chainLogo {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: block;
 }
 /* terracotta stays on the glyph only: the text needs AA on paper */
 .arrow {
@@ -212,25 +176,28 @@
   color: var(--s-accent);
 }
 @media (hover: hover) {
-  a.row:hover::before {
-    opacity: 1;
-  }
-  a.row:hover .addr {
+  .verifiedLink:hover {
     color: var(--s-ink);
   }
-  a.row:hover .link {
-    color: var(--s-ink);
-  }
-  a.row:hover .arrow {
+  .verifiedLink:hover .arrow {
     transform: translate(2px, -2px);
   }
 }
-a.row:focus-visible {
-  outline: none;
+.verifiedLink:focus-visible {
+  outline: 2px solid var(--s-primary);
+  outline-offset: 3px;
+  border-radius: 6px;
 }
-a.row:focus-visible::before {
-  opacity: 1;
-  box-shadow: 0 0 0 2px var(--s-primary);
+
+@media (min-width: 640px) {
+  .refusal {
+    grid-column: span 6;
+  }
+}
+@media (min-width: 900px) {
+  .refusal {
+    grid-column: span 3;
+  }
 }
 
 @media (min-width: 900px) {
@@ -273,55 +240,13 @@ a.row:focus-visible::before {
   .down {
     display: block;
   }
-  .table {
+  .refusals {
     margin-top: 40px;
-  }
-  /* On phones every row is a centred stack: name, address, explorer link. */
-  .chainHead > :nth-child(n),
-  .row > :nth-child(n) {
-    grid-column: 1 / -1;
-    grid-row: auto;
-    justify-self: center;
-    align-self: auto;
-    text-align: center;
-  }
-  .chainHead,
-  .row {
-    justify-items: center;
-  }
-  .chainCell {
-    justify-content: center;
-  }
-  .name {
-    align-items: center;
-  }
-  .link {
-    justify-content: center;
-  }
-  .row {
-    row-gap: 6px;
-    padding: 14px 0;
-  }
-  .row::before {
-    inset: 2px -8px;
-  }
-  .addrFull {
-    display: none;
-  }
-  .addrShort {
-    display: inline;
-  }
-  .rowStatic .addr {
-    white-space: normal;
-  }
-  .link {
-    font-size: 13px;
+    row-gap: 24px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .row::before,
-  .addr,
-  .link,
+  .verifiedLink,
   .arrow {
     transition: none;
   }

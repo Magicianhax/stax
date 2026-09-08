@@ -4,9 +4,14 @@
 // diagram on the 12-column grid (two columns per step) whose connecting line
 // draws itself as the section scrolls (ScrollTrigger scrub on
 // stroke-dashoffset; without JS or under reduced motion the line is simply
-// drawn). Under it, the verified contracts as a 12-column table: name 4 cols,
-// mono address 6 cols, explorer link 2 cols. Names, explorers and addresses
-// come from the chain registry so nothing is typed here.
+// drawn).
+//
+// Under it, the four things the contract refuses. This used to be a table of
+// hex addresses, which is proof only to someone already holding a block
+// explorer: it asks the reader to take the interesting part on faith and gives
+// them the boring part in full. The refusals are the actual promise, each one a
+// real revert in StaxExecutor and InferenceVerifier, and the addresses stay one
+// click away behind the verified links rather than on the page.
 import { useRef } from "react";
 import Image from "next/image";
 import {
@@ -55,71 +60,55 @@ const DOWN = centres
   })
   .join(" ");
 
-const CONTRACT_ROWS: {
-  key: "executor" | "verifier" | "registry";
-  name: string;
-  does: string;
-}[] = [
-  { key: "verifier", name: "Verifier", does: "checks Vera's signature and the risk" },
-  { key: "executor", name: "Executor", does: "moves the money, only after the check" },
-  { key: "registry", name: "Identity registry", does: "Vera's identity, on record" },
+const REFUSALS: { title: string; note: string }[] = [
+  {
+    title: "A plan Vera didn’t sign",
+    note: "Her signature is recovered on chain and checked against her registered identity. Anything else reverts.",
+  },
+  {
+    title: "Risk above the ceiling you set",
+    note: "You choose the number. The contract compares the plan’s assessed risk against it and stops there.",
+  },
+  {
+    title: "An asset or venue off the list",
+    note: "Only approved tokens, bought through approved routers. There is no path to anything else.",
+  },
+  {
+    title: "A cent more than you approved",
+    note: "What was actually spent is measured after the trades, not promised before them, and has to fit.",
+  },
 ];
 
-function short(addr: string): string {
-  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
-}
+/** The chains the contracts are live on, for the one quiet line of proof. */
+const CHAINS: StaxChain[] = [BASE, MANTLE];
 
-function ChainRows({ chain }: { chain: StaxChain }) {
+/**
+ * The verified links. The executor is the contract that moves the money, so it
+ * is the one worth opening; naming the explorer rather than printing the address
+ * keeps the proof and drops the forty characters nobody reads.
+ */
+function VerifiedLinks() {
+  const live = CHAINS.filter((c) => c.contracts.deployed);
+  if (live.length === 0) return null;
   return (
-    <>
-      <div className={s.chainHead}>
-        <span className={s.chainCell}>
-          <Image src={chain.brand.logo} alt="" width={18} height={18} className={s.chainLogo} />
-          {chain.name}
+    <p className={s.verified}>
+      Live and verified on{" "}
+      {live.map((chain, i) => (
+        <span key={chain.key}>
+          {i > 0 && <span aria-hidden> · </span>}
+          <a
+            className={s.verifiedLink}
+            href={explorerAddress(chain, chain.contracts.executor)}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <Image src={chain.brand.logo} alt="" width={16} height={16} className={s.chainLogo} />
+            {chain.name}
+            <ArrowUpRight size={13} strokeWidth={2.4} aria-hidden className={s.arrow} />
+          </a>
         </span>
-        <span className={s.chainNote}>
-          {chain.contracts.deployed ? `verified on ${chain.explorer.name}` : "launching"}
-        </span>
-        <span className={s.chainNote} aria-hidden />
-      </div>
-      {chain.contracts.deployed ? (
-        CONTRACT_ROWS.map((row) => {
-          const addr = chain.contracts[row.key];
-          return (
-            <a
-              key={row.key}
-              className={s.row}
-              href={explorerAddress(chain, addr)}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label={`${row.name} contract on ${chain.name}, ${addr}. Open on ${chain.explorer.name}.`}
-            >
-              <span className={s.name}>
-                {row.name}
-                <span className={s.does}>{row.does}</span>
-              </span>
-              <span className={s.addr} title={addr}>
-                <span className={s.addrFull}>{addr}</span>
-                <span className={s.addrShort}>{short(addr)}</span>
-              </span>
-              <span className={s.link}>
-                {chain.explorer.name}
-                <ArrowUpRight size={14} strokeWidth={2.4} aria-hidden className={s.arrow} />
-              </span>
-            </a>
-          );
-        })
-      ) : (
-        <div className={`${s.row} ${s.rowStatic}`}>
-          <span className={s.name}>
-            Same three contracts
-            <span className={s.does}>being switched on for {chain.name}</span>
-          </span>
-          <span className={s.addr}>addresses appear here once live</span>
-          <span className={s.link} aria-hidden />
-        </div>
-      )}
-    </>
+      ))}
+    </p>
   );
 }
 
@@ -183,9 +172,15 @@ export function Guarantee() {
           </Reveal>
         </div>
 
-        <Reveal className={s.table} stagger={0.04}>
-          <ChainRows chain={MANTLE} />
-          <ChainRows chain={BASE} />
+        <Reveal className={s.refusals} stagger={0.05}>
+          <p className={s.eyebrow}>What it refuses</p>
+          {REFUSALS.map((r) => (
+            <div key={r.title} className={s.refusal}>
+              <h3 className={s.refusalTitle}>{r.title}</h3>
+              <p className={s.refusalNote}>{r.note}</p>
+            </div>
+          ))}
+          <VerifiedLinks />
         </Reveal>
       </div>
     </section>
