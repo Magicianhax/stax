@@ -231,8 +231,10 @@ export const waitlist = pgTable(
     refCode: text("ref_code").notNull(),
     /** Another row's `ref_code`, set once at join, never changed. */
     referredBy: text("referred_by"),
-    /** 'beta-page' | 'admin' | 'import' */
+    /** 'beta-page' | 'admin' | 'import' | 'invite' */
     source: text("source"),
+    /** The invite code that let this row skip the queue, if one did. */
+    inviteCode: text("invite_code"),
     note: text("note"),
     createdAt: createdAt(),
     approvedAt: timestamp("approved_at", { withTimezone: true }),
@@ -246,6 +248,39 @@ export const waitlist = pgTable(
     index("waitlist_referred_by_idx").on(t.referredBy),
     index("waitlist_email_lower_idx").on(sql`lower(${t.email})`),
     check("waitlist_status_check", sql`${t.status} in ('waiting', 'approved', 'blocked')`),
+  ],
+);
+
+/**
+ * Invite codes: a code hands its holder a place in the beta without waiting.
+ *
+ * Uses are counted rather than a row being deleted, because a code that has been
+ * handed out is a fact worth keeping after it is spent: the admin list should be
+ * able to say what a code was for and who came in on it. `max_uses` of 1 is the
+ * common case (a code per person); a larger number makes a code shareable with a
+ * group, which is why redemption increments under a conditional update rather
+ * than reading and writing back.
+ */
+export const inviteCodes = pgTable(
+  "invite_codes",
+  {
+    /** The code itself, lowercase, from the unambiguous alphabet. */
+    code: text("code").primaryKey(),
+    /** What it was made for, in the admin's words: "seed round", "@jack". */
+    label: text("label"),
+    maxUses: integer("max_uses").notNull().default(1),
+    uses: integer("uses").notNull().default(0),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    /** Privy user id of the admin who generated it. */
+    createdBy: text("created_by").notNull(),
+    /** Set when an admin turns a code off; a spent code is not disabled, it is spent. */
+    disabledAt: timestamp("disabled_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("invite_codes_created_at_idx").on(t.createdAt),
+    check("invite_codes_max_uses_check", sql`${t.maxUses} >= 1`),
+    check("invite_codes_uses_check", sql`${t.uses} >= 0`),
   ],
 );
 
@@ -267,7 +302,7 @@ export const waitlistEvents = pgTable(
     index("waitlist_events_waitlist_id_idx").on(t.waitlistId),
     check(
       "waitlist_events_action_check",
-      sql`${t.action} in ('joined', 'approved', 'blocked', 'unblocked', 'note', 'imported')`,
+      sql`${t.action} in ('joined', 'approved', 'blocked', 'unblocked', 'note', 'imported', 'invited')`,
     ),
   ],
 );
@@ -403,6 +438,7 @@ export type NewPriceSnapshot = typeof priceSnapshots.$inferInsert;
 export type Basket = typeof baskets.$inferSelect;
 export type NewBasket = typeof baskets.$inferInsert;
 export type WaitlistRow = typeof waitlist.$inferSelect;
+export type InviteCodeRow = typeof inviteCodes.$inferSelect;
 export type NewWaitlistRow = typeof waitlist.$inferInsert;
 export type WaitlistEvent = typeof waitlistEvents.$inferSelect;
 export type NewWaitlistEvent = typeof waitlistEvents.$inferInsert;

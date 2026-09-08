@@ -81,5 +81,59 @@ export interface AdminActionResponse {
   skipped?: { address: string | null; email: string | null; reason: string }[];
 }
 
+// ---------- invite codes ----------
+
+/** Codes are read aloud and retyped, so the look-alikes are gone and case never matters. */
+export const INVITE_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
+export const INVITE_CODE_LENGTH = 10;
+export const INVITE_LABEL_MAX = 80;
+/** One request may mint this many at once. */
+export const INVITE_BATCH_MAX = 50;
+
+/** Trim a typed code to what the server will look up, or null if it cannot be one. */
+export function normalizeInviteCode(code: string | null | undefined): string | null {
+  const v = (code ?? "").trim().toLowerCase().replace(/[\s-]/g, "");
+  return /^[a-z0-9]{6,16}$/.test(v) ? v : null;
+}
+
+/** One code, as the admin console sees it. */
+export interface InviteCode {
+  code: string;
+  label: string | null;
+  maxUses: number;
+  uses: number;
+  /** True when it can still be redeemed right now: not spent, not disabled, not expired. */
+  live: boolean;
+  expiresAt: number | null;
+  disabledAt: number | null;
+  createdAt: number;
+  /** The joining URL to hand over. */
+  url: string;
+}
+
+export interface InviteListResponse {
+  codes: InviteCode[];
+}
+
+export type InviteAdminAction =
+  | { action: "create"; count: number; maxUses?: number; label?: string; expiresInDays?: number }
+  | { action: "disable"; codes: string[] };
+
+export interface InviteCreateResponse {
+  ok: true;
+  /** Newest first, exactly the codes this request minted. */
+  created: InviteCode[];
+}
+
+export interface InviteDisableResponse {
+  ok: true;
+  changed: number;
+}
+
+/** `POST /api/beta/redeem` when the code will not let anyone in. */
+export const INVITE_BAD_CODE = "That code isn't valid. Check it and try again.";
+export const INVITE_SPENT = "That code has already been used.";
+export const INVITE_EXPIRED = "That code has expired.";
+
 /** The 403 body the money routes return while the flag is on and the caller isn't approved. */
 export const BETA_GATE_MESSAGE = "Stax is in private beta. You're on the list.";

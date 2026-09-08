@@ -52,6 +52,9 @@ function randomFrom(alphabet: string, length: number): string {
   return out;
 }
 
+export { randomFrom };
+export type WaitlistExecutor = Executor;
+
 const newId = () => randomFrom(BASE62, 12);
 const newRefCode = () => randomFrom(REF_ALPHABET, REF_CODE_LENGTH);
 
@@ -200,11 +203,13 @@ export async function getStatus(userId: string): Promise<WaitlistStatus | "none"
 
 // ---------- join ----------
 
-async function logEvent(
+export type WaitlistAction = "joined" | "approved" | "blocked" | "unblocked" | "note" | "imported" | "invited";
+
+export async function logEvent(
   ex: Executor,
   waitlistId: string,
   actor: string,
-  action: "joined" | "approved" | "blocked" | "unblocked" | "note" | "imported",
+  action: WaitlistAction,
   meta?: Record<string, unknown>,
 ): Promise<void> {
   await ex.insert(waitlistEvents).values({ waitlistId, actor, action, meta: meta ?? null });
