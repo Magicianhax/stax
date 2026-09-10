@@ -24,6 +24,7 @@ import { isBetaOn } from "@/lib/beta";
 import { db, users, waitlist, waitlistEvents, type WaitlistRow } from "@/lib/db";
 import { ownedAddresses, type OwnedAddresses, type OwnedResolver } from "@/lib/server/ownedAddresses";
 import { fetchPrivyEmail } from "@/lib/server/privyAuth";
+import { hasGiftAddressedTo, lookupHash, privyIdentitiesFor } from "@/lib/server/giftsStore";
 import { touchUser } from "@/lib/server/users";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -342,6 +343,46 @@ async function fillIn(tx: Tx, row: WaitlistRow, address: string | null, email: s
   if (address && !row.address && !(await addressOwner(tx, address))) set.address = address;
   if (email && !row.email) set.email = email;
   if (Object.keys(set).length) await tx.update(waitlist).set(set).where(eq(waitlist.id, row.id));
+}
+
+/**
+ * Let someone in because a gift is waiting for them.
+ *
+ * Being sent a basket is a stronger signal than joining a queue: somebody spent real
+ * money addressed to this person, and making them wait behind a waitlist to collect it
+ * is the one moment the gate is actively harmful. So the first time a recipient signs
+ * in, they are approved — no invite code, no position, no email from us.
+ *
+ * Identities come from our own `users` row when we have them and from Privy otherwise,
+ * so the usual case is one indexed query. Returns true only when this call is what
+ * changed the row, which keeps the audit log honest about why someone was let in.
+ */
+export async function admitGiftRecipient(userId: string): Promise<boolean> {
+  const [me] = await db
+    .select({ email: users.email, xUsername: users.xUsername })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  const hashes: string[] = [];
+  if (me?.email) hashes.push(lookupHash({ kind: "email", email: me.email }));
+  if (me?.xUsername) hashes.push(lookupHash({ kind: "x", username: me.xUsername }));
+  if (hashes.length === 0) {
+    const identities = await privyIdentitiesFor(userId);
+    if (identities.email) hashes.push(lookupHash({ kind: "email", email: identities.email }));
+    if (identities.username) hashes.push(lookupHash({ kind: "x", username: identities.username }));
+  }
+  if (!(await hasGiftAddressedTo(hashes))) return false;
+
+  // Never unblock a blocked account: a gift is a welcome, not an appeal.
+  const [row] = await db
+    .update(waitlist)
+    .set({ status: "approved", approvedAt: new Date() })
+    .where(and(eq(waitlist.userId, userId), eq(waitlist.status, "waiting")))
+    .returning({ id: waitlist.id });
+  if (!row) return false;
+  await logEvent(db, row.id, "system", "approved", { reason: "gift" });
+  return true;
 }
 
 // ---------- stats ----------

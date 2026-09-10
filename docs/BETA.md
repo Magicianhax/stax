@@ -61,6 +61,16 @@ in SQL with a window function; never stored.
   `invited`. Two people racing for the last use of a shared code cannot both win. A blocked account
   is never let in: a code is a queue jump, not an appeal. 10/min per user, because guessing a code
   is the only attack there is. 400 with a plain message when the code is unknown, spent or expired.
+- Gift recipients are admitted automatically. `admitGiftRecipient(userId)` resolves the
+  caller's identities (from `users.email` / `users.x_username` when known, Privy otherwise),
+  hashes them with the same `lookupHash` the gift row was written with, and flips a
+  `waiting` row to `approved` when a **funded or claimed** gift is addressed to them,
+  logging `approved` with `meta.reason = 'gift'`. Pending gifts never count, or addressing
+  a gift to yourself and abandoning it would be a free key; blocked accounts are never
+  unblocked. Called from `POST /api/beta/join` and from `GET /api/me/access` while the
+  caller is still waiting, both best-effort — a failure leaves the gate exactly as it was.
+  Somebody spent real money addressed to this person; making them queue to collect it is
+  the one moment the gate actively hurts.
 - `GET /api/beta/stats` (public, 60 s cache) → `{ waiting, approved, total }` for the landing/beta page.
 - Admin (auth + `requireAdmin`): `GET /api/admin/beta?status=&q=&cursor=&limit=` → `{ rows: AdminRow[], next: cursor|null, stats }` where `AdminRow = { id, userId, address, email, status, refCode, referredBy, referrals, position, source, note, createdAt, approvedAt }` (search `q` over email/address/refCode/userId); `POST /api/admin/beta` body one of
   `{ action: 'approve'|'block'|'unblock', ids: string[] }`, `{ action: 'approveTop', n: number }` (top N waiting by position), `{ action: 'add', entries: [{ address?: string, email?: string, note?: string }] }` (creates approved rows with `source: 'admin'`), `{ action: 'note', id, note }` → `{ ok: true, changed: number }`. Every action logs a `waitlist_events` row with `actor = 'admin:<userId>'`.

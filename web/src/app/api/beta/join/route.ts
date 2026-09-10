@@ -8,7 +8,7 @@ import { z } from "zod";
 import { verifyRequest } from "@/lib/server/privyAuth";
 import { rateLimit } from "@/lib/server/rateLimit";
 import { badRequest, serverError, tooManyRequests, unauthorized } from "@/lib/server/respond";
-import { joinWaitlist } from "@/lib/server/waitlist";
+import { admitGiftRecipient, getAccess, joinWaitlist } from "@/lib/server/waitlist";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -41,7 +41,17 @@ export async function POST(req: NextRequest) {
   if (body.website) return badRequest();
 
   try {
-    const access = await joinWaitlist({ userId: user.userId, address: body.address, ref: body.ref });
+    let access = await joinWaitlist({ userId: user.userId, address: body.address, ref: body.ref });
+    // A recipient signing in to collect a gift should never see a queue position, not
+    // even for the minute until the next access poll. Best-effort: joining still stands
+    // if this fails.
+    if (access.status === "waiting") {
+      try {
+        if (await admitGiftRecipient(user.userId)) access = await getAccess(user.userId);
+      } catch (e) {
+        console.warn("[beta-join] gift admission check failed:", e instanceof Error ? e.message : e);
+      }
+    }
     return Response.json(access, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
     return serverError("beta-join", err);

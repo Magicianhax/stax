@@ -149,6 +149,23 @@ export async function recipientHashesFor(userId: string): Promise<string[]> {
 }
 
 /**
+ * Is there a real gift waiting for any of these identities?
+ *
+ * Only `funded` and `claimed` count. A `pending` row is a gift someone started and
+ * may never finish, and it must not be enough to let anyone past the beta gate —
+ * otherwise addressing a gift to yourself and abandoning it is a free key.
+ */
+export async function hasGiftAddressedTo(hashes: string[]): Promise<boolean> {
+  if (hashes.length === 0) return false;
+  const [row] = await db
+    .select({ id: gifts.id })
+    .from(gifts)
+    .where(and(inArray(gifts.recipientEmailHash, hashes), inArray(gifts.status, ["funded", "claimed"])))
+    .limit(1);
+  return Boolean(row);
+}
+
+/**
  * Does the signed-in caller own the identity this gift is addressed to?
  *
  * THE security gate for claiming, and the one function both claim routes go through, so
