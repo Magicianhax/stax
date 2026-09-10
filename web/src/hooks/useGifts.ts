@@ -471,11 +471,22 @@ export function useSendGift(): UseSendGift {
 
         // 6. Tell the server, which re-reads the contract before believing it.
         //    The body must list exactly what the contract holds, cash row included.
+        //
+        //    Past this line the gift EXISTS: the park transaction has a receipt and
+        //    the tokens are in the contract. So a failure here is a bookkeeping
+        //    failure, never a lost gift, and it must not be reported as one. We
+        //    retry a few times for a lagging node, and if it still will not take,
+        //    the giver is shown their gift anyway — the list endpoint reconciles
+        //    the row against the contract on its own (healStalePendingGifts).
         setPhase("recording");
-        await postJson(`/api/gifts/${reserved.giftId}/funded`, {
-          txHash: parkReceipt.receipt.transactionHash,
-          tokens: parked,
-        });
+        try {
+          await postJson(`/api/gifts/${reserved.giftId}/funded`, {
+            txHash: parkReceipt.receipt.transactionHash,
+            tokens: parked,
+          });
+        } catch (e) {
+          console.warn("[gifts] parked on-chain but not recorded:", e instanceof Error ? e.message : e);
+        }
 
         setSent({
           id: reserved.giftId,

@@ -17,6 +17,10 @@ import { badRequest, jsonError, serverError, tooManyRequests, unauthorized } fro
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+/** How many extra reads to spend waiting for a lagging node before giving up. */
+const ON_CHAIN_READ_RETRIES = 4;
+const ON_CHAIN_READ_BACKOFF_MS = 1500;
+
 const Body = z.object({
   txHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/, "Invalid transaction hash."),
   tokens: z
@@ -57,7 +61,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const giftContract = giftContractFor(chain);
     if (!giftContract) return jsonError(503, "Gifting isn't switched on for this network yet.");
 
-    const onChain = await readOnChainGift(chain, giftContract, id);
+    // The client only calls this once its park transaction has a receipt, so the
+    // gift IS on chain by now. The node we ask can still be a block or two behind
+    // itself, and answering 409 to that told a giver their gift had failed when it
+    // was already parked. Ask again a few times before believing the absence.
+    let onChain = await readOnChainGift(chain, giftContract, id);
+    for (let attempt = 0; !onChain && attempt < ON_CHAIN_READ_RETRIES; attempt++) {
+      await new Promise((r) => setTimeout(r, ON_CHAIN_READ_BACKOFF_MS));
+      onChain = await readOnChainGift(chain, giftContract, id);
+    }
     if (!onChain) return jsonError(409, "We can't see that gift on-chain yet. Give it a moment and try again.");
     if (onChain.from.toLowerCase() !== row.fromAddress.toLowerCase()) {
       return jsonError(409, "That gift was created by a different account.");
