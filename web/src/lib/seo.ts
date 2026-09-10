@@ -6,7 +6,7 @@ export const SITE_NAME = "Stax";
 
 export const SITE_TAGLINE = "Invest in plain words";
 export const SITE_DESCRIPTION =
-  "Own real companies in plain words. Vera, an AI investing assistant, builds the plan and a contract checks it before money moves. Tokenized stocks by Coinbase on Base and Backed on Mantle, gas-free, email login, for eligible non-US users. Track Winner (Trading & Strategy) and Best UI/UX, Mantle Turing Test Hackathon 2026.";
+  "Own real companies in plain words. Vera, an AI broker, builds the plan and a contract on Base checks it before money moves. Tokenized stocks, email login, no seed phrase. For eligible non-US users.";
 
 export const TWITTER_HANDLE = "@stax_market";
 export const GITHUB_URL = "https://github.com/Magicianhax/stax";
