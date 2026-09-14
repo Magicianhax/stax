@@ -23,6 +23,7 @@ import {
   getGiftRow,
   giverLabelsFor,
   isGiftId,
+  markClaimed,
   readOnChainGift,
   recipientKindOf,
   toSummary,
@@ -81,7 +82,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // The contract is the last word on whether there is anything left to release.
     const onChain = await readOnChainGift(chain, giftContract, id);
     if (!onChain) return jsonError(409, "We can't see that gift on-chain.");
-    if (onChain.claimed) return jsonError(409, "This gift has already been claimed.");
+    if (onChain.claimed) {
+      // Our row said funded, so the claim's callback was lost. This caller owns the
+      // identity and `reclaim` reverts until reclaimAfter, so it was their claim: record it
+      // so the gift stops offering itself.
+      if (row.reclaimAfter.getTime() > Date.now()) await markClaimed(id, user.userId, null);
+      return jsonError(409, "This gift has already been claimed.");
+    }
     if (Number(onChain.unlockAt) * 1000 > Date.now()) return jsonError(409, "This gift hasn't opened yet.");
 
     const deadline = BigInt(Math.floor(Date.now() / 1000) + CLAIM_DEADLINE_SECONDS);

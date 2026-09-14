@@ -34,7 +34,7 @@ import {
   createGift,
   giftShareUrl,
   giverLabelsFor,
-  healStalePendingGifts,
+  healGifts,
   listGiftsFor,
   newGiftId,
   newSalt,
@@ -246,15 +246,18 @@ export async function GET(req: NextRequest) {
     await touchUser(user.userId, identities.email, identities.username);
     const { sent, received } = await listGiftsFor(chain, user.userId, recipientHashesOf(identities));
 
-    // Ask the chain about the caller's own rows that have been "Setting up" too long,
-    // before deciding what to show — otherwise a lost callback strands one for ever.
-    const settledSent = await healStalePendingGifts(chain, sent);
+    // Ask the chain about rows a lost callback may have stranded — "Setting up" too long,
+    // or claimed on-chain but still funded here — before deciding what to show. A gift sent
+    // to yourself sits in both lists, so each row is asked about once.
+    const now = Date.now();
+    const unique = [...new Map([...sent, ...received].map((r) => [r.id, r])).values()];
+    const healed = await healGifts(chain, user.userId, unique, new Set(received.map((r) => r.id)), now);
+    const current = (row: (typeof sent)[number]) => healed.get(row.id) ?? row;
 
     const givers = await giverLabelsFor(received.map((r) => r.fromUserId));
-    const now = Date.now();
     const body: { sent: GiftSummary[]; received: GiftSummary[] } = {
-      sent: settledSent.map((row) => toSummary(row, "sent", null, now)),
-      received: received.map((row) => toSummary(row, "received", givers.get(row.fromUserId) ?? null, now)),
+      sent: sent.map((row) => toSummary(current(row), "sent", null, now)),
+      received: received.map((row) => toSummary(current(row), "received", givers.get(row.fromUserId) ?? null, now)),
     };
     return Response.json(body);
   } catch (err) {

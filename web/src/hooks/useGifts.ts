@@ -477,7 +477,7 @@ export function useSendGift(): UseSendGift {
         //    failure, never a lost gift, and it must not be reported as one. We
         //    retry a few times for a lagging node, and if it still will not take,
         //    the giver is shown their gift anyway — the list endpoint reconciles
-        //    the row against the contract on its own (healStalePendingGifts).
+        //    the row against the contract on its own (healGifts).
         setPhase("recording");
         try {
           await postJson(`/api/gifts/${reserved.giftId}/funded`, {
@@ -544,7 +544,9 @@ function useGiftSettlement(kind: "claim" | "reclaim") {
       const receipt = await sendSponsoredCalls(provider, [call], chain);
       await postJson(`/api/gifts/${id}/claimed`, { txHash: receipt.receipt.transactionHash });
     },
-    onSuccess: () => {
+    // Settled, not success: a claim can land on-chain and still have its callback fail,
+    // and the list is what heals it. Leaving the cache alone kept "Ready to claim" up.
+    onSettled: () => {
       void qc.invalidateQueries({ queryKey: ["gifts"] });
       refreshBalances();
     },

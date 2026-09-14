@@ -9,17 +9,13 @@ import type { NextRequest } from "next/server";
 import { isAddress } from "viem";
 import { z } from "zod";
 import { giftContractFor } from "@/lib/gifts";
-import { getGiftRow, isGiftId, markFunded, readOnChainGift, toSummary } from "@/lib/server/giftsStore";
+import { getGiftRow, isGiftId, markFunded, readOnChainGiftSettled, toSummary } from "@/lib/server/giftsStore";
 import { verifyRequest } from "@/lib/server/privyAuth";
 import { rateLimit } from "@/lib/server/rateLimit";
 import { badRequest, jsonError, serverError, tooManyRequests, unauthorized } from "@/lib/server/respond";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-
-/** How many extra reads to spend waiting for a lagging node before giving up. */
-const ON_CHAIN_READ_RETRIES = 4;
-const ON_CHAIN_READ_BACKOFF_MS = 1500;
 
 const Body = z.object({
   txHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/, "Invalid transaction hash."),
@@ -65,11 +61,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // gift IS on chain by now. The node we ask can still be a block or two behind
     // itself, and answering 409 to that told a giver their gift had failed when it
     // was already parked. Ask again a few times before believing the absence.
-    let onChain = await readOnChainGift(chain, giftContract, id);
-    for (let attempt = 0; !onChain && attempt < ON_CHAIN_READ_RETRIES; attempt++) {
-      await new Promise((r) => setTimeout(r, ON_CHAIN_READ_BACKOFF_MS));
-      onChain = await readOnChainGift(chain, giftContract, id);
-    }
+    const onChain = await readOnChainGiftSettled(chain, giftContract, id, () => true);
     if (!onChain) return jsonError(409, "We can't see that gift on-chain yet. Give it a moment and try again.");
     if (onChain.from.toLowerCase() !== row.fromAddress.toLowerCase()) {
       return jsonError(409, "That gift was created by a different account.");

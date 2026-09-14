@@ -69,8 +69,17 @@ export const GIFT_PILL_LABEL: Record<GiftPill, string> = {
   failed: "Didn't go through",
 };
 
-/** Which pill a gift wears right now. */
-export function pillFor(gift: { status: GiftStatus; claimable?: boolean }): GiftPill {
+/**
+ * Which pill a gift wears right now.
+ *
+ * `claimable` is only ever true on a gift the caller received, so on the giver's side the
+ * unlock date decides it. Without that a sent gift past its date read "Waiting to unlock ·
+ * Ready now", contradicting itself.
+ */
+export function pillFor(
+  gift: { status: GiftStatus; claimable?: boolean; direction?: "sent" | "received"; unlockAt?: string },
+  nowMs: number = Date.now(),
+): GiftPill {
   switch (gift.status) {
     case "pending":
       return "preparing";
@@ -80,8 +89,11 @@ export function pillFor(gift: { status: GiftStatus; claimable?: boolean }): Gift
       return "returned";
     case "failed":
       return "failed";
-    default:
-      return gift.claimable ? "ready" : "waiting";
+    default: {
+      if (gift.claimable) return "ready";
+      const at = gift.direction === "sent" && gift.unlockAt ? Date.parse(gift.unlockAt) : NaN;
+      return Number.isFinite(at) && at <= nowMs ? "ready" : "waiting";
+    }
   }
 }
 

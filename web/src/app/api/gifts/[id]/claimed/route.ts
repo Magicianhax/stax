@@ -17,7 +17,7 @@ import {
   isGiftId,
   markClaimed,
   markReclaimed,
-  readOnChainGift,
+  readOnChainGiftSettled,
   toSummary,
 } from "@/lib/server/giftsStore";
 import { verifyRequest } from "@/lib/server/privyAuth";
@@ -54,7 +54,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const giftContract = giftContractFor(chain);
     if (!giftContract) return jsonError(503, "Gifting isn't switched on for this network yet.");
 
-    const onChain = await readOnChainGift(chain, giftContract, id);
+    // The client calls this with the receipt in hand, so the claim has landed; a node a
+    // block behind would still say "parked". Wait that out rather than refuse a real claim.
+    const onChain = await readOnChainGiftSettled(chain, giftContract, id, (g) => g.claimed);
     if (!onChain) return jsonError(409, "We can't see that gift on-chain.");
     if (!onChain.claimed) return jsonError(409, "That gift is still parked. Nothing to record yet.");
 

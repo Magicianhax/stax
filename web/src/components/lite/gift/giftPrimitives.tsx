@@ -56,7 +56,13 @@ const PILL_ICON: Partial<Record<GiftPill, "check" | "clock" | "info">> = {
 };
 
 /** Where a gift is, in one word or three. Never a raw status string. */
-export function StatusPill({ gift, style }: { gift: { status: Gift["status"]; claimable?: boolean }; style?: CSSProperties }) {
+export function StatusPill({
+  gift,
+  style,
+}: {
+  gift: Pick<Gift, "status"> & Partial<Pick<Gift, "claimable" | "direction" | "unlockAt">>;
+  style?: CSSProperties;
+}) {
   const kind = pillFor(gift);
   const tone = TONE[kind];
   const icon = PILL_ICON[kind];

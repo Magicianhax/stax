@@ -261,8 +261,18 @@ export async function markFailed(id: string): Promise<GiftRow | null> {
   return row ?? null;
 }
 
-/** Mark a gift claimed once `getGift(...).claimed` is true on-chain. */
-export async function markClaimed(id: string, claimedByUserId: string, txHash: string): Promise<GiftRow | null> {
+/**
+ * Mark a gift claimed once `getGift(...).claimed` is true on-chain.
+ *
+ * Both are nullable for the same reason `markFunded`'s hash is: a claim recovered by the
+ * self-heal was read off the contract, which records neither who asked nor the hash, and
+ * the giver's own list can heal a gift without knowing who the recipient's account is.
+ */
+export async function markClaimed(
+  id: string,
+  claimedByUserId: string | null,
+  txHash: string | null,
+): Promise<GiftRow | null> {
   const [row] = await db
     .update(gifts)
     .set({ status: "claimed", claimTxHash: txHash, claimedByUserId, updatedAt: new Date() })
@@ -319,9 +329,11 @@ export async function listGiftsFor(
     if (row.fromUserId === userId) sent.push(row);
     // A `pending` row is a reservation and nothing more: no money is parked and the
     // contract has never heard of it, so there is nothing addressed to the recipient yet.
-    // Showing it would announce a gift that may never exist. The giver keeps seeing their
-    // own pending rows — that side of it is real work they started.
-    if (addressedToMe.has(row.recipientEmailHash) && row.status !== "pending") received.push(row);
+    // A `failed` one never reached the contract at all. Showing either would announce a
+    // gift that does not exist. The giver keeps seeing both — that side is work they started.
+    if (addressedToMe.has(row.recipientEmailHash) && row.status !== "pending" && row.status !== "failed") {
+      received.push(row);
+    }
   }
   return { sent, received };
 }
@@ -358,6 +370,33 @@ export interface OnChainGift {
   note: string;
 }
 
+/** How many extra reads to spend waiting for a lagging node, and how far apart. */
+const ON_CHAIN_READ_RETRIES = 4;
+const ON_CHAIN_READ_BACKOFF_MS = 1500;
+
+/**
+ * `readOnChainGift`, asked again a few times until `settled` holds.
+ *
+ * The routes that record a transaction are only called once the client holds its receipt,
+ * so the change IS on-chain. The node the server asks sits behind a fallback transport and
+ * can still be a block or two behind the bundler's. Answering straight away turned that
+ * lag into "nothing happened" — a claim that had landed was left reading "Ready to claim".
+ * Returns the last read either way; the caller decides what an unsettled one means.
+ */
+export async function readOnChainGiftSettled(
+  chain: ChainKey,
+  giftContract: Address,
+  id: `0x${string}`,
+  settled: (gift: OnChainGift) => boolean,
+): Promise<OnChainGift | null> {
+  let gift = await readOnChainGift(chain, giftContract, id);
+  for (let attempt = 0; !(gift && settled(gift)) && attempt < ON_CHAIN_READ_RETRIES; attempt++) {
+    await new Promise((r) => setTimeout(r, ON_CHAIN_READ_BACKOFF_MS));
+    gift = await readOnChainGift(chain, giftContract, id);
+  }
+  return gift;
+}
+
 /**
  * Read the gift straight from TimelockGift on `chain`. Returns null when the contract
  * has never heard of the id (`from` is the zero address). The routes call this before
@@ -383,8 +422,8 @@ export async function readOnChainGift(chain: ChainKey, giftContract: Address, id
  */
 const STALE_PENDING_MS = 10 * 60_000;
 
-/** The list endpoint is on the critical path of the gifts screen, so cap the RPC work. */
-const STALE_PENDING_MAX = 5;
+/** The list endpoint is on the critical path of the gifts screen, so cap the RPC work per kind. */
+const HEAL_MAX = 5;
 
 /**
  * What the contract says is parked, as the row records it. Only reached when the funded
@@ -420,33 +459,70 @@ async function settleStalePending(
 }
 
 /**
- * Resolve the caller's own gifts that have been stuck `pending` too long, by asking the
- * contract what really happened: funded if the money is parked, failed if it never was.
- * Without this a client that dies between reserving and reporting leaves a row reading
- * "Setting up" for ever, with no path out of it.
- *
- * `rows` arrives newest first, so the cap takes the most recent stale rows. Everything is
- * wrapped: a flaky RPC must degrade to leaving the row pending, never to failing the list.
+ * A funded row the contract says has already been emptied. Before `reclaimAfter` only the
+ * recipient could have done that — `reclaim` reverts until then — so it was a claim, and
+ * that is the only case settled here. After it, `claimed` cannot tell a claim from the
+ * giver taking it back, so the row is left for the callback rather than guessed at.
  */
-export async function healStalePendingGifts(
+async function settleClaimedFunded(
   chain: ChainKey,
+  giftContract: Address,
+  row: GiftRow,
+  claimedByUserId: string | null,
+  now: number,
+): Promise<GiftRow | null> {
+  if (row.reclaimAfter.getTime() <= now) return null;
+  const onChain = await readOnChainGift(chain, giftContract, row.id as `0x${string}`);
+  if (!onChain?.claimed) return null;
+  return markClaimed(row.id, claimedByUserId, row.claimTxHash);
+}
+
+/**
+ * Bring rows the caller can see back in line with the contract before they are shown.
+ * Without this, a client that dies — or a server read that lands a block early — between
+ * the transaction and its callback strands a row for ever:
+ *
+ *   • `pending` too long   → funded if the money is parked, failed if it never was
+ *                            (only the caller's own sent rows; nobody else can be setting up)
+ *   • `funded` and open    → claimed, if the contract has already paid it out. Otherwise a
+ *                            claimed gift keeps reading "Ready to claim" and every retry
+ *                            is refused as already claimed.
+ *
+ * `recipientIds` are the rows addressed to the caller, so a claim healed from the
+ * recipient's side records who claimed it. Everything is wrapped: a flaky RPC must degrade
+ * to leaving a row as it was, never to failing the list.
+ */
+export async function healGifts(
+  chain: ChainKey,
+  userId: string,
   rows: GiftRow[],
+  recipientIds: Set<string>,
   now = Date.now(),
-): Promise<GiftRow[]> {
+): Promise<Map<string, GiftRow>> {
+  const healed = new Map<string, GiftRow>();
   const giftContract = giftContractFor(chain);
-  if (!giftContract) return rows;
-  const stale = rows
-    .filter((r) => r.status === "pending" && now - r.createdAt.getTime() > STALE_PENDING_MS)
-    .slice(0, STALE_PENDING_MAX);
-  if (stale.length === 0) return rows;
+  if (!giftContract) return healed;
+
+  const stalePending = rows
+    .filter((r) => r.status === "pending" && r.fromUserId === userId && now - r.createdAt.getTime() > STALE_PENDING_MS)
+    .slice(0, HEAL_MAX);
+  const openFunded = rows
+    .filter((r) => r.status === "funded" && r.unlockAt.getTime() <= now)
+    .slice(0, HEAL_MAX);
+  if (stalePending.length === 0 && openFunded.length === 0) return healed;
+
   try {
-    const settled = await Promise.all(stale.map((row) => settleStalePending(chain, giftContract, row)));
-    const healed = new Map(settled.filter((r): r is GiftRow => r !== null).map((r) => [r.id, r]));
-    return healed.size === 0 ? rows : rows.map((r) => healed.get(r.id) ?? r);
+    const settled = await Promise.all([
+      ...stalePending.map((row) => settleStalePending(chain, giftContract, row)),
+      ...openFunded.map((row) =>
+        settleClaimedFunded(chain, giftContract, row, recipientIds.has(row.id) ? userId : null, now),
+      ),
+    ]);
+    for (const row of settled) if (row) healed.set(row.id, row);
   } catch (e) {
-    console.warn("[gifts] stale-pending self-heal failed:", e instanceof Error ? e.message : e);
-    return rows;
+    console.warn("[gifts] self-heal failed:", e instanceof Error ? e.message : e);
   }
+  return healed;
 }
 
 const ERC20_BALANCE_ABI = [
