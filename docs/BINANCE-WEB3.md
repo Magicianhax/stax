@@ -534,6 +534,99 @@ it. That first trade is also the one that will show whether an `executeBatch`-wr
 
 ---
 
+## 5a. DeFi API, prefix `/api/v1/defi` (wave 5b "money" stream, LIVE 2026-09-25)
+
+BSC only. Signed the same way as every other endpoint (§1). Not in the original research pass —
+added when wave 5b needed a real BSC lending product for "Savings." Research script:
+`scratchpad/bnb/defi-explore.mjs` + `redeem-explore.mjs` (session scratchpad, not committed; every
+call either a read or an unsigned-calldata BUILD, never a signed/broadcast transaction).
+
+| Endpoint | Method | Status | Notes |
+|---|---|---|---|
+| `/data/position/list` | POST | DOCS | `addresses` (max 3), `binanceChainIds?` → per-address positions across protocols. Not called — Savings doesn't need a position reader yet (see "Open questions" below). |
+| `/data/protocol/list` | POST | **LIVE** | `binanceChainId?, investType? ("Earn"\|"LiquidityPool"), sortField? ("tvl"\|"apy"), sortDirection?, page?, size?` → `{ page, size, total, list: [{ defiProtocolId, protocolName, protocolLogo, tvl, apyBps, apyDisplay, investType[], supportedChains[] }] }` |
+| `/data/protocol/detail` | POST | DOCS | `defiProtocolId` → team/security/FAQ metadata. Not needed for Savings. |
+| `/data/investment/list` | POST | **LIVE** | `investType, defiProtocolId?, tokenAddressList?, binanceChainId?, sortField?, sortDirection?, page?, size? (max 100, default 20)` → `{ page, size, total, list: [{ binanceChainId, defiProtocolId, protocolName, investmentId, investmentName, investType, apyType, apyBps, apyDisplay, tvl }] }` |
+| `/data/investment/detail` | POST | **LIVE** | `investmentId` → adds `investable, poolAddress, feeRate, assetTokenList[], rewardTokenList[], lpTokenList[], borrowTokenList[]` (each token: `tokenAddress, tokenName, tokenSymbol`) |
+| `/transaction/deposit` | POST | **LIVE** | `address, investmentId, token: { tokenAddress, amount /* human decimal, NOT raw units */ }, simulate?` → `{ dataList: [{ callDataType, from, to, value /* hex */, data, gasLimit, gasPrice, maxPriorityFeePerGas, maxFeePerGas }], preview? }` |
+| `/transaction/redeem` | POST | **LIVE (error case)** | `address, investmentId, ratio? (0,1], token? (exact-amount pair), slippageBps?, simulate?` → same `dataList` shape, plus `redeemDelayDays: [min, max]` |
+| `/transaction/lp-add`, `/lp-add/calculate`, `/lp-remove`, `/transaction/claim` | POST | DOCS | Not used by Savings (Earn only, no LP, no claim). |
+
+**Protocols supported for Earn on BSC (LIVE, `protocol/list` with `investType: "Earn"`, 2026-09-25):**
+Aave V3 (3.31% APY), Lista (6.44%), **Venus (4.71%)**, Aster (1.76%), Solv (3.00%), Venus Flux
+(3.47%). `apyBps` is the machine number, `apyDisplay` Binance's own formatted string — shown
+verbatim, never re-derived.
+
+**Venus's BSC Earn markets (LIVE, `investment/list` with `defiProtocolId: "venus"`, 33 rows):**
+USDC (4.71%), sUSDe (4.65%), **USDT (3.38%, `investmentId`
+`5b77bfd8d8f7c18e9ee0d8f331c4d78f56744eed8addbe2e9970c0ef37e763cb` — the one Savings uses, pinned
+in `lib/server/savings.ts`**), FDUSD, DAI, asBNB, XVS, USD1, USDe, SOL, lisUSD, slisBNB, XRP,
+BSC_ETH, TRX, BCH, BTCB, WBNB, LTC, LINK, ADA, BNB, Cake, AAVE, wBETH, DOGE, TWT, SolvBTC, XVS
+(again, 0% row), TSLAB, NVDAB, SPCXB, SKHYB (the last four are 0.00% APY listing rows for
+tokenized-stock collateral, not stablecoin lending — Savings never touches them).
+
+**`investmentDetail` on the USDT market (LIVE):** `investable: true`, `apyBps: 338`, `apyDisplay:
+"3.38%"`, `assetTokenList: [{ tokenAddress: "0x55d398…97955", tokenSymbol: "USDT" }]` (matches
+`rewardTokenList` — interest accrues in USDT itself, no separate reward token), `poolAddress:
+null`, `feeRate: null`.
+
+**`transaction/deposit` for $6 USDT into that market (LIVE, wallet
+`0xF977814e90dA44bFA03b6295A0616a897441aceC`, `simulate: true`):**
+
+```json
+{
+  "dataList": [{
+    "callDataType": "DEPOSIT",
+    "to": "0xfD5840Cd36d94D7229439859C0112a4185BC0255",
+    "value": "0x0",
+    "data": "0xa0712d6800000000000000000000000000000000000000000000000053444835ec580000"
+  }],
+  "preview": {
+    "success": true,
+    "balanceChange": [
+      { "tokenSymbol": "USDT", "amount": "-6", "valueUsd": "5.997745243055148" },
+      { "tokenSymbol": "vUSDT", "tokenDecimals": "8", "amount": "226.3005974", "valueUsd": "5.9976387..." }
+    ],
+    "feeAndContract": { "interactWith": { "address": "0xfd5840cd36d94d7229439859c0112a4185bc0255" } }
+  }
+}
+```
+
+`0xa0712d68` is `mint(uint256)` — Venus/Compound's classic entry point; `0xfD5840…BC0255` is the
+vUSDT market contract, pinned as the ONLY DeFi contract `assertSavingsCallsAreSafe`
+(`lib/execution.ts`) allows a savings call to target. **`dataList` came back as a single
+`[DEPOSIT]` call, not the `[APPROVE, DEPOSIT]` pair the product docs describe as typical** — this
+wallet already had a standing USDT allowance on the vUSDT market from prior activity, so Binance
+omitted the redundant approve. `lib/server/binance/defi.ts` never assumes a fixed call count: it
+carries `dataList` through as-is, in order, whatever length Binance returns. A synthetic two-call
+fixture (`__fixtures__/defi_build_deposit_with_approve.json`, explicitly marked non-LIVE) pins
+that shape is still parsed correctly.
+
+**`transaction/redeem` on the same wallet (LIVE) failed, not succeeded:** that wallet has no
+Venus USDT position (it never actually deposited — the deposit call above was BUILD + `simulate`
+only, never signed or sent), so redeem returned business error `40456` `"no position found for
+investmentId=…"` rather than calldata. `buildSavingsRedeem` treats this specific code as a plain,
+expected refusal ("You don't have savings to move out yet."), not a 500. **The successful
+`[REDEEM]` calldata shape is therefore UNVERIFIED against a real position** — a synthetic fixture
+(`__fixtures__/defi_build_redeem.json`, marked non-LIVE) pins the shape the docs describe so
+`buildRedeem`'s parsing has something to test against; verify it against an actual funded deposit
+before relying on it past the hackathon.
+
+**DX friction:** the product docs page for `/transaction/deposit` says `dataList` is "typically
+`[APPROVE, DEPOSIT]`" but gives no way to know in advance which shape a given wallet will get —
+the caller finds out only by reading `callDataType` off however many entries come back. Worth
+flagging in the DX report: a `needsApproval: boolean` field on the response would save a whole
+class of "why did my two-call UI only show one button" bug reports.
+
+**Open question (add to §10's list):** whether `data/position/list` reports an ERC-4337 smart
+account's Venus position the same way it would an EOA's — UNVERIFIED, not called this session
+(the 3-address cap and no evident cost saving over `investment/detail` for a single pinned market
+made it a call not worth spending on a hackathon-scoped Savings feature; worth using later if
+Savings ever shows a live position balance instead of relying on the wallet's own USDT balance
+delta).
+
+---
+
 ## 6. Wallet API and Address Portfolio, prefix `/api/v1/dex`
 
 | Endpoint | Status | Params | Response |
@@ -575,6 +668,33 @@ joining on `/rwa/tokens` addresses.
 
 Whether portfolio PnL works for an ERC-4337 smart-account address with activity is UNVERIFIED: the
 only address tested was a router contract, and every metric came back zero.
+
+### `POST /balance/token-balances-by-address` for a real, active address (LIVE, wave 5b "money"
+stream, 2026-09-25, Binance hot wallet `0xF977814e90dA44bFA03b6295A0616a897441aceC` — the same
+public address used before in this doc)
+
+Requested 6 addresses (USDT, WBNB, ETH-peg, BTCB, NVDAB, NVDAon); only **4 came back**:
+
+```json
+{ "data": [{ "tokenAssets": [
+  { "symbol": "USDT", "balance": "100000000.110000200000000000", "rawBalance": "100000000110000200000000000", "tokenPrice": "0.9994371988760312", "isRiskToken": false },
+  { "symbol": "WBNB", "balance": "116.109694839977807594", "rawBalance": "116109694839977807594", "tokenPrice": "782.481262958345320060062521751741043396", "isRiskToken": false },
+  { "symbol": "ETH", "balance": "60000.000000000000000000", "rawBalance": "60000000000000000000000", "tokenPrice": "2691.54963478980337005365966066808418", "isRiskToken": false },
+  { "symbol": "BTCB", "balance": "18800.001311276384671483", "rawBalance": "18800001311276384671483", "tokenPrice": "84469.60870281084665485180215512948522801", "isRiskToken": false }
+] }] }
+```
+
+**NVDAB and NVDAon were silently DROPPED from the response, not returned as a zero-balance row.**
+This contradicts the assumption in the existing test fixture (`balances_response.json`, a
+PancakeSwap router address that *does* get back a zero-balance WBNB row) that every requested
+address always comes back. The real behavior looks like: an address the wallet has never touched
+(no balance, no approval, no history) can be omitted entirely, while an address it holds — even at
+zero after being fully spent — still gets a row. `lib/server/binance/wallet.ts`'s `rawBalanceMap`
+was written to already treat a missing address as "unknown" (not 0n) for exactly this reason: the
+portfolio route (`app/api/portfolio/route.ts`) is the one that decides a missing entry reads as
+"not held" (0n), not `rawBalanceMap` itself, so a genuinely-dropped stock address and a real zero
+balance end up rendering identically without the wallet module having to guess which one Binance
+meant.
 
 ---
 
