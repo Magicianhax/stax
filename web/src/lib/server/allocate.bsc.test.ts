@@ -186,6 +186,70 @@ describe("buildAllocation on BSC", () => {
   });
 });
 
+describe("buildAllocation on BSC: crypto mix (Wave 5 direction A/B)", () => {
+  function oneNvdaCatalog() {
+    bscCatalogSnapshotSpy.mockResolvedValue({ asOf: NOW, tickers: [ticker({ ticker: "NVDA", bestVenue: "bstock" })] });
+  }
+
+  it("leaves crypto out of the universe and the prompt when the goal never mentions it", async () => {
+    oneNvdaCatalog();
+    generateObjectSpy.mockResolvedValue(objectResult([{ symbol: "NVDA", weightPct: 100, reason: "why" }]));
+
+    await buildAllocation(bsc, "grow my savings", 100);
+
+    const { system } = generateObjectSpy.mock.calls[0][0] as { system: string };
+    expect(system).not.toMatch(/BTCB/);
+  });
+
+  it("adds crypto to the universe and the prompt when the goal asks for a mix", async () => {
+    oneNvdaCatalog();
+    generateObjectSpy.mockResolvedValue(
+      objectResult([
+        { symbol: "NVDA", weightPct: 80, reason: "why" },
+        { symbol: "BTCB", weightPct: 20, reason: "why" },
+      ]),
+    );
+
+    await buildAllocation(bsc, "80% stocks, 20% crypto", 100);
+
+    const { system } = generateObjectSpy.mock.calls[0][0] as { system: string };
+    expect(system).toMatch(/BTCB/);
+    expect(system).toMatch(/20%/);
+  });
+
+  it("renormalises onto the requested ratio when the model's own picks miss it, and stamps a real BSC address on the crypto leg", async () => {
+    oneNvdaCatalog();
+    // The model ignores the ratio rule entirely (a real model can misbehave) and returns
+    // 100% stock; the pure post-check still gets the user close to what they asked for.
+    generateObjectSpy.mockResolvedValue(objectResult([{ symbol: "NVDA", weightPct: 100, reason: "why" }]));
+
+    const result = await buildAllocation(bsc, "80% stocks, 20% crypto", 100);
+
+    const crypto = result.allocations.find((a) => a.symbol === "BTCB");
+    const nvda = result.allocations.find((a) => a.symbol === "NVDA");
+    expect(crypto).toBeDefined();
+    expect(crypto!.weightPct).toBeCloseTo(20, 0);
+    expect(nvda!.weightPct).toBeCloseTo(80, 0);
+    // Crypto isn't in the RWA catalog, so its address must come from the chain's own asset
+    // registry, not the (empty, for BTCB) catalog venue lookup.
+    expect(crypto!.address?.toLowerCase()).toBe("0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c");
+    expect(crypto).not.toHaveProperty("venue"); // no issuer choice for a plain crypto asset
+  });
+
+  it("still clears the $6 floor after a ratio correction shrinks a leg", async () => {
+    oneNvdaCatalog();
+    generateObjectSpy.mockResolvedValue(objectResult([{ symbol: "NVDA", weightPct: 100, reason: "why" }]));
+
+    // At $20, a strict 80/20 split would put BTCB at $4 (under the floor); the plan must still
+    // come back with every leg clearing $6, even if that means the ratio drifts from the ask.
+    const result = await buildAllocation(bsc, "80% stocks, 20% crypto", 20);
+
+    for (const a of result.allocations) {
+      expect((a.weightPct / 100) * 20).toBeGreaterThanOrEqual(6 - 1e-6);
+    }
+  });
+});
+
 describe("buildAllocation on Base", () => {
   it("never touches the BSC catalog, and never stamps a venue/address", async () => {
     generateObjectSpy.mockResolvedValue(objectResult([{ symbol: "NVDA", weightPct: 100, reason: "why" }]));
