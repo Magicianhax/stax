@@ -19,6 +19,7 @@ import { useChain } from "@/lib/chains/active";
 import { fromUnits } from "@/lib/format";
 import { quoteAlongRoute, quoteSingleHop } from "@/lib/swapRouting";
 import { fetchSwapQuote, usesAggregator } from "@/lib/swapQuote";
+import { usdToRaw } from "@/lib/units";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 
 const AGGREGATOR_DEBOUNCE_MS = 400;
@@ -65,7 +66,10 @@ export function useQuote(asset: Asset | null, amountUsd: number) {
     refetchInterval: 15_000,
     queryFn: async (): Promise<Quote> => {
       const a = asset!;
-      const amountInRaw = BigInt(cents) * BigInt(10_000);
+      // Chain-aware: `10_000` * cents is only correct on 6-decimal USDC. BSC's cash is
+      // 18-decimal USDT, and usesAggregator() routes it through this same aggregator branch
+      // (see swapQuote.ts), so a hardcoded multiply under-quoted every BSC buy by 10^12x.
+      const amountInRaw = usdToRaw(chain, cents / 100);
       const route = chain.routes[a.symbol];
       let expectedOutRaw: bigint;
       let minOutRaw: bigint | undefined;
