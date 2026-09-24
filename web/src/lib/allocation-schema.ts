@@ -3,6 +3,13 @@ import { z } from "zod";
 /**
  * The typed allocation the AI agent must produce from a user's plain-language goal.
  * Used with the AI SDK's `generateObject` so the model is forced to return this shape.
+ *
+ * `venue`/`address` are BSC-only additions (Task 12): which issuer (bStock or Ondo) and which
+ * on-chain address a leg will actually buy — the RWA catalog's `bestVenue` pick, resolved by
+ * `buildAllocation` before the response goes out. Both are optional so Base/Mantle allocations
+ * (and anything built before this wave, e.g. a saved basket's `basketToAllocation`) stay valid
+ * without them; `/api/invest-plan` re-resolves the venue fresh from the catalog at invest time
+ * regardless, since a market can close between building the plan and signing it.
  */
 export const AllocationSchema = z.object({
   summary: z.string().describe("One short, friendly headline for the strategy (no jargon)."),
@@ -23,6 +30,11 @@ export const AllocationSchema = z.object({
         symbol: z.string().describe("Asset ticker — MUST be one of the provided available assets."),
         weightPct: z.number().min(0).max(100).describe("Percent of the total investment in this asset."),
         reason: z.string().describe("One short, jargon-free reason this asset fits the goal."),
+        venue: z.enum(["bstock", "ondo"]).optional().describe("BSC only: which issuer this leg will buy from."),
+        address: z
+          .string()
+          .optional()
+          .describe("BSC only: the on-chain address of that venue's token, for display."),
       }),
     )
     .min(1)

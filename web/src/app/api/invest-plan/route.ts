@@ -7,11 +7,18 @@ import { riskScoreFor } from "@/lib/baskets";
 import { buildLegs } from "@/lib/legBuilder";
 import { buildPlanId, recHash, signRiskInference } from "@/lib/eip712";
 import { netOf } from "@/lib/fees";
+import { usdToRaw } from "@/lib/units";
 import { chainFromRequest, serverClient } from "@/lib/server/chain";
 import { requireApproved } from "@/lib/server/admin";
 import { verifyRequest } from "@/lib/server/privyAuth";
 import { rateLimit } from "@/lib/server/rateLimit";
+import { getSmartAccount } from "@/lib/server/users";
+import { getBinanceWeb3 } from "@/lib/server/binance";
+import { bscCatalogSnapshot } from "@/lib/server/rwaCatalog";
+import { buildBscInvestCalls } from "@/lib/server/bscPlan";
+import { BinanceLegError, BinanceLegRefusal } from "@/lib/server/binanceLegs";
 import { unauthorized, badRequest, tooManyRequests, serverError, jsonError } from "@/lib/server/respond";
+import type { ExecCall } from "@/lib/execution";
 import type { InvestPlanResult } from "@/lib/invest-types";
 
 // Signs with the agent key + reads chain state — never cache.
@@ -45,7 +52,10 @@ export async function POST(req: NextRequest) {
 
   // Which chain the plan is for (x-stax-chain header / ?chain=; Base default).
   const chain = chainFromRequest(req);
-  if (!chain.contracts.deployed) {
+  // The executor isn't the only way to invest: BSC (ADR-0005) has no executor at all yet and
+  // goes through the direct smart-account path below instead. Any other undeployed chain
+  // (Base pre-deploy) still has nothing to fall back to.
+  if (!chain.contracts.deployed && !chain.routers.binance) {
     return jsonError(503, `Stax is not deployed on ${chain.name} yet`);
   }
 
@@ -58,7 +68,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { allocation, amountUsd } = body;
+    const { allocation, amountUsd, address } = body;
 
     // Baskets / shared links: every holding must be buyable on this chain. Name the
     // offenders (they're our own tickers, not user input echoed back).
@@ -69,17 +79,71 @@ export async function POST(req: NextRequest) {
       return badRequest(`Not buyable on ${chain.name} yet: ${[...new Set(notRoutable)].join(", ")}.`);
     }
 
-    // USDC is 6dp. Round to whole micro-USDC. The platform fee is skimmed by the
-    // client (a batched USDC transfer to the treasury), so we deploy the NET into
-    // assets — build the legs against the net so they sum correctly.
-    const grossTotal = BigInt(Math.round(amountUsd * 10 ** chain.usdc.decimals));
+    // Dollars -> raw cash units through units.ts, never a float times 10**decimals by hand —
+    // BSC's USDT is 18dp, and that used to be a 6dp-only formula (M-11 / Review Focus #2).
+    // The platform fee is skimmed by the client (a batched cash transfer to the treasury, zero
+    // on BSC — ADR-0007), so we deploy the NET into assets — legs are built against the net so
+    // they sum correctly and BSC deploys the full amount.
+    const grossTotal = usdToRaw(chain, amountUsd);
     if (grossTotal <= BigInt(0)) {
       return badRequest("Amount too small.");
     }
-    const usdcTotal = netOf(grossTotal);
+    const usdcTotal = netOf(grossTotal, chain.key);
 
-    // Clock read at request time (allowed here) — drives planId nonce + expiry.
-    const nowSeconds = Math.floor(Date.now() / 1000);
+    // Clock read at request time (allowed here) — drives planId nonce + expiry, and (BSC) the
+    // market-hours checks below.
+    const nowMs = Date.now();
+    const nowSeconds = Math.floor(nowMs / 1000);
+
+    if (!chain.contracts.deployed) {
+      // Direct smart-account path (ADR-0005): no executor to route through, so every leg is
+      // built straight against the Binance aggregator and returned as calls for the client to
+      // sign verbatim (assertExecCallsAreSafe checks every recipient client-side). The taker
+      // must be the caller's own registered smart account — there is no executor in between to
+      // hold funds, so signing for anyone else's account is never on the table.
+      const account = await getSmartAccount(user.userId, chain.key);
+      if (!account) {
+        return badRequest("No account found for this network. Please sign in again.");
+      }
+      if (account.address.toLowerCase() !== address.toLowerCase()) {
+        return jsonError(403, "Plan must be for your own account.");
+      }
+
+      let calls: ExecCall[];
+      try {
+        const [catalog, tokens] = await Promise.all([bscCatalogSnapshot(nowMs), getBinanceWeb3().rwaTokens()]);
+        calls = await buildBscInvestCalls({
+          chain,
+          allocation,
+          usdcTotal,
+          taker: account.address as `0x${string}`,
+          catalog: catalog.tickers,
+          tokens,
+          nowMs,
+        });
+      } catch (err) {
+        // Any leg failing fails the whole plan, naming that leg — never a partial batch.
+        if (err instanceof BinanceLegRefusal) return badRequest(err.message);
+        if (err instanceof BinanceLegError) {
+          console.error("[invest-plan]", err.message);
+          return jsonError(502, "The swap aggregator is unavailable right now. Please try again.");
+        }
+        throw err;
+      }
+
+      const result: InvestPlanResult = {
+        plan: { planId: buildPlanId(allocation, nowSeconds), recHash: recHash(allocation), riskScore: Math.round(allocation.riskScore), agentId: chain.contracts.agentId.toString() },
+        inference: { assessedRisk: 0, maxRisk: 0, expiry: "0", signature: "0x" },
+        legs: [],
+        usdcTotal: usdcTotal.toString(),
+        chain: chain.key,
+        executor: chain.contracts.executor,
+        explorer: chain.explorer.url,
+        notes: [],
+        calls,
+      };
+      return Response.json(result);
+    }
 
     // serverClient batches the per-leg pool reads into one multicall eth_call.
     const { legs, notes } = await buildLegs({

@@ -95,7 +95,7 @@ export async function runAutopilot(
 
   // 4. Build the plan exactly like /api/invest-plan (net deployed; fee skimmed).
   const grossTotal = usdToRaw(chain, working.amountUsd);
-  const usdcTotal = netOf(grossTotal);
+  const usdcTotal = netOf(grossTotal, chain.key);
   const feeRaw = grossTotal - usdcTotal;
 
   const { legs } = await buildLegs({ chain, allocation, usdcTotal, client, nowSeconds: now });

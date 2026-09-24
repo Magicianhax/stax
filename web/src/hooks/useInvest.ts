@@ -98,7 +98,10 @@ export function useInvest(): UseInvest {
         setPhase("idle");
         return result;
       }
-      if (!chain.contracts.deployed) {
+      // /api/allocate needs no executor — only the direct-path invest() below does. BSC
+      // (no executor at all yet, ADR-0005) still builds a plan; any other undeployed chain
+      // (Base pre-deploy) has nothing to invest into, so stop before spending an AI call.
+      if (!chain.contracts.deployed && !chain.routers.binance) {
         setError(notLiveMessage);
         setPhase("error");
         return null;

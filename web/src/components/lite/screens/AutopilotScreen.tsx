@@ -771,7 +771,8 @@ export function AutopilotScreen({
             </Reveal>
 
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 10, lineHeight: 1.5 }}>
-              Each run puts in {usd(amountNum)} ({usd(feeUsd(amountNum))} fee, no network cost) only if your balance covers it and{" "}
+              Each run puts in {usd(amountNum)} (
+              {chain.key === "bsc" ? "no fee" : `${usd(feeUsd(amountNum, chain.key))} fee`}, no network cost) only if your balance covers it and{" "}
               {basketMode ? "the basket’s risk" : "Vera’s risk"} stays at or under your ceiling. Capped at {usd(amountNum * 2)} per period.
             </div>
           </div>
