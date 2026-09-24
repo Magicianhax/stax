@@ -116,7 +116,7 @@ export function VenuePicker({ venues, bestVenue, onSelect, style }: VenuePickerP
                     </span>
                   )}
                 </div>
-                <MarketStatusBadge state={v.state} nextOpenMs={v.nextOpenMs} buyable={v.buyable} platform={v.platform} style={{ marginTop: 4 }} />
+                <MarketStatusBadge state={v.state} nextOpenMs={v.nextOpenMs} buyable={v.buyable} platform={v.platform} nested style={{ marginTop: 4 }} />
               </div>
               <div style={{ textAlign: "right", flex: "none" }}>
                 <div className="tnum" style={{ fontWeight: 600, fontSize: 14.5, color: "var(--ink)" }}>

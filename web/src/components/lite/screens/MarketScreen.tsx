@@ -187,7 +187,7 @@ export function MarketScreen({
               {held ? `Owned · ${tokenQty(held.raw, held.asset.decimals ?? 18)}` : sub}
             </span>
             {showVenueBadge && (
-              <MarketStatusBadge state={venue!.state} nextOpenMs={venue!.nextOpenMs} buyable={venue!.buyable} platform={venue!.platform} style={{ flex: "none" }} />
+              <MarketStatusBadge state={venue!.state} nextOpenMs={venue!.nextOpenMs} buyable={venue!.buyable} platform={venue!.platform} nested style={{ flex: "none" }} />
             )}
           </div>
           {/* on-chain vs reference gap — BSC only, replaces a day-change figure there is no live

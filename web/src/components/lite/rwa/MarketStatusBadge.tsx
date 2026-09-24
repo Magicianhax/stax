@@ -6,8 +6,16 @@
 // the old copy leaked trader terms like "Pre-market" and "Overnight" straight to the screen),
 // and `formatOpensLocal` inside it is the one place any next-open instant becomes a clock face,
 // so this never disagrees with the Trade screen's closed line or the server's refusal about what
-// time it is. A real 44px `<button>` (not just a chip) so it can open the explainer sheet below,
-// same idiom as `MarketStatus`'s NYSE pill on Base/Mantle.
+// time it is.
+//
+// A real 44px `<button>` opening the explainer sheet below, same idiom as `MarketStatus`'s NYSE
+// pill on Base/Mantle — but ONLY when it's the row's own tap target. VenuePicker's and Market's
+// rows are themselves a `<button>` (picking the venue / opening the asset), and a `<button>`
+// nested inside a `<button>` is invalid HTML: the browser silently drops the outer handler on
+// some inputs, screen readers can't tell the two apart, and a tap meant for the badge also
+// "picks" the row underneath it. `nested` (set by those two callers) renders the plain chip with
+// no wrapper and no sheet; the sheet stays reachable from AssetDetail's standalone badge, which
+// isn't inside another button.
 import { useState, type CSSProperties } from "react";
 import type { RwaPlatform } from "@/lib/chains";
 import type { MarketState } from "@/lib/rwa";
@@ -26,14 +34,61 @@ export interface MarketStatusBadgeProps {
   buyable?: boolean;
   /** Names the issuer on a pause ("Paused by Ondo for now") instead of an anonymous "the market". */
   platform?: RwaPlatform;
+  /** True inside a row that is already a `<button>` (VenuePicker, Market's list row): renders the
+   *  plain chip, no tap target of its own and no sheet, so two interactive controls never nest. */
+  nested?: boolean;
   style?: CSSProperties;
 }
 
-export function MarketStatusBadge({ state, nextOpenMs, buyable, platform, style }: MarketStatusBadgeProps) {
+function Chip({ text, live, style }: { text: string; live: boolean; style?: CSSProperties }) {
+  return (
+    <span
+      className="chip"
+      style={{
+        // minHeight (not a fixed height) + normal wrapping + flex-start: the plain-words states
+        // ("Paused by Ondo for now", "Closed · opens Mon 6:30 PM your time") run longer than the
+        // old one-word "Paused"/"Closed", and a nowrap pill just overflowed its column and
+        // overlapped whatever sat beside it (caught in the wave-5 UX preview screenshot) — this
+        // wraps onto a second line inside whatever width the caller gives it instead.
+        minHeight: 22,
+        padding: "3px 9px",
+        gap: 6,
+        fontSize: 11.5,
+        fontWeight: 600,
+        lineHeight: 1.3,
+        color: "var(--ink-2)",
+        boxShadow: "none",
+        background: "var(--surface-2)",
+        whiteSpace: "normal",
+        alignItems: "flex-start",
+        maxWidth: "100%",
+        ...style,
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          width: 6,
+          height: 6,
+          marginTop: 4,
+          borderRadius: "50%",
+          flex: "none",
+          background: live ? "var(--pos)" : "var(--ink-3)",
+          boxShadow: live ? "0 0 0 3px color-mix(in srgb, var(--pos) 22%, transparent)" : "none",
+        }}
+      />
+      {text}
+    </span>
+  );
+}
+
+export function MarketStatusBadge({ state, nextOpenMs, buyable, platform, nested, style }: MarketStatusBadgeProps) {
   const [open, setOpen] = useState(false);
   const live = buyable ?? state === "open";
   const platformLabel = platform ? PLATFORM_LABEL[platform] : undefined;
   const text = stateLabel({ state, buyable: live, nextOpenMs, platformLabel });
+
+  if (nested) return <Chip text={text} live={live} style={style} />;
 
   return (
     <>
@@ -58,34 +113,7 @@ export function MarketStatusBadge({ state, nextOpenMs, buyable, platform, style 
           maxWidth: "100%",
         }}
       >
-        <span
-          className="chip"
-          style={{
-            height: 22,
-            padding: "0 9px",
-            gap: 6,
-            fontSize: 11.5,
-            fontWeight: 600,
-            color: "var(--ink-2)",
-            boxShadow: "none",
-            background: "var(--surface-2)",
-            whiteSpace: "nowrap",
-            ...style,
-          }}
-        >
-          <span
-            aria-hidden
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: "50%",
-              flex: "none",
-              background: live ? "var(--pos)" : "var(--ink-3)",
-              boxShadow: live ? "0 0 0 3px color-mix(in srgb, var(--pos) 22%, transparent)" : "none",
-            }}
-          />
-          {text}
-        </span>
+        <Chip text={text} live={live} style={style} />
       </button>
 
       <BottomSheet open={open} onClose={() => setOpen(false)} title="Market hours">
