@@ -17,9 +17,13 @@ import { useAssetPrice } from "@/hooks/usePrices";
 import { useMarketHistory, type MarketRange } from "@/hooks/useMarket";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { useBaskets } from "@/hooks/useBaskets";
+import { useRwaTicker, primaryVenue, useBscBuyGate } from "@/hooks/useRwa";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { displayFor } from "@/lib/displayAssets";
 import { Icon, AssetTile, PriceChart, SectionTitle, Stat, MarketStatus, type PricePoint } from "@/components/design";
+import { MarketStatusBadge } from "@/components/lite/rwa/MarketStatusBadge";
+import { PriceGap } from "@/components/lite/rwa/PriceGap";
+import { VenuePicker } from "@/components/lite/rwa/VenuePicker";
 import { Money, Reveal, Tick, useFlashRow } from "@/components/motion";
 import { usd, tokenQty, timeAgo } from "@/lib/format";
 import { priceSeries } from "@/lib/demoSeries";
@@ -89,6 +93,21 @@ export function AssetDetailScreen({
   const coinbaseStock = stock && chain.key === "base";
   const yieldText = safe ? yieldLine(liveApy, d.apy) : undefined;
   const coming = Boolean(asset.coming || d.coming);
+  // BSC: each stock is issued by bStock and/or Ondo, and either can be paused or off-hours
+  // independent of the plain "coming soon" gate above. `rwaTicker` is undefined off BSC,
+  // before Task 9's catalog API exists, or while it's still loading — the buy button only
+  // reacts to a real answer, never to the absence of one.
+  const bsc = chain.key === "bsc";
+  const rwaTicker = useRwaTicker(asset.symbol);
+  const venue = rwaTicker ? primaryVenue(rwaTicker) : undefined;
+  // The buy gate has to agree with what a manual buy actually does: `go("trade", { symbol })`
+  // resolves straight to `asset.address` (the default venue), never to `rwaTicker.bestVenue` —
+  // so a paused default with a buyable twin must still block Buy, and the gate must fail closed
+  // (not open) before the catalog has answered at all. bscBuyGate in useRwa.ts is the single
+  // tested rule; this screen just reads its verdict.
+  const bscGate = useBscBuyGate(asset.symbol, asset.address);
+  const buyVenue = bscGate.status === "ready" ? bscGate.venue : undefined;
+  const bscBuyable = bsc ? bscGate.status === "ready" && bscGate.buyable : undefined;
   const [r, setR] = useState(2);
   const range = RANGES[r] as MarketRange;
   const [hover, setHover] = useState<(PricePoint & { index: number }) | null>(null);
@@ -172,9 +191,33 @@ export function AssetDetailScreen({
     ...(stock ? [{ k: "Issued by", v: chain.issuer.replace(" tokenized stocks", "") }] : []),
     { k: "Network", v: chain.name },
   ];
+  // BSC: the earliest next open among this ticker's venues, for "Market closed · opens …".
+  // Undefined when every venue that's off gives no next-open time (e.g. a plain pause).
+  const bscOpensAt =
+    bscBuyable === false
+      ? rwaTicker?.venues
+          .map((v) => v.nextOpenMs)
+          .filter((t): t is number => t !== null)
+          .sort((a, b) => a - b)[0]
+      : undefined;
+  const bscOpensLabel =
+    bscOpensAt !== undefined
+      ? new Date(bscOpensAt).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })
+      : undefined;
+  // "Checking…" and "unavailable" are distinct from a confirmed closed market: a quick tap
+  // before the catalog loads, or a `/api/rwa` error, must never read as an open invitation, but
+  // it also shouldn't claim a close nobody confirmed.
   const reason = coming
     ? `Not buyable on ${chain.name} yet: there’s no liquid market for it. We’ll switch it on as soon as there is.`
-    : undefined;
+    : bsc && bscGate.status === "loading"
+      ? "Checking market…"
+      : bsc && bscGate.status === "unavailable"
+        ? "Market status unavailable"
+        : bscBuyable === false
+          ? bscOpensLabel
+            ? `Market closed · opens ${bscOpensLabel}`
+            : "Market closed right now — check back shortly."
+          : undefined;
 
   return (
     <div className="screen screen-pad-top" style={{ paddingBottom: 0 }}>
@@ -225,10 +268,21 @@ export function AssetDetailScreen({
             </span>
           </div>
         )}
-        {/* stock-market clock — only stocks have a market that closes */}
+        {/* stock-market clock — only stocks have a market that closes. BSC leads with the
+            venue's own state (a bStock pause isn't the same event as the NYSE closing) plus
+            the on-chain-vs-reference gap; the generic NYSE calendar is the honest fallback
+            while the catalog hasn't loaded (its "reference price only moves in market hours"
+            fact is exactly what a bStock row falls back to — docs/BINANCE-WEB3.md §2). */}
         {stock && (
           <div style={{ marginTop: 14 }}>
-            <MarketStatus detail />
+            {bsc && rwaTicker ? (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 7 }}>
+                {venue && <MarketStatusBadge state={venue.state} nextOpenMs={venue.nextOpenMs} />}
+                <PriceGap ticker={asset.symbol} venues={rwaTicker.venues} />
+              </div>
+            ) : (
+              <MarketStatus detail />
+            )}
           </div>
         )}
       </div>
@@ -252,6 +306,19 @@ export function AssetDetailScreen({
           />
         </div>
       </div>
+
+      {/* venues — BSC only: bStock and Ondo both mint this ticker, at their own prices
+          and their own trading state, so the choice is shown rather than picked silently */}
+      {bsc && rwaTicker && rwaTicker.venues.length > 0 && (
+        <div style={{ padding: "18px 22px 0" }}>
+          <SectionTitle>Venues</SectionTitle>
+          {/* No `onSelect`: a manual buy always resolves to `asset.address` regardless of which
+              row is highlighted (Task 12 wires a real choice into the trade), so the picker
+              stays display-only and highlights the venue Buy will actually use, not whichever
+              is priced closest to the reference. */}
+          <VenuePicker venues={rwaTicker.venues} bestVenue={buyVenue?.platform ?? rwaTicker.bestVenue} />
+        </div>
+      )}
 
       {/* your position — value is shares × the price shown above, always;
           avg cost + gain from the lots when we know them */}
@@ -447,10 +514,18 @@ export function AssetDetailScreen({
           <button
             className="btn btn-primary tap"
             style={{ flex: 2 }}
-            disabled={coming}
+            disabled={coming || bscBuyable === false}
             onClick={() => go("trade", { symbol: asset.symbol, side: "buy" })}
           >
-            {coming ? "Coming soon" : "Buy"}
+            {coming
+              ? "Coming soon"
+              : bsc && bscGate.status === "loading"
+                ? "Checking market…"
+                : bsc && bscGate.status === "unavailable"
+                  ? "Market status unavailable"
+                  : bscBuyable === false
+                    ? "Market closed"
+                    : "Buy"}
           </button>
         </div>
       </div>

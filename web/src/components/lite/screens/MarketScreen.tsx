@@ -16,7 +16,10 @@ import { usePrices } from "@/hooks/usePrices";
 import { useMarketSummary } from "@/hooks/useMarket";
 import { usePortfolio } from "@/hooks/useBalances";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
+import { useRwa, primaryVenue } from "@/hooks/useRwa";
 import { Icon, AssetTile, Sparkline, SectionTitle, MarketStatus } from "@/components/design";
+import { MarketStatusBadge } from "@/components/lite/rwa/MarketStatusBadge";
+import { PriceGap } from "@/components/lite/rwa/PriceGap";
 import { Reveal } from "@/components/motion";
 import { usd, tokenQty } from "@/lib/format";
 
@@ -58,6 +61,11 @@ export function MarketScreen({
   const { address } = useSmartAccount();
   const { data: port } = usePortfolio(address ?? undefined);
   const owned = useMemo(() => new Map((port?.holdings ?? []).map((h) => [h.asset.symbol, h])), [port]);
+  // BSC only: each row's on-chain price sits next to its issuer, so the venue's own state and
+  // its gap vs the real share replace the day-change sparkline other chains show (BSC has no
+  // live intraday history source yet, and a demo sparkline would be a lie about a real venue).
+  const { data: rwa } = useRwa();
+  const rwaByTicker = useMemo(() => new Map((rwa?.tickers ?? []).map((t) => [t.ticker, t])), [rwa]);
 
   // Every asset on this chain with its display record; "coming" ones sink to the
   // bottom of their group (stable sort keeps the registry order otherwise).
@@ -95,6 +103,11 @@ export function MarketScreen({
     const safe = asset.tier === "safe";
     const sub = safe ? yieldLine(p?.apy, d.apy, true) ?? (d.ticker ?? asset.symbol) : (d.ticker ?? asset.symbol);
     const held = owned.get(asset.symbol);
+    // BSC: the venue's own open/paused state and its gap vs the real share, not a day-change
+    // figure BSC has no live source for yet.
+    const bsc = chain.key === "bsc";
+    const rwaTicker = bsc ? rwaByTicker.get(asset.symbol) : undefined;
+    const venue = rwaTicker ? primaryVenue(rwaTicker) : undefined;
     return (
       <button
         key={asset.symbol}
@@ -133,28 +146,40 @@ export function MarketScreen({
             {coming && <ComingTag />}
           </div>
           {/* owned rows swap the ticker line for a quiet "Owned · qty" tag — the
-              name keeps its room; the ticker sits after the quantity */}
-          <div
-            className={safe || held ? "tnum" : "mono"}
-            style={{
-              fontSize: safe || held ? 12.5 : 12,
-              color: held ? "var(--primary)" : "var(--ink-2)",
-              fontWeight: held ? 600 : undefined,
-              marginTop: 1,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {held ? `Owned · ${tokenQty(held.raw, held.asset.decimals ?? 18)}` : sub}
+              name keeps its room; the ticker sits after the quantity. BSC also
+              gets the venue's live state beside it (bStock/Ondo can differ). */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+            <span
+              className={safe || held ? "tnum" : "mono"}
+              style={{
+                fontSize: safe || held ? 12.5 : 12,
+                color: held ? "var(--primary)" : "var(--ink-2)",
+                fontWeight: held ? 600 : undefined,
+                marginTop: 1,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                minWidth: 0,
+              }}
+            >
+              {held ? `Owned · ${tokenQty(held.raw, held.asset.decimals ?? 18)}` : sub}
+            </span>
+            {venue && !held && <MarketStatusBadge state={venue.state} nextOpenMs={venue.nextOpenMs} style={{ flex: "none" }} />}
           </div>
+          {/* on-chain vs reference gap — BSC only, replaces a day-change figure
+              there is no live source for yet */}
+          {rwaTicker && !held && (
+            <div style={{ marginTop: 3 }}>
+              <PriceGap ticker={asset.symbol} venues={rwaTicker.venues} style={{ fontSize: 11 }} />
+            </div>
+          )}
         </div>
-        {!coming && !safe && <Sparkline data={spark} color={up ? "var(--pos)" : "var(--neg)"} />}
+        {!coming && !safe && !bsc && <Sparkline data={spark} color={up ? "var(--pos)" : "var(--neg)"} />}
         <div style={{ textAlign: "right", minWidth: 70 }}>
           <div className="tnum" style={{ fontWeight: 600, fontSize: 15.5, color: coming ? "var(--ink-2)" : "var(--ink)" }}>
             {shownPrice !== undefined ? usd(shownPrice) : "—"}
           </div>
-          {!coming && !safe && (
+          {!coming && !safe && !bsc && (
             <div
               className="tnum"
               style={{ fontSize: 12.5, fontWeight: 600, color: up ? "var(--pos)" : "var(--neg)" }}
