@@ -18,6 +18,9 @@ import { useMarketHistory, type MarketRange } from "@/hooks/useMarket";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { useBaskets } from "@/hooks/useBaskets";
 import { useRwa, useBscBuyGate } from "@/hooks/useRwa";
+import { useSpreadHistory } from "@/hooks/useSpread";
+import { PriceVsRealShare } from "@/components/lite/spread/PriceVsRealShare";
+import { historyStatus } from "@/lib/priceHistoryStatus";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { displayFor } from "@/lib/displayAssets";
 import { pickHolding, resolveVenueAddress } from "@/lib/venues";
@@ -134,6 +137,12 @@ export function AssetDetailScreen({
   // The gate still fails closed (not open) before the catalog has answered at all — bscBuyGate in
   // useRwa.ts is the single tested rule; this screen just reads its verdict for the chosen venue.
   const bscGate = useBscBuyGate(asset.symbol, chosenAddress);
+  // Price vs the real share, for the chosen issuer only — mounted under "Who you buy from" below.
+  // Crypto (no `platform`) never queries this: there's no issuer, no reference price to compare.
+  const { data: spreadHistory } = useSpreadHistory(bsc && asset.platform ? asset.symbol : undefined);
+  const chosenHistoryPoints = chosenVenue
+    ? (spreadHistory?.venues.find((v) => v.platform === chosenVenue)?.points ?? [])
+    : [];
   const bscBuyable = bsc ? bscGate.status === "ready" && bscGate.buyable : undefined;
   const [r, setR] = useState(2);
   const range = RANGES[r] as MarketRange;
@@ -379,6 +388,17 @@ export function AssetDetailScreen({
               falls back to the catalog's bestVenue until the viewer taps something else, or if
               their pick stops trading mid-visit. */}
           <VenuePicker venues={rwaTicker.venues} bestVenue={defaultVenue ?? null} onSelect={setPickedVenue} />
+          {/* Price vs the real share, for whichever issuer is chosen above — one line chart, or
+              a plain sentence when there's nothing to draw yet (never an empty chart shell). */}
+          {historyStatus(chosenHistoryPoints.length) === "empty" ? (
+            <p style={{ margin: "12px 2px 0", fontSize: 12.5, lineHeight: 1.5, color: "var(--ink-3)" }}>
+              We start recording this stock&apos;s price history the first time someone looks at it.
+            </p>
+          ) : (
+            <div style={{ marginTop: 12 }}>
+              <PriceVsRealShare ticker={asset.symbol} points={chosenHistoryPoints} />
+            </div>
+          )}
         </div>
       )}
 

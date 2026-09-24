@@ -22,6 +22,8 @@ import { toTile, catFor } from "@/lib/displayAssets";
 import { usd } from "@/lib/format";
 import { assetBySymbol } from "@/lib/chains";
 import { STAX_FEE_LABEL, feeUsd } from "@/lib/fees";
+import { planDryRunView } from "@/lib/planDryRuns";
+import type { DryRun } from "@/lib/dryRun";
 import type { AllocateResult } from "@/lib/invest-types";
 import { iconBtn, Spinner, ThinkingDots, YieldTag } from "./primitives";
 import { useChainReady } from "../useChainReady";
@@ -56,6 +58,7 @@ export function PlanScreen({
   onInvest,
   basket,
   goal,
+  dryRuns,
 }: {
   go: (screen: string, params?: Record<string, unknown>) => void;
   allocation: AllocateResult;
@@ -69,9 +72,19 @@ export function PlanScreen({
   basket?: Basket;
   /** The goal that produced this plan (kept on a saved basket as its origin). */
   goal?: string;
+  /**
+   * One Binance Transaction API dry run per leg, same order as `allocation.allocations`
+   * (InvestPlanResult.dryRuns — wave-5 "dryrun" stream). Not wired end to end yet: useInvest.ts
+   * only learns these inside `invest()`, right as the hold-to-confirm fires, and doesn't expose
+   * them on its returned object for a screen to read beforehand — see wiringNeeded in the wave
+   * report for the smallest edit that would. Undefined here renders exactly what this screen
+   * already did.
+   */
+  dryRuns?: DryRun[];
 }) {
   const risk = riskMeta(allocation.riskScore);
   const { chain, investable } = useChainReady();
+  const dryRunView = planDryRunView(allocation.allocations, dryRuns, (s) => assetBySymbol(chain, s)?.decimals ?? 18);
   const { save } = useBaskets();
   const { notify } = useToast();
   const [saveOpen, setSaveOpen] = useState(false);
@@ -200,6 +213,7 @@ export function PlanScreen({
         {allocation.allocations.map((a) => {
           const tile = toTile(a.symbol);
           const dollars = (amount * a.weightPct) / 100;
+          const check = dryRunView.legs.find((l) => l.symbol === a.symbol);
           return (
             <div key={a.symbol} className="card" style={{ padding: "14px 16px", marginBottom: 10 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
@@ -236,6 +250,22 @@ export function PlanScreen({
                 <Icon name="info" size={15} style={{ flex: "none", marginTop: 1, color: "var(--accent)" }} />
                 {a.reason}
               </div>
+              {/* Binance's own pre-trade check on this leg, in plain words — never claims a
+                  check that didn't run (design decision in lib/plainCopy.ts's dryRunLine, matched
+                  here for the "not checked yet" case that screen deliberately stays silent on). */}
+              {check && (
+                <div
+                  style={{
+                    fontSize: 12.5,
+                    color: check.status === "failed" ? "var(--neg)" : "var(--ink-3)",
+                    fontWeight: check.status === "failed" ? 600 : 500,
+                    marginTop: 6,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {check.text}
+                </div>
+              )}
             </div>
           );
         })}
@@ -338,7 +368,7 @@ export function PlanScreen({
             </span>
           </button>
         ) : (
-          <HoldButton onComplete={onInvest} disabled={rethinking || busy || !investable} className="btn-lg">
+          <HoldButton onComplete={onInvest} disabled={rethinking || busy || !investable || dryRunView.blocked} className="btn-lg">
             {`Hold to invest ${usd(amount)}`}
           </HoldButton>
         )}

@@ -221,6 +221,12 @@ export function MarketScreen({
               <PriceGap venue={venue} style={{ fontSize: 12.5 }} />
             </div>
           )}
+          {/* Crypto isn't in the RWA catalog (no issuer, no closed market) — a plain "trades any
+              time" line replaces the gap/badge row above so a crypto row never reads as blank
+              next to a stock row that has one. */}
+          {bsc && asset.tier === "crypto" && (
+            <div style={{ marginTop: 3, fontSize: 12.5, fontWeight: 600, color: "var(--ink-3)" }}>Trades any time</div>
+          )}
         </div>
         {!coming && !safe && !bsc && <Sparkline data={spark} color={up ? "var(--pos)" : "var(--neg)"} />}
         <div style={{ textAlign: "right", minWidth: 70 }}>
@@ -283,6 +289,49 @@ export function MarketScreen({
           </span>
         </button>
       </div>
+
+      {/* "Which is cheaper?" entry — BSC only: some stocks here have two versions (bStock and
+          Ondo). A dedicated card, not a category chip, because it's a comparison across the
+          whole list, not a filter of it. */}
+      {chain.key === "bsc" && (
+        <div style={{ padding: "14px 22px 0" }}>
+          <button
+            type="button"
+            className="card tap"
+            onClick={() => go("issuers")}
+            style={{
+              width: "100%",
+              textAlign: "left",
+              padding: "14px 16px",
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              background: "none",
+              border: 0,
+            }}
+          >
+            <span
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 11,
+                flex: "none",
+                display: "grid",
+                placeItems: "center",
+                background: "var(--surface-2)",
+                color: "var(--accent)",
+              }}
+            >
+              <Icon name="trend" size={19} stroke={2} />
+            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: 15, letterSpacing: "-.01em" }}>Same stock, two prices</div>
+              <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 1 }}>See which is cheaper right now</div>
+            </div>
+            <Icon name="chevR" size={18} style={{ color: "var(--ink-3)", flex: "none" }} />
+          </button>
+        </div>
+      )}
 
       {/* search */}
       <div style={{ padding: "14px 22px 0" }}>

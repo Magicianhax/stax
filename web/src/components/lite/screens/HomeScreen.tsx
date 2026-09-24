@@ -11,7 +11,7 @@
 // Note on P&L: we don't track cost basis on-chain, so the only gain shown is
 // today's move (real 1D market data per holding), never an invented "all time".
 import { holdingKey } from "@/lib/venues";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePortfolio, type Holding } from "@/hooks/useBalances";
 import { useActivity } from "@/hooks/useActivity";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
@@ -21,6 +21,7 @@ import { Money, Reveal } from "@/components/motion";
 import { toTile, catFor } from "@/lib/displayAssets";
 import { PLATFORM_LABEL } from "@/components/lite/rwa/VenuePicker";
 import { usd, tokenQty } from "@/lib/format";
+import { todayMarketLine } from "@/lib/homeToday";
 import { portfolioSeries } from "@/lib/demoSeries";
 import { iconBtn } from "./primitives";
 import { useChainReady } from "../useChainReady";
@@ -32,6 +33,20 @@ import type { LoopParams } from "../LiteApp";
 const DOTS = "••••••";
 const TOP_HOLDINGS = 4;
 const RECENT = 3;
+const TODAY_LINE_TICK_MS = 60_000;
+
+/** Home's "Today" line, on a slow tick. Null until mounted (same hydration-safe idiom
+ *  MarketScreen's `useBscMarketClock` uses) so the server and first client paint agree. */
+function useTodayLine(): string | null {
+  const [line, setLine] = useState<string | null>(null);
+  useEffect(() => {
+    const tick = () => setLine(todayMarketLine(Date.now()));
+    tick();
+    const id = setInterval(tick, TODAY_LINE_TICK_MS);
+    return () => clearInterval(id);
+  }, []);
+  return line;
+}
 
 function dayLabel(unixSec?: number): string | undefined {
   if (!unixSec) return undefined;
@@ -93,6 +108,7 @@ export function HomeScreen({
 
   const today = todayChange(holdings, total);
   const up = (today?.abs ?? 0) >= 0;
+  const todayLine = useTodayLine();
   // Demo: the deterministic portfolio series (stable screenshots). Real: the
   // holdings' 1D sparklines, blended by value.
   const spark = demo ? portfolioSeries("1D", total).map((p) => p.v) : todaySpark(holdings, balance);
@@ -237,6 +253,12 @@ export function HomeScreen({
               )}
             </button>
           </div>
+          {/* BSC: a single, simple line under the balance — is the US market (the reference
+              every tokenized stock here tracks) open right now. Off BSC there's no such
+              reference to speak of. */}
+          {chain.key === "bsc" && todayLine && (
+            <div style={{ padding: "10px 0 0", fontSize: 13, fontWeight: 600, color: "var(--ink-2)" }}>{todayLine}</div>
+          )}
         </div>
 
         {/* balance split row */}
