@@ -16,6 +16,7 @@ const bscCatalogSnapshotSpy = vi.fn();
 vi.mock("./rwaCatalog", () => ({ bscCatalogSnapshot: (...args: unknown[]) => bscCatalogSnapshotSpy(...args) }));
 
 import { buildAllocation } from "./allocate";
+import { AllocationRefusal } from "./bscPlan";
 import { getChain } from "@/lib/chains";
 import type { RwaTickerView, VenueView } from "@/lib/rwa";
 
@@ -100,6 +101,9 @@ describe("buildAllocation on BSC", () => {
     });
 
     await expect(buildAllocation(bsc, "grow it", 100)).rejects.toThrow(/closed/i);
+    // Typed, not a plain Error, so /api/allocate can map it to a 4xx instead of a
+    // generic 500 (Review Focus #1) — see the "problems" this fixed for the wording.
+    await expect(buildAllocation(bsc, "grow it", 100)).rejects.toBeInstanceOf(AllocationRefusal);
     expect(generateObjectSpy).not.toHaveBeenCalled();
   });
 
@@ -107,6 +111,7 @@ describe("buildAllocation on BSC", () => {
     bscCatalogSnapshotSpy.mockResolvedValue({ asOf: NOW, tickers: [ticker()] });
 
     await expect(buildAllocation(bsc, "grow it", 5)).rejects.toThrow(/\$6/);
+    await expect(buildAllocation(bsc, "grow it", 5)).rejects.toBeInstanceOf(AllocationRefusal);
     expect(generateObjectSpy).not.toHaveBeenCalled();
   });
 
@@ -135,7 +140,9 @@ describe("buildAllocation on BSC", () => {
     }
   });
 
-  it("refuses, naming $6, when the model's own weights leave a leg under the floor even after capping", async () => {
+  it("shrinks a heavily skewed model plan to the legs that clear $6, instead of refusing outright", async () => {
+    // 97/3 at $20 leaves MSFT at $0.60 even after the count-cap renormalisation; a valid
+    // 1-leg plan (NVDA at the full $20) exists, so that's what comes back (Review Focus #3).
     bscCatalogSnapshotSpy.mockResolvedValue({
       asOf: NOW,
       tickers: [
@@ -150,7 +157,8 @@ describe("buildAllocation on BSC", () => {
       ]),
     );
 
-    await expect(buildAllocation(bsc, "grow it", 20)).rejects.toThrow(/\$6/);
+    const result = await buildAllocation(bsc, "grow it", 20);
+    expect(result.allocations).toEqual([expect.objectContaining({ symbol: "NVDA", weightPct: 100 })]);
   });
 
   it("stamps each surviving leg with the venue and address the catalog currently picks", async () => {

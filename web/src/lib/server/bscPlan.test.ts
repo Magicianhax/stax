@@ -160,13 +160,40 @@ describe("enforceMinLegs", () => {
     if (!result.ok) expect(result.message).toMatch(/\$6/);
   });
 
-  it("refuses when a heavily skewed weighting leaves a kept leg under $6 even after renormalising", () => {
-    // 2 legs fit ($20/6=3, so both survive), but a 97/3 split still leaves one leg at $0.60.
+  it("drops a leg that's still under $6 after renormalising, rather than refusing a plan a smaller one would fix", () => {
+    // 2 legs fit ($20/6=3, so both survive the count cap), but a 97/3 split leaves MSFT at
+    // $0.60. A valid 1-leg plan (NVDA at the full $20) exists, so that's what comes back —
+    // refusing outright would throw away a plan the user could actually invest.
     const legs = [
       { symbol: "NVDA", usd: 19.4 },
       { symbol: "MSFT", usd: 0.6 },
     ];
     const result = enforceMinLegs(legs, 20);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.legs).toEqual([{ symbol: "NVDA", usd: 20 }]);
+    }
+  });
+
+  it("drops down through more than one round when the count cap alone still leaves a leg under $6", () => {
+    // All 3 legs fit the count cap ($20/6=3), but a 90/8/2 split leaves the smallest two under
+    // $6 even after one renormalisation — it takes two drops to reach a valid plan.
+    const legs = [
+      { symbol: "NVDA", usd: 18 },
+      { symbol: "MSFT", usd: 1.6 },
+      { symbol: "GOOGL", usd: 0.4 },
+    ];
+    const result = enforceMinLegs(legs, 20);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.legs).toHaveLength(1);
+      expect(result.legs[0]).toMatchObject({ symbol: "NVDA", usd: 20 });
+    }
+  });
+
+  it("refuses only when not even the single largest leg can clear $6", () => {
+    // $5 total can't fund one $6 leg no matter how much gets dropped.
+    const result = enforceMinLegs([{ symbol: "NVDA", usd: 4 }, { symbol: "MSFT", usd: 1 }], 5);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.message).toMatch(/\$6/);
   });

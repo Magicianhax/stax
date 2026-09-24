@@ -72,11 +72,23 @@ export interface BscCandidateLeg {
 export type EnforceMinLegsResult<T> = { ok: true; legs: T[] } | { ok: false; message: string };
 
 /**
+ * A refusal Vera's own BSC planning rules make (market closed, or the amount can't clear the
+ * $6-per-leg floor) rather than an unexpected fault — the message is written for the user.
+ * `/api/allocate` and `/api/invest-plan` map this to a 4xx instead of the generic serverError
+ * 500 (Review Focus #1/#3); anything else thrown out of `buildAllocation` is a real fault and
+ * still goes through serverError.
+ */
+export class AllocationRefusal extends Error {}
+
+/**
  * The $6-per-leg rule (Global Constraint, Review Focus #3), enforced on whatever a caller hands
- * in: drop the smallest legs down to `maxBscLegs(totalUsd)`, renormalise the survivors' `usd` so
- * they still sum to `totalUsd`, and refuse outright — naming the minimum — if even the smallest
- * surviving leg still can't clear it. Generic over `T` so both the AI's raw allocation legs and
- * the invest-plan's resolved (symbol, address, usd) legs can share this one rule.
+ * in: drop the smallest legs down to `maxBscLegs(totalUsd)`, then keep dropping the smallest
+ * survivor and renormalising while it's still under $6 and more than one leg remains — a
+ * heavily skewed weighting (e.g. 97/3) should shrink to a smaller plan that clears the floor,
+ * not refuse a plan outright when a smaller one was available. Refuses — naming the minimum —
+ * only when not even a single leg (the whole amount) can clear it. Generic over `T` so both the
+ * AI's raw allocation legs and the invest-plan's resolved (symbol, address, usd) legs can share
+ * this one rule.
  */
 export function enforceMinLegs<T extends BscCandidateLeg>(legs: T[], totalUsd: number): EnforceMinLegsResult<T> {
   const cap = maxBscLegs(totalUsd);
@@ -86,17 +98,26 @@ export function enforceMinLegs<T extends BscCandidateLeg>(legs: T[], totalUsd: n
   if (legs.length === 0) {
     return { ok: false, message: `No stocks are buyable right now to build a plan from.` };
   }
-  // Largest first, so the legs kept under the cap are the ones the AI weighted most.
-  const kept = [...legs].sort((a, b) => b.usd - a.usd).slice(0, cap);
-  const keptTotal = kept.reduce((s, l) => s + l.usd, 0);
-  if (keptTotal <= 0) {
-    return { ok: false, message: `Each stock needs at least $${BSC_MIN_LEG_USD}; try a larger amount.` };
+  // Largest first, so the legs kept under the cap (and dropped from, below) are the ones the
+  // AI weighted least.
+  let kept = [...legs].sort((a, b) => b.usd - a.usd).slice(0, cap);
+  let renormalised: T[];
+  for (;;) {
+    const keptTotal = kept.reduce((s, l) => s + l.usd, 0);
+    if (keptTotal <= 0) {
+      return { ok: false, message: `Each stock needs at least $${BSC_MIN_LEG_USD}; try a larger amount.` };
+    }
+    // Renormalise onto the exact total so the legs still add up to what the user is investing,
+    // not to whatever the kept legs happened to sum to before a drop.
+    renormalised = kept.map((l) => ({ ...l, usd: (l.usd / keptTotal) * totalUsd }));
+    const smallest = renormalised[renormalised.length - 1]; // kept stays sorted descending
+    if (smallest.usd >= BSC_MIN_LEG_USD - 1e-9 || kept.length === 1) break;
+    kept = kept.slice(0, -1);
   }
-  // Renormalise onto the exact total so the legs still add up to what the user is investing,
-  // not to whatever the kept legs happened to sum to before the drop.
-  const renormalised = kept.map((l) => ({ ...l, usd: (l.usd / keptTotal) * totalUsd }));
   const smallest = Math.min(...renormalised.map((l) => l.usd));
   if (smallest < BSC_MIN_LEG_USD - 1e-9) {
+    // Only reachable when kept.length === 1, i.e. the full amount itself can't clear $6 — but
+    // that already returns above via the cap === 0 check, so this is a last-resort guard.
     return {
       ok: false,
       message: `Each stock needs at least $${BSC_MIN_LEG_USD}; try a larger amount or fewer picks.`,

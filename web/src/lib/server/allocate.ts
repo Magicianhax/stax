@@ -17,9 +17,9 @@ import { anthropic } from "@ai-sdk/anthropic";
 import { AllocationSchema, type Allocation } from "@/lib/allocation-schema";
 import { investableAssets } from "@/lib/chains";
 import type { Asset, StaxChain } from "@/lib/chains/types";
-import { allClosedMessage, buyableTickers, enforceMinLegs, maxBscLegs, unavailableNote, venueAddressFor } from "./bscPlan";
+import { AllocationRefusal, allClosedMessage, buyableTickers, enforceMinLegs, maxBscLegs, unavailableNote, venueAddressFor } from "./bscPlan";
 import { bscCatalogSnapshot } from "./rwaCatalog";
-import type { RwaTickerView } from "@/lib/rwa";
+import { BSC_MIN_LEG_USD, type RwaTickerView } from "@/lib/rwa";
 
 const MODEL = process.env.AI_MODEL || "claude-sonnet-4-6";
 
@@ -31,9 +31,10 @@ function tierLine(tier: Asset["tier"], assets: Asset[]): string | null {
   return `${label} (${list.join(", ")})`;
 }
 
-/** BSC-only prompt context: the leg cap and why any listed ticker isn't in the universe. */
+/** BSC-only prompt context: the leg cap, the per-leg weight floor, and why any listed ticker isn't in the universe. */
 interface BscPromptInfo {
   maxLegs: number;
+  minWeightPct: number;
   unavailable: string[];
 }
 
@@ -49,6 +50,7 @@ function systemPrompt(chain: StaxChain, universe: Asset[], bsc?: BscPromptInfo):
   const bscRules = bsc
     ? [
         `- Use AT MOST ${bsc.maxLegs} of the assets above in this plan (never more): Binance rejects a trade under $6, so more names than that would size some legs too small for the amount given.`,
+        `- Give every pick you DO include at least ${bsc.minWeightPct}% of the total weight: anything smaller would size that leg under Binance's $6 minimum for this amount, and the plan would be shrunk (or refused) to fix it. Leave a name out entirely rather than give it a token weight.`,
         ...(bsc.unavailable.length > 0
           ? [
               `- These names are NOT in the list above and must never be picked, because they aren't tradeable right now: ${bsc.unavailable.join("; ")}. If the user's goal mentions one of them by name, say in your rationale that it's temporarily unavailable (market closed or paused) and suggest a close alternative from the list instead.`,
@@ -93,17 +95,19 @@ export async function buildAllocation(
     const catalog = await bscCatalogSnapshot(Date.now());
     const buyable = buyableTickers(catalog.tickers);
     if (buyable.length === 0) {
-      throw new Error(allClosedMessage(catalog.tickers, Date.now()));
+      throw new AllocationRefusal(allClosedMessage(catalog.tickers, Date.now()));
     }
     const buyableSymbols = new Set(buyable.map((t) => t.ticker));
     universe = universe.filter((a) => buyableSymbols.has(a.symbol));
     catalogBySymbol = new Map(catalog.tickers.map((t) => [t.ticker, t]));
     const maxLegs = maxBscLegs(amountUsd);
     if (maxLegs === 0) {
-      throw new Error(`$${amountUsd} is below Binance's $6 minimum per stock.`);
+      throw new AllocationRefusal(`$${amountUsd} is below Binance's $6 minimum per stock.`);
     }
     bscInfo = {
       maxLegs,
+      // ceil so a pick right at the boundary still clears $6 after rounding, not just meets it.
+      minWeightPct: Math.ceil((BSC_MIN_LEG_USD / amountUsd) * 100),
       unavailable: catalog.tickers.filter((t) => !buyableSymbols.has(t.ticker)).map((t) => unavailableNote(t, Date.now())),
     };
   }
@@ -147,7 +151,7 @@ export async function buildAllocation(
   const candidateLegs = normalized.map((a) => ({ ...a, usd: (a.weightPct / 100) * amountUsd }));
   const capped = enforceMinLegs(candidateLegs, amountUsd);
   if (!capped.ok) {
-    throw new Error(capped.message);
+    throw new AllocationRefusal(capped.message);
   }
   const allocations = capped.legs.map((l) => {
     const ticker = bySymbol.get(l.symbol);
@@ -165,3 +169,4 @@ export async function buildAllocation(
 }
 
 export { MODEL as ALLOCATE_MODEL };
+export { AllocationRefusal };
