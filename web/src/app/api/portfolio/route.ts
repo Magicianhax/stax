@@ -16,6 +16,7 @@ import { fromUnits } from "@/lib/format";
 import { buildAssetRows, type PortfolioHoldingRow } from "@/lib/portfolioRows";
 import { chainFromRequest, serverClient } from "@/lib/server/chain";
 import { getBinanceWeb3 } from "@/lib/server/binance";
+import { balancesBatched, rawBalanceMap } from "@/lib/server/binance/wallet";
 import { getDaySummary } from "@/lib/server/marketData";
 import { rateLimit, clientIp } from "@/lib/server/rateLimit";
 import { badRequest, tooManyRequests, serverError } from "@/lib/server/respond";
@@ -54,6 +55,37 @@ async function twinPricesByAddress(chain: StaxChain): Promise<Map<string, number
   }
 }
 
+/**
+ * BSC's raw token balances via the Binance Wallet API (one batched read across every candidate
+ * address — cash, every stock's default mint, every twin mint, crypto) instead of a per-token RPC
+ * `balanceOf`. Cached per address for the same window as the route's own `Cache-Control`, so a
+ * user re-polling the page doesn't redraw the shared 5-per-window Binance budget every few
+ * seconds. Returns `null` on ANY failure (bad shape, timeout, rate limit) so the caller falls
+ * back to the RPC multicall below and the portfolio never goes blank for a Binance hiccup.
+ */
+const BSC_BALANCE_CACHE_TTL_MS = 10_000;
+const bscBalanceCache = new Map<string, { at: number; value: Promise<Map<string, bigint>> }>();
+
+function cachedBscBalances(address: `0x${string}`, tokenAddresses: `0x${string}`[]): Promise<Map<string, bigint>> {
+  const key = address.toLowerCase();
+  const hit = bscBalanceCache.get(key);
+  if (hit && Date.now() - hit.at < BSC_BALANCE_CACHE_TTL_MS) return hit.value;
+  const value = balancesBatched(address, tokenAddresses).then(rawBalanceMap);
+  bscBalanceCache.set(key, { at: Date.now(), value });
+  value.catch(() => bscBalanceCache.delete(key)); // don't let a failure poison later polls
+  return value;
+}
+
+async function bscRawBalances(chain: StaxChain, address: `0x${string}`, tokenAddresses: `0x${string}`[]): Promise<Map<string, bigint> | null> {
+  if (chain.key !== "bsc") return null;
+  try {
+    return await cachedBscBalances(address, tokenAddresses);
+  } catch (err) {
+    console.warn("[portfolio] Binance Wallet API balances unavailable, falling back to RPC:", err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
 export async function GET(req: NextRequest) {
   const limit = await rateLimit(`portfolio:${clientIp(req)}`, 30, 60_000);
   if (!limit.ok) return tooManyRequests(limit.retryAfter);
@@ -67,57 +99,76 @@ export async function GET(req: NextRequest) {
   try {
     const assets = chain.assets.all.filter((a) => a.address && a.decimals);
     // Assets with a twin (BSC only — see chains/bsc.assets.ts) get a second balance read at the
-    // twin's own address, appended after the main asset list so both live in the one multicall.
+    // twin's own address.
     const twinned = assets.filter((a) => a.twin);
-    const [results, prices, day, twinPrices] = await Promise.all([
-      // USDC first, then the asset universe, then twin addresses — one multicall, one RPC request.
-      client.multicall({
-        contracts: [
-          { address: chain.usdc.address, abi: ERC20_ABI, functionName: "balanceOf" as const, args: [address as `0x${string}`] },
-          ...assets.map((asset) => ({
-            address: asset.address!,
-            abi: ERC20_ABI,
-            functionName: "balanceOf" as const,
-            args: [address as `0x${string}`] as const,
-          })),
-          ...twinned.map((asset) => ({
-            address: asset.twin!.address,
-            abi: ERC20_ABI,
-            functionName: "balanceOf" as const,
-            args: [address as `0x${string}`] as const,
-          })),
-        ],
-      }),
+    const readAddresses = [
+      chain.usdc.address,
+      ...assets.map((a) => a.address!),
+      ...twinned.map((a) => a.twin!.address),
+    ];
+
+    const [binanceMap, prices, day, twinPrices] = await Promise.all([
+      bscRawBalances(chain, address as `0x${string}`, readAddresses),
       cachedPrices(chain),
       getDaySummary(chain).catch(() => ({}) as Awaited<ReturnType<typeof getDaySummary>>),
       twinPricesByAddress(chain),
     ]);
 
-    const usdcRead = results[0];
-    const cashUsd =
-      usdcRead.status === "success" ? fromUnits(usdcRead.result as bigint, chain.usdc.decimals) : 0;
+    // BSC's own balances came back above — no RPC multicall needed at all. Off BSC, or when
+    // Binance errored (bscRawBalances already logged why), the ORIGINAL per-token RPC multicall
+    // runs exactly as it always did, so a Binance outage never blanks the portfolio.
+    const results = binanceMap
+      ? null
+      : await client.multicall({
+          contracts: [
+            { address: chain.usdc.address, abi: ERC20_ABI, functionName: "balanceOf" as const, args: [address as `0x${string}`] },
+            ...assets.map((asset) => ({
+              address: asset.address!,
+              abi: ERC20_ABI,
+              functionName: "balanceOf" as const,
+              args: [address as `0x${string}`] as const,
+            })),
+            ...twinned.map((asset) => ({
+              address: asset.twin!.address,
+              abi: ERC20_ABI,
+              functionName: "balanceOf" as const,
+              args: [address as `0x${string}`] as const,
+            })),
+          ],
+        });
 
-    const twinOffset = 1 + assets.length;
-    const twinRawBySymbol = new Map<string, bigint>();
-    for (let j = 0; j < twinned.length; j++) {
-      const r = results[twinOffset + j];
-      if (r.status === "success") twinRawBySymbol.set(twinned[j].symbol, r.result as bigint);
-    }
+    // One accessor per source: a failed/absent RPC read and an address Binance's response never
+    // mentioned both mean the same thing here — "not held" (0n) — so every downstream line reads
+    // identically whichever source answered.
+    const cashRaw = binanceMap
+      ? (binanceMap.get(chain.usdc.address.toLowerCase()) ?? BigInt(0))
+      : results![0].status === "success"
+        ? (results![0].result as bigint)
+        : BigInt(0);
+    const cashUsd = fromUnits(cashRaw, chain.usdc.decimals);
+
+    const defaultRawFor = (i: number, asset: (typeof assets)[number]): bigint => {
+      if (binanceMap) return binanceMap.get(asset.address!.toLowerCase()) ?? BigInt(0);
+      const r = results![i + 1];
+      return r.status === "success" ? (r.result as bigint) : BigInt(0);
+    };
+    const twinRawFor = (asset: (typeof assets)[number], twinIndex: number): bigint | undefined => {
+      if (!asset.twin) return undefined;
+      if (binanceMap) return binanceMap.get(asset.twin.address.toLowerCase());
+      const r = results![1 + assets.length + twinIndex];
+      return r.status === "success" ? (r.result as bigint) : undefined;
+    };
 
     const holdings: PortfolioHoldingRow[] = [];
+    let twinIndex = 0;
     for (let i = 0; i < assets.length; i++) {
-      const r = results[i + 1];
       const asset = assets[i];
-      const twinRaw = asset.twin ? twinRawBySymbol.get(asset.symbol) : undefined;
-      // A failed default-address read reads as "not held" (0n), same as before — but it must
-      // not also hide a twin balance that DID read successfully, so this never `continue`s past
-      // the twin row the way skipping the whole iteration would.
-      if (r.status !== "success" && twinRaw === undefined) continue;
+      const twinRaw = asset.twin ? twinRawFor(asset, twinIndex++) : undefined;
       const p = prices[asset.symbol];
       holdings.push(
         ...buildAssetRows({
           asset,
-          defaultRaw: r.status === "success" ? (r.result as bigint) : BigInt(0),
+          defaultRaw: defaultRawFor(i, asset),
           defaultPriceUsd: p?.priceUsd ?? null,
           twinRaw,
           twinPriceUsd: asset.twin ? (twinPrices.get(asset.twin.address.toLowerCase()) ?? null) : undefined,
