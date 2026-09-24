@@ -48,6 +48,8 @@ export interface BinanceLegArgs {
    * made just to size this guard.
    */
   usdValue: number;
+  /** False for a price check: quote only, no swap build, and the leg's `swapData` is "0x". */
+  build?: boolean;
 }
 
 export interface BinanceLeg {
@@ -69,6 +71,13 @@ export interface BinanceLeg {
  */
 export class BinanceLegError extends Error {}
 
+/**
+ * A leg Stax itself refuses (the $6 floor, an RFQ route, an unrecognised router). Its message
+ * is written for the user, so /api/swap-quote returns it as a 400. Anything that is neither
+ * this nor a BinanceLegError is an internal fault and is never echoed to the browser.
+ */
+export class BinanceLegRefusal extends Error {}
+
 /** Wraps a final BinanceWeb3Error with the leg's token so a basket/quote failure names it. */
 function wrap(symbol: string, err: unknown): never {
   if (err instanceof BinanceWeb3Error) {
@@ -85,8 +94,10 @@ function wrap(symbol: string, err: unknown): never {
  * what Binance actually guarantees.
  */
 export async function buildBinanceLeg(a: BinanceLegArgs): Promise<BinanceLeg> {
-  if (a.usdValue < BSC_MIN_LEG_USD) {
-    throw new Error(`${a.symbol}: leg is ${a.usdValue < 0 ? "invalid" : `$${a.usdValue.toFixed(2)}`}, below Binance's $${BSC_MIN_LEG_USD} minimum.`);
+  // NaN (an unpriceable sell) compares false against everything, so it is refused explicitly.
+  if (!Number.isFinite(a.usdValue) || a.usdValue < BSC_MIN_LEG_USD) {
+    const shown = Number.isFinite(a.usdValue) && a.usdValue >= 0 ? `$${a.usdValue.toFixed(2)}` : "unpriced";
+    throw new BinanceLegRefusal(`${a.symbol}: this trade is ${shown}, below Binance's $${BSC_MIN_LEG_USD} minimum.`);
   }
   const router = a.chain.routers.binance;
   if (!router) throw new Error(`Binance aggregator isn't configured on ${a.chain.name}.`);
@@ -96,10 +107,30 @@ export async function buildBinanceLeg(a: BinanceLegArgs): Promise<BinanceLeg> {
     .quote({ fromToken: a.tokenIn, toToken: a.tokenOut, amount: a.amountIn, taker: a.taker })
     .catch((err) => wrap(a.symbol, err));
   if (q.executionMode !== "SWAP") {
-    throw new Error(`${a.symbol}: Binance returned an RFQ route, which a contract can't sign.`);
+    throw new BinanceLegRefusal(`${a.symbol}: Binance returned an RFQ route, which a contract can't sign.`);
   }
   if (q.approveTarget.toLowerCase() !== router.toLowerCase()) {
-    throw new Error(`${a.symbol}: Binance quoted an unexpected router.`);
+    throw new BinanceLegRefusal(`${a.symbol}: Binance quoted an unexpected router.`);
+  }
+  if (q.fromTokenAmount !== a.amountIn) {
+    throw new BinanceLegRefusal(`${a.symbol}: Binance quoted a different amount than requested.`);
+  }
+
+  const slippageFloor = (q.toTokenAmount * (BPS - BigInt(a.slippageBps))) / BPS;
+  // A price check (TradeScreen polls every 15 s) needs only the quote. Building the swap is a
+  // second call against the shared 5-per-window budget, so it happens only when the user is
+  // about to sign, and a price-only leg carries no calldata.
+  if (a.build === false) {
+    return {
+      router,
+      tokenIn: a.tokenIn,
+      tokenOut: a.tokenOut,
+      amountIn: a.amountIn,
+      swapData: "0x",
+      minOut: slippageFloor,
+      expectedOut: q.toTokenAmount,
+      priceImpactPct: q.priceImpactPercent,
+    };
   }
 
   const slippagePercent = (a.slippageBps / 100).toString();
@@ -114,13 +145,11 @@ export async function buildBinanceLeg(a: BinanceLegArgs): Promise<BinanceLeg> {
     })
     .catch((err) => wrap(a.symbol, err));
   if (built.executionMode !== "SWAP") {
-    throw new Error(`${a.symbol}: Binance returned an RFQ route, which a contract can't sign.`);
+    throw new BinanceLegRefusal(`${a.symbol}: Binance returned an RFQ route, which a contract can't sign.`);
   }
   if (built.tx.to.toLowerCase() !== router.toLowerCase()) {
-    throw new Error(`${a.symbol}: Binance's swap calldata targeted an unexpected router.`);
+    throw new BinanceLegRefusal(`${a.symbol}: Binance's swap calldata targeted an unexpected router.`);
   }
-
-  const slippageFloor = (q.toTokenAmount * (BPS - BigInt(a.slippageBps))) / BPS;
   const minOut = built.tx.minReceiveAmount < slippageFloor ? built.tx.minReceiveAmount : slippageFloor;
 
   return {
@@ -149,8 +178,10 @@ export function checkBscBuyable(
 ): { ok: true; row: RwaToken } | { ok: false; message: string } {
   const row = tokens.find((t) => t.tokenContractAddress.toLowerCase() === tokenAddress.toLowerCase());
   if (!row || !isBuyable(row.statusInfo)) {
-    const nextOpenMs = row?.statusInfo.nextOpenTime ?? nextUsOpenMs(nowMs);
-    return { ok: false, message: `${symbol} is closed right now. ${formatNextOpen(new Date(nextOpenMs))}.` };
+    if (!row) return { ok: false, message: `${symbol} isn't available to trade on BNB Chain right now.` };
+    const next = row.statusInfo.nextOpenTime;
+    const nextOpenMs = next !== null && next > nowMs ? next : nextUsOpenMs(nowMs);
+    return { ok: false, message: `${symbol} is closed right now; it ${formatNextOpen(new Date(nextOpenMs), new Date(nowMs))}.` };
   }
   return { ok: true, row };
 }

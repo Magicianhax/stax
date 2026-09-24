@@ -16,18 +16,12 @@ const BINANCE_CHAIN_ID = "56";
  *
  * docs/BINANCE-WEB3.md §3 says every value is a string, but a LIVE call (2026-09-24) returned
  * plain JSON numbers instead — the doc was wrong, or the wire format changed since it was
- * written. `z.coerce.number()` accepts either, so the parser survives whichever one Binance
+ * written. `wireNum` accepts either (and rejects null), so the parser survives whichever one Binance
  * actually sends on a given day.
  */
-const wireCandleRow = z.tuple([
-  z.coerce.number(),
-  z.coerce.number(),
-  z.coerce.number(),
-  z.coerce.number(),
-  z.coerce.number(),
-  z.coerce.number(),
-  z.coerce.number(),
-]);
+// Not z.coerce.number(): that turns null into 0, and a zero-price candle is fabricated data.
+const wireNum = z.union([z.number(), z.string()]).pipe(z.coerce.number().refine(Number.isFinite, "not a finite number"));
+const wireCandleRow = z.tuple([wireNum, wireNum, wireNum, wireNum, wireNum, wireNum, wireNum]);
 
 export async function candles(addr: `0x${string}`, bar: "5m" | "1h" | "4h" | "1d", limit: number): Promise<Candle[]> {
   const data = await web3Request<unknown>("GET", "/api/v1/dex/market/candles", {

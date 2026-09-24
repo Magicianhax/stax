@@ -24,7 +24,7 @@ import { z } from "zod";
 import { assetBySymbol, isRoutable } from "@/lib/chains";
 import { chainFromRequest } from "@/lib/server/chain";
 import { KyberError, KyberNoRoute, kyberBuild, kyberRoute } from "@/lib/server/kyber";
-import { BinanceLegError, bscLegUsdValue, buildBinanceLeg, checkBscBuyable } from "@/lib/server/binanceLegs";
+import { BinanceLegError, BinanceLegRefusal, bscLegUsdValue, buildBinanceLeg, checkBscBuyable } from "@/lib/server/binanceLegs";
 import { getBinanceWeb3 } from "@/lib/server/binance";
 import { requireApproved } from "@/lib/server/admin";
 import { verifyRequest } from "@/lib/server/privyAuth";
@@ -146,6 +146,7 @@ export async function POST(req: NextRequest) {
         taker: sender,
         slippageBps,
         usdValue,
+        build: Boolean(body.build),
       });
       const result: SwapQuoteResponse = {
         router: leg.router,
@@ -163,7 +164,7 @@ export async function POST(req: NextRequest) {
         console.error("[swap-quote]", err.message);
         return jsonError(502, "The swap aggregator is unavailable right now. Please try again.");
       }
-      if (err instanceof Error) return badRequest(err.message);
+      if (err instanceof BinanceLegRefusal) return badRequest(err.message);
       return serverError("swap-quote", err);
     }
   }

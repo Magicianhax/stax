@@ -136,7 +136,7 @@ export const BSC_STOCKS: Asset[] = [
   stock({
     // Underlying company unconfirmed in research; ticker kept as the display name rather than guess.
     symbol: "CBRS",
-    name: "CBRS",
+    name: "Cerebras",
     address: "0xe81c6bb0266cd68b4f17278531dd03ea1f12da4e",
     platform: "bstock",
     onchainSymbol: "CBRSB",
@@ -169,7 +169,7 @@ export const BSC_STOCKS: Asset[] = [
   stock({
     // Leveraged/inverse memory-sector ETF; exact issuer unconfirmed in research.
     symbol: "DRAM",
-    name: "DRAM ETF",
+    name: "Roundhill Memory ETF",
     address: "0x93862d63fd9fd488b1328e9b47717d75e994a84b",
     platform: "bstock",
     onchainSymbol: "DRAMB",
@@ -306,7 +306,7 @@ export const BSC_STOCKS: Asset[] = [
   stock({
     // Likely an SK Hynix-linked product; underlying issuer unconfirmed in research.
     symbol: "SKHY",
-    name: "SKHY",
+    name: "SK Hynix",
     address: "0xca750ef65f295bbecd685abf54e82caf297bdb61",
     platform: "bstock",
     onchainSymbol: "SKHYB",
@@ -331,7 +331,7 @@ export const BSC_STOCKS: Asset[] = [
   stock({
     // Docs list a "SpaceX" catalog sector; SPCX is presumed to be SpaceX pre-IPO shares, unconfirmed.
     symbol: "SPCX",
-    name: "SPCX",
+    name: "SpaceX",
     address: "0xbe9d156892e55e7154bcd3cb0fea677f9d3103e1",
     platform: "bstock",
     onchainSymbol: "SPCXB",
@@ -370,51 +370,9 @@ export const BSC_STOCKS: Asset[] = [
     twin: ondoTwin("0xceb29848d04ad3cb46e1fe8e45b82ffac39d797d", "WDCon"),
   }),
 
-  // bStock-only rows (§7.2) — no Ondo twin.
-  stock({
-    symbol: "INTW",
-    name: "GraniteShares 2x Long INTC Daily ETF",
-    address: "0x0735d9904b7e34e6fe39b0f66e00c111b3f2b681",
-    platform: "bstock",
-    onchainSymbol: "INTWB",
-  }),
-  stock({
-    symbol: "KORU",
-    name: "Direxion Daily MSCI South Korea Bull 3X Shares",
-    address: "0x1ffad32d69c5fead99f88c25ca0191edc3757636",
-    platform: "bstock",
-    onchainSymbol: "KORUB",
-  }),
-  stock({
-    symbol: "MUU",
-    name: "Direxion Daily 2X Long Micron ETF",
-    address: "0x0bb3fa77e0809f42948e435f04883c25415e8263",
-    platform: "bstock",
-    onchainSymbol: "MUUB",
-  }),
-  stock({
-    symbol: "MVLL",
-    name: "GraniteShares 2x Long Marvell Daily ETF",
-    address: "0x7c26a12f20507e2cee22ceebed9e88fda47f866c",
-    platform: "bstock",
-    onchainSymbol: "MVLLB",
-  }),
-  stock({
-    symbol: "QNT",
-    name: "Quantinuum",
-    address: "0xd721c192d612db77621df57a9fab38418033c02e",
-    platform: "bstock",
-    onchainSymbol: "QNTB",
-  }),
-  stock({
-    symbol: "SNXX",
-    name: "Tradr 2X Long SanDisk Daily ETF",
-    address: "0x9e82e3da8f1115b73d24bb24113ab836ffdab6b6",
-    platform: "bstock",
-    onchainSymbol: "SNXXB",
-  }),
-
-  // Ondo-only megacaps (§7.3 / appendix) — no bStock listing found.
+  // Ondo-only megacaps (§7.3 / appendix) — no bStock listing found. bStock-only rows (§7.2) are
+  // left out on purpose: most are 2x/3x leveraged daily ETFs, which don't belong in a first
+  // stock portfolio.
   stock({
     symbol: "AMZN",
     name: "Amazon",

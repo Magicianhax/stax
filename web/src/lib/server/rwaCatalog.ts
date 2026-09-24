@@ -180,19 +180,22 @@ export async function bscCatalogSnapshot(nowMs: number): Promise<RwaListResponse
   });
 }
 
-const DETAIL_TTL_S = 60;
-const DETAIL_FALLBACK_TTL_S = 600;
+// Profile is near-static company info and candles move slowly at 1h+ bars; both share the one
+// 5-per-window Binance budget with live quotes, so they are cached far longer than prices.
+const PROFILE_TTL_S = 6 * 3600;
+const CANDLES_TTL_S = 300;
+const DETAIL_FALLBACK_TTL_S = 24 * 3600; // must outlive PROFILE_TTL_S, or an outage after expiry has nothing to serve
 
 /** `/underlying-profile` for one address, cached with the same stale-on-outage fallback. */
 export function cachedRwaProfile(address: `0x${string}`): Promise<unknown> {
-  return cachedWithFallback(`binance:rwa:profile:${address}`, DETAIL_TTL_S, DETAIL_FALLBACK_TTL_S, () =>
+  return cachedWithFallback(`binance:rwa:profile:${address}`, PROFILE_TTL_S, DETAIL_FALLBACK_TTL_S, () =>
     getBinanceWeb3().rwaProfile(address),
   );
 }
 
 /** `/candles` for one address, cached with the same stale-on-outage fallback. */
 export function cachedCandles(address: `0x${string}`, bar: "5m" | "1h" | "4h" | "1d", limit: number) {
-  return cachedWithFallback(`binance:rwa:candles:${address}:${bar}:${limit}`, DETAIL_TTL_S, DETAIL_FALLBACK_TTL_S, () =>
+  return cachedWithFallback(`binance:rwa:candles:${address}:${bar}:${limit}`, CANDLES_TTL_S, DETAIL_FALLBACK_TTL_S, () =>
     getBinanceWeb3().candles(address, bar, limit),
   );
 }

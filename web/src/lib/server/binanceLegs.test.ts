@@ -16,6 +16,7 @@ import { assetBySymbol } from "@/lib/chains";
 import type { RwaToken } from "./binance/types";
 import {
   BinanceLegError,
+  BinanceLegRefusal,
   bscLegUsdValue,
   buildBinanceLeg,
   checkBscBuyable,
@@ -207,12 +208,39 @@ describe("checkBscBuyable", () => {
       NOW,
     );
     expect(gate.ok).toBe(false);
-    if (!gate.ok) expect(gate.message).toMatch(/^NVDA is closed right now\./);
+    if (!gate.ok) expect(gate.message).toMatch(/^NVDA is closed right now; it opens /);
   });
 
-  it("fails closed when the token isn't in the catalog at all", () => {
+  it("fails closed when the token isn't in the catalog at all, and says unavailable, not closed", () => {
     const gate = checkBscBuyable([], NVDA, "NVDA", NOW);
     expect(gate.ok).toBe(false);
+    if (!gate.ok) expect(gate.message).toMatch(/isn't available/);
+  });
+});
+
+describe("buildBinanceLeg review fixes", () => {
+  it("quotes without building the swap for a price check, saving a Binance call", async () => {
+    const leg = await buildBinanceLeg(args({ build: false }));
+    expect(buildSwapSpy).not.toHaveBeenCalled();
+    expect(leg.swapData).toBe("0x");
+    expect(leg.expectedOut).toBe(BigInt(1000));
+    expect(leg.minOut).toBe(BigInt(990)); // 1000 at 100 bps slippage
+  });
+
+  it("refuses an unpriceable (NaN) leg instead of letting it past the $6 floor", async () => {
+    await expect(buildBinanceLeg(args({ usdValue: Number.NaN }))).rejects.toBeInstanceOf(BinanceLegRefusal);
+    expect(quoteSpy).not.toHaveBeenCalled();
+  });
+
+  it("refuses a quote for a different input amount than requested", async () => {
+    quoteSpy.mockResolvedValueOnce({ ...goodQuote, fromTokenAmount: usdToRaw(bsc, 9) });
+    await expect(buildBinanceLeg(args())).rejects.toThrow(/different amount/);
+    expect(buildSwapSpy).not.toHaveBeenCalled();
+  });
+
+  it("marks RFQ and router rejections as refusals the route may show the user", async () => {
+    quoteSpy.mockResolvedValueOnce({ ...goodQuote, executionMode: "RFQ" });
+    await expect(buildBinanceLeg(args())).rejects.toBeInstanceOf(BinanceLegRefusal);
   });
 });
 

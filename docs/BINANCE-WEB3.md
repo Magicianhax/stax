@@ -312,7 +312,8 @@ bstock tracked its reference more tightly. A single premarket sample, not a patt
 `bar` values (DOCS; only `1h` exercised): `1s 5s 30s 1m 3m 5m 15m 30m 1h 2h 4h 6h 8h 12h 1d 3d 1w 1M`.
 
 **Candle row (LIVE):** `[open, high, low, close, volume, timestampMs, tradeCount]`. The timestamp is
-at **index 5**, not index 0 as on Binance spot klines. Values are strings. Parse by position with
+at **index 5**, not index 0 as on Binance spot klines. The docs say values are strings; a LIVE call
+(2026-09-24, NVDAB, bar=1h) returned plain JSON numbers, so accept both. Parse by position with
 that order.
 
 ---
@@ -398,7 +399,8 @@ missing), and `slippagePercent`.
 }
 ```
 
-UNVERIFIED and critical for executor legs: whether the calldata delivers output to `msg.sender`, to
+RESOLVED in §10 (LIVE-calldata, 2026-09-24), with one caveat recorded there. Originally open and
+critical for executor legs: whether the calldata delivers output to `msg.sender`, to
 `userWalletAddress`, or to `tx.from`. It was built with a dummy taker (`0x…dEaD`) and never run. Before
 wiring executor legs, verify it once with `POST /pre-transaction/simulate`, using
 `from = executor, to = router, data = tx.data`, and read `balanceChanges`.
@@ -649,8 +651,12 @@ commands that the user's own agent runs. Do not claim Autopilot executes through
    amount, different taker each time, zero byte-level dependence on the taker beyond the
    cosmetic `tx.from` field the API echoes back. Binance's aggregator is a plain
    call-and-forward router with no recipient parameter: **output goes to whoever calls it
-   (`msg.sender`), full stop — `userWalletAddress` only affects quoting/RFQ eligibility, never
-   delivery.** This is not a blocker for either path: on the direct path `msg.sender` is the
+   (`msg.sender`) — `userWalletAddress` only affects quoting/RFQ eligibility, never
+   delivery.** Caveat: calldata evidence rules out a recipient derived from `userWalletAddress`,
+   but cannot by itself tell `msg.sender` delivery apart from `tx.origin` delivery. The two
+   differ on the direct path, where `tx.origin` is the ERC-4337 bundler. `simulate` could not
+   settle it (it reverts on allowance before the output leg). The first funded $6 trade settles
+   it: check that the tokens land in the smart account. This is not a blocker for either path: on the direct path `msg.sender` is the
    user's own smart account, so output lands correctly by construction. On the executor path,
    `StaxExecutor.investWithAI` already calls `leg.router.call(leg.swapData)` itself (making the
    executor `msg.sender`) and measures `IERC20(tokenOut).balanceOf(address(this))` before/after

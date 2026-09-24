@@ -116,6 +116,12 @@ describe("candles", () => {
     const rows = await candles("0x02fca66c1d1afb4e2a7884261eb00f63598a7436", "1h", 1);
     expect(rows[0]).toEqual({ open: 223.1, high: 223.9, low: 222.8, close: 223.54, volume: 184032.5, t: 1790247600000, trades: 412 });
   });
+
+  it("rejects a null field instead of charting it as a zero price", async () => {
+    mockWeb3Request.mockResolvedValueOnce([[null, 223.9, 222.8, 223.54, 184032.5, 1790247600000, 412]]);
+    const { candles } = await import("./market");
+    await expect(candles("0x02fca66c1d1afb4e2a7884261eb00f63598a7436", "1h", 1)).rejects.toThrow();
+  });
 });
 
 describe("quote", () => {
