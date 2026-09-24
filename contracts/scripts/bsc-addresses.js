@@ -4,6 +4,8 @@
 // (bsc.assets.ts is Task 9's file; this script does not import it so contracts/ never depends
 // on web/).
 
+const fs = require("node:fs");
+
 const USDT = "0x55d398326f99059fF775485246999027B3197955"; // BSC cash, 18 decimals
 
 // The only venue the executor may call on BSC: the Binance Web3 DEX aggregator router, which
@@ -26,10 +28,35 @@ const WHITELIST_ASSETS = STOCKS.map((s) => ({ ...s, decimals: 18 }));
 
 const ROUTERS = [{ name: "Binance Web3 aggregator", address: BINANCE_ROUTER }];
 
+// The asset list deploy-bsc.js whitelists, check-bsc.js pre-flights and enable-assets-bsc.js
+// (re)whitelists — all three need the same curated catalog once Task 9's replaces the seed
+// list above, so the loading lives in one place.
+//
+// This reads an env var, not a CLI argument. `hardhat run <script> --network <net> -- <arg>`
+// cannot forward that trailing argument to the script: Hardhat 2's CLI parses everything after
+// the script path itself, and rejects it before the script ever runs (HH305 with the `--`
+// separator, HH308 without it). BSC_ASSETS_JSON works the same way AGENT_SIGNER_ADDRESS and
+// the *_BSC resume addresses already do below.
+//
+//   BSC_ASSETS_JSON=/path/to/assets.json npx hardhat run scripts/deploy-bsc.js --network bsc
+function loadAssets() {
+  const jsonPath = process.env.BSC_ASSETS_JSON;
+  if (!jsonPath) return WHITELIST_ASSETS;
+  const raw = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
+  if (!Array.isArray(raw) || raw.length === 0) throw new Error(`${jsonPath}: expected a non-empty JSON array`);
+  for (const a of raw) {
+    if (!a.symbol || !/^0x[0-9a-fA-F]{40}$/.test(a.address)) {
+      throw new Error(`${jsonPath}: bad entry ${JSON.stringify(a)}`);
+    }
+  }
+  return raw.map((a) => ({ decimals: 18, ...a }));
+}
+
 module.exports = {
   USDT,
   BINANCE_ROUTER,
   STOCKS,
   WHITELIST_ASSETS,
   ROUTERS,
+  loadAssets,
 };

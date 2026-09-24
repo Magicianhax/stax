@@ -1,32 +1,19 @@
-const fs = require("node:fs");
 const hre = require("hardhat");
-const { USDT, ROUTERS, WHITELIST_ASSETS } = require("./bsc-addresses");
+const { USDT, ROUTERS, loadAssets } = require("./bsc-addresses");
 
 // Deploys InferenceVerifier + IdentityRegistry + StaxExecutor to BSC mainnet, whitelists the
 // Binance Web3 aggregator router and every BSC tokenized-stock asset, and registers Vera in
 // the IdentityRegistry. Mirrors deploy-base.js; USDT (18 dec) stands in for Base's USDC.
 //
-//   npm run check:bsc                          # read-only pre-flight, no key needed
-//   npm run deploy:bsc -- [assets.json]        # needs PRIVATE_KEY (a little BNB) + AGENT_SIGNER_ADDRESS
+//   npm run check:bsc                                    # read-only pre-flight, no key needed
+//   npx hardhat run scripts/deploy-bsc.js --network bsc  # needs PRIVATE_KEY (a little BNB) + AGENT_SIGNER_ADDRESS
 //
-// The optional assets.json argument is an array of { symbol, address, decimals? } objects to
-// whitelist instead of the seed list in bsc-addresses.js (Task 9's curated catalog, once it
-// exists). Every tx waits for its receipt before the next one is sent.
+// BSC_ASSETS_JSON=/path/to/assets.json before that command whitelists that curated catalog
+// (Task 9's, once it exists) instead of the seed list in bsc-addresses.js — see loadAssets()
+// there for why this is an env var and not a positional argument. Every tx waits for its
+// receipt before the next one is sent.
 
 const AGENT_CARD = process.env.AGENT_CARD_URI || "https://stax.best/.well-known/agent-card.json";
-
-function loadAssets() {
-  const argPath = process.argv[2];
-  if (!argPath) return WHITELIST_ASSETS;
-  const raw = JSON.parse(fs.readFileSync(argPath, "utf8"));
-  if (!Array.isArray(raw) || raw.length === 0) throw new Error(`${argPath}: expected a non-empty JSON array`);
-  for (const a of raw) {
-    if (!a.symbol || !/^0x[0-9a-fA-F]{40}$/.test(a.address)) {
-      throw new Error(`${argPath}: bad entry ${JSON.stringify(a)}`);
-    }
-  }
-  return raw.map((a) => ({ decimals: 18, ...a }));
-}
 
 async function main() {
   const agentSigner = process.env.AGENT_SIGNER_ADDRESS;
@@ -181,9 +168,17 @@ async function main() {
   console.log(`npx hardhat verify --network ${hre.network.name} ${verifier.address} ${agentSigner}`);
   console.log(`npx hardhat verify --network ${hre.network.name} ${registry.address}`);
   console.log(`npx hardhat verify --network ${hre.network.name} ${executorAddress} ${USDT} ${verifier.address}`);
+
+  return summary;
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exitCode = 1;
-});
+// Guarded so `require("./deploy-bsc")` (the hardhat test suite proving BSC_ASSETS_JSON reaches
+// loadAssets, on the in-memory network) can call main() itself instead of it firing on require.
+if (require.main === module) {
+  main().catch((e) => {
+    console.error(e);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { main };

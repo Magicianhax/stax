@@ -1,10 +1,11 @@
 const hre = require("hardhat");
-const { ROUTERS, WHITELIST_ASSETS } = require("./bsc-addresses");
+const { ROUTERS, loadAssets } = require("./bsc-addresses");
 
 // (Re)whitelist the BSC router + assets on an already-deployed StaxExecutor, e.g. when
 // Task 9's curated catalog adds a ticker to bsc.assets.ts. Mirrors enable-assets-base.js.
 //
 //   STAX_EXECUTOR_BSC=0x...            executor address (required)
+//   BSC_ASSETS_JSON=assets.json        curated catalog instead of the seed list (optional)
 //   EXTRA_ASSETS=0xabc...,0xdef...     extra token addresses to whitelist (optional)
 //   npm run enable:bsc
 //
@@ -49,9 +50,10 @@ async function main() {
     console.log(`setRouter(${r.name} ${r.address}, true) -> ${h}`);
   }
 
-  // 2) Assets: everything in bsc-addresses.js + EXTRA_ASSETS, minus what is already allowed.
+  // 2) Assets: the curated catalog (BSC_ASSETS_JSON) or else the seed list, + EXTRA_ASSETS,
+  //    minus what is already allowed.
   const wanted = [
-    ...WHITELIST_ASSETS.map((a) => ({ symbol: a.symbol, address: a.address })),
+    ...loadAssets().map((a) => ({ symbol: a.symbol, address: a.address })),
     ...extra.map((address) => ({ symbol: `extra:${address}`, address })),
   ];
   const missing = [];
@@ -81,7 +83,12 @@ async function main() {
   console.log(JSON.stringify({ txHashes, checks }, null, 2));
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exitCode = 1;
-});
+// Guarded the same way deploy-bsc.js is, so the hardhat test suite can call main() itself.
+if (require.main === module) {
+  main().catch((e) => {
+    console.error(e);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { main };

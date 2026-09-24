@@ -1,6 +1,7 @@
 // Read-only pre-flight for the BSC deployment. No private key, no Hardhat network needed:
 //
 //   npm run check:bsc                        (BSC_RPC_URL from .env, else public RPCs)
+//   BSC_ASSETS_JSON=assets.json npm run check:bsc   (pre-flight a curated catalog instead)
 //
 // Asserts, against BSC mainnet:
 //   - USDT has code and 18 decimals
@@ -8,6 +9,10 @@
 //   - every whitelisted stock token has code and the expected decimals()
 // There are no venue pools to check here (unlike Base's Uniswap V3 pairs): BSC buys route
 // entirely through the Binance Web3 aggregator, which owns its own liquidity sourcing.
+// Checks whatever loadAssets() resolves to (the curated catalog when BSC_ASSETS_JSON is set,
+// else the seed list) so a curated list gets the same code/decimals pre-flight the seed list
+// always got — it used to only ever check the seed list, since the seed list was the only
+// list deploy-bsc.js could reach either.
 // Exits non-zero on the first failing assertion group.
 
 require("dotenv").config();
@@ -74,11 +79,13 @@ async function main() {
     return !!code && code !== "0x";
   };
 
+  const assets = A.loadAssets();
+
   // 0) Checksums: catch a mistyped address before it ends up in a whitelist tx.
   console.log("Addresses");
   assert(getAddress(A.USDT) === A.USDT, `USDT is checksummed (${A.USDT})`);
   assert(getAddress(A.BINANCE_ROUTER) === A.BINANCE_ROUTER, `BINANCE_ROUTER is checksummed (${A.BINANCE_ROUTER})`);
-  for (const t of A.WHITELIST_ASSETS) assert(getAddress(t.address) === t.address, `${t.symbol} is checksummed (${t.address})`);
+  for (const t of assets) assert(getAddress(t.address) === t.address, `${t.symbol} is checksummed (${t.address})`);
 
   // 1) USDT itself.
   console.log("\nUSDT");
@@ -91,7 +98,7 @@ async function main() {
 
   // 3) Whitelisted tokens: code + decimals (+ symbol for the log).
   console.log("\nWhitelisted assets");
-  for (const t of A.WHITELIST_ASSETS) {
+  for (const t of assets) {
     const code = await hasCode(t.address);
     assert(code, `${t.symbol} ${t.address} has code`);
     if (!code) continue;
