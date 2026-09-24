@@ -9,7 +9,7 @@
 // Assets with no liquid market yet are tagged "Coming soon" with the buy disabled
 // and the reason spelled out.
 import { useState } from "react";
-import type { Asset } from "@/lib/chains";
+import type { Asset, RwaPlatform } from "@/lib/chains";
 import { useChain } from "@/lib/chains/active";
 import { usePortfolio } from "@/hooks/useBalances";
 import { usePortfolioHistory } from "@/hooks/usePortfolioHistory";
@@ -20,6 +20,7 @@ import { useBaskets } from "@/hooks/useBaskets";
 import { useRwaTicker, primaryVenue, useBscBuyGate } from "@/hooks/useRwa";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { displayFor } from "@/lib/displayAssets";
+import { resolveVenueAddress } from "@/lib/venues";
 import { Icon, AssetTile, PriceChart, SectionTitle, Stat, MarketStatus, type PricePoint } from "@/components/design";
 import { MarketStatusBadge } from "@/components/lite/rwa/MarketStatusBadge";
 import { PriceGap } from "@/components/lite/rwa/PriceGap";
@@ -100,13 +101,23 @@ export function AssetDetailScreen({
   const bsc = chain.key === "bsc";
   const rwaTicker = useRwaTicker(asset.symbol);
   const venue = rwaTicker ? primaryVenue(rwaTicker) : undefined;
-  // The buy gate has to agree with what a manual buy actually does: `go("trade", { symbol })`
-  // resolves straight to `asset.address` (the default venue), never to `rwaTicker.bestVenue` —
-  // so a paused default with a buyable twin must still block Buy, and the gate must fail closed
-  // (not open) before the catalog has answered at all. bscBuyGate in useRwa.ts is the single
-  // tested rule; this screen just reads its verdict.
-  const bscGate = useBscBuyGate(asset.symbol, asset.address);
-  const buyVenue = bscGate.status === "ready" ? bscGate.venue : undefined;
+  // Which issuer Buy will actually use: an explicit tap on the Venues panel, else the catalog's
+  // bestVenue, else the asset's own platform — the same fallback order VenuePicker itself uses
+  // for its ring, so the highlighted row and the button never disagree about the venue. A picked
+  // venue that stops trading (the issuer pauses mid-session) falls back the same way VenuePicker's
+  // own ring does, rather than keep pointing the buy at a venue that just went dark.
+  const [pickedVenue, setPickedVenue] = useState<RwaPlatform | undefined>(undefined);
+  const pickedLive = pickedVenue !== undefined && rwaTicker?.venues.some((v) => v.platform === pickedVenue && v.buyable);
+  const defaultVenue = rwaTicker?.bestVenue ?? asset.platform;
+  const chosenVenue = pickedLive ? pickedVenue : defaultVenue;
+  const chosenAddress = bsc ? (resolveVenueAddress(chain, asset, chosenVenue)?.address ?? asset.address) : asset.address;
+  // The buy gate has to agree with what a manual buy actually does: `go("trade", { symbol, venue })`
+  // resolves through resolveVenueAddress to `chosenAddress`, so the gate checks THAT venue's
+  // buyability, not always the asset's own default — a paused default with a buyable twin the
+  // viewer picked must enable Buy, and a buyable default with a picked-but-paused twin must not.
+  // The gate still fails closed (not open) before the catalog has answered at all — bscBuyGate in
+  // useRwa.ts is the single tested rule; this screen just reads its verdict for the chosen venue.
+  const bscGate = useBscBuyGate(asset.symbol, chosenAddress);
   const bscBuyable = bsc ? bscGate.status === "ready" && bscGate.buyable : undefined;
   const [r, setR] = useState(2);
   const range = RANGES[r] as MarketRange;
@@ -312,11 +323,10 @@ export function AssetDetailScreen({
       {bsc && rwaTicker && rwaTicker.venues.length > 0 && (
         <div style={{ padding: "18px 22px 0" }}>
           <SectionTitle>Venues</SectionTitle>
-          {/* No `onSelect`: a manual buy always resolves to `asset.address` regardless of which
-              row is highlighted (Task 12 wires a real choice into the trade), so the picker
-              stays display-only and highlights the venue Buy will actually use, not whichever
-              is priced closest to the reference. */}
-          <VenuePicker venues={rwaTicker.venues} bestVenue={buyVenue?.platform ?? rwaTicker.bestVenue} />
+          {/* Tapping a row picks that issuer for Buy (see `chosenVenue` above); the ring still
+              falls back to the catalog's bestVenue until the viewer taps something else, or if
+              their pick stops trading mid-visit. */}
+          <VenuePicker venues={rwaTicker.venues} bestVenue={defaultVenue ?? null} onSelect={setPickedVenue} />
         </div>
       )}
 
@@ -507,7 +517,10 @@ export function AssetDetailScreen({
             className="btn btn-ghost tap"
             style={{ flex: 1 }}
             disabled={!holding || coming}
-            onClick={() => go("trade", { symbol: asset.symbol, side: "sell" })}
+            // A twin holding sells its own token — carry the venue the position was actually
+            // bought through, not the ticker's default, or the sell would try to move a token
+            // this account never held.
+            onClick={() => go("trade", { symbol: asset.symbol, side: "sell", venue: bsc ? holding?.venue : undefined })}
           >
             Sell
           </button>
@@ -515,7 +528,7 @@ export function AssetDetailScreen({
             className="btn btn-primary tap"
             style={{ flex: 2 }}
             disabled={coming || bscBuyable === false}
-            onClick={() => go("trade", { symbol: asset.symbol, side: "buy" })}
+            onClick={() => go("trade", { symbol: asset.symbol, side: "buy", venue: bsc ? chosenVenue : undefined })}
           >
             {coming
               ? "Coming soon"

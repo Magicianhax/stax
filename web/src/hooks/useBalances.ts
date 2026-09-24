@@ -16,7 +16,7 @@ import { useCallback } from "react";
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { getPublicClient } from "@/lib/wagmi";
 import { ERC20_ABI } from "@/lib/abis";
-import { assetBySymbol, type Asset, type StaxChain } from "@/lib/chains";
+import { assetBySymbol, type Asset, type RwaPlatform, type StaxChain } from "@/lib/chains";
 import { useChain } from "@/lib/chains/active";
 import { authedFetch } from "@/lib/authedFetch";
 import { fromUnits } from "@/lib/format";
@@ -47,6 +47,10 @@ export interface Holding {
   dayChangePct?: number;
   /** Real 1D sparkline for row charts. */
   spark?: number[];
+  /** BSC only: which issuer minted this row's tokens — a ticker can appear twice, once per
+   *  venue, when the user holds both bStock's and Ondo's mint of the same stock. Undefined on
+   *  every Base/Mantle holding. */
+  venue?: RwaPlatform;
 }
 
 export interface Portfolio {
@@ -90,6 +94,7 @@ interface PortfolioApiHolding {
   valueUsd: number | null;
   dayChangePct: number | null;
   spark: number[] | null;
+  venue?: RwaPlatform;
 }
 
 interface PortfolioApiResponse {
@@ -121,13 +126,15 @@ export function usePortfolio(address?: string) {
         if (!asset) continue;
         holdings.push({
           asset,
-          // Raw units in the asset's own decimals (Base stocks 8, aBasUSDC 6, Mantle xStocks 18).
+          // Raw units in the asset's own decimals (Base stocks 8, aBasUSDC 6, Mantle xStocks 18) —
+          // or, for a twin row, the twin's own decimals; the server already sized `raw` correctly.
           raw: BigInt(h.raw),
           qty: h.qty,
           valueUsd: h.valueUsd ?? undefined,
           priceUsd: h.priceUsd ?? undefined,
           dayChangePct: h.dayChangePct ?? undefined,
           spark: h.spark ?? undefined,
+          venue: h.venue,
         });
       }
       return {

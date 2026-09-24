@@ -4,7 +4,7 @@
 // chains (Base). Shared by useQuote (build=false, display) and useSwap (build=true,
 // fetched immediately before the UserOp is sent — Kyber routes are good for ~10s).
 import { authedFetch } from "@/lib/authedFetch";
-import type { Asset, StaxChain } from "@/lib/chains";
+import type { Asset, RwaPlatform, StaxChain } from "@/lib/chains";
 
 /** Wire shape of /api/swap-quote (amounts are raw-unit decimal strings). */
 export interface SwapQuoteWire {
@@ -37,6 +37,8 @@ export interface SwapQuoteArgs {
   recipient: `0x${string}`;
   slippageBps?: number;
   build?: boolean;
+  /** BSC only: which issuer to trade. Ignored (and safe to omit) on every other chain. */
+  venue?: RwaPlatform;
 }
 
 /** True when `asset` is quoted + swapped through the aggregator on `chain`. */
@@ -54,6 +56,27 @@ export function aggregatorRouterFor(chain: StaxChain, asset: Asset | null | unde
   return chain.routers.kyber;
 }
 
+/**
+ * The message to show for a failed /api/swap-quote call: the server's own text — "NVDA is
+ * closed right now; it opens…", "below Binance's $6 minimum" — when the body has one, else a
+ * generic fallback. Pure so the extraction rule (not just "some UI showed something") is a
+ * plain test; `fetchSwapQuote` and `quoteErrorMessage` both build on it.
+ */
+export function swapQuoteErrorMessage(json: unknown, fallback = "Couldn't get a price right now."): string {
+  const error = (json as { error?: unknown } | null)?.error;
+  return typeof error === "string" ? error : fallback;
+}
+
+/**
+ * The message a quote-fetching hook (useQuote / useSellQuote) should show for its query's
+ * `error`. Only a real Error carries a message worth showing — react-query can hand back
+ * anything a thrown value happened to be — so anything else reads as "no message", never a
+ * stringified `[object Object]`.
+ */
+export function quoteErrorMessage(error: unknown): string | undefined {
+  return error instanceof Error ? error.message : undefined;
+}
+
 export async function fetchSwapQuote(args: SwapQuoteArgs): Promise<SwapQuote> {
   const res = await authedFetch("/api/swap-quote", {
     method: "POST",
@@ -62,7 +85,7 @@ export async function fetchSwapQuote(args: SwapQuoteArgs): Promise<SwapQuote> {
   });
   const json = (await res.json().catch(() => null)) as (SwapQuoteWire & { error?: string }) | null;
   if (!res.ok || !json) {
-    throw new Error(typeof json?.error === "string" ? json.error : "Couldn't get a price right now.");
+    throw new Error(swapQuoteErrorMessage(json));
   }
   return {
     router: json.router,

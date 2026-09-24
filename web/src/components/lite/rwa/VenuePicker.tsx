@@ -19,7 +19,8 @@ import type { VenueView } from "@/lib/rwa";
 import { usd } from "@/lib/format";
 import { MarketStatusBadge } from "./MarketStatusBadge";
 
-const PLATFORM_LABEL: Record<RwaPlatform, string> = { bstock: "bStock", ondo: "Ondo" };
+/** Display name for an issuer — shared with TradeScreen's "via bStock" / "via Ondo" line. */
+export const PLATFORM_LABEL: Record<RwaPlatform, string> = { bstock: "bStock", ondo: "Ondo" };
 
 export interface VenuePickerProps {
   venues: VenueView[];
