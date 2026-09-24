@@ -10,6 +10,7 @@ import { Icon, SectionTitle } from "@/components/design";
 import { Reveal } from "@/components/motion";
 import { useSpreadBoard } from "@/hooks/useSpread";
 import { IssuerBoard } from "@/components/lite/spread/IssuerBoard";
+import { boardRowTargetVenue } from "@/lib/issuerBoardNav";
 import { iconBtn, Spinner } from "./primitives";
 
 export function IssuerBoardScreen({
@@ -57,8 +58,10 @@ export function IssuerBoardScreen({
               <IssuerBoard
                 rows={data?.board ?? []}
                 onSelect={(ticker) => {
-                  const row = data?.board.find((r) => r.ticker === ticker);
-                  go("asset", { symbol: ticker, venue: row?.cheaper });
+                  // Buyable-aware: a plain "cheapest price" pick can be a paused issuer, which
+                  // would land the viewer on a screen contradicting the row they just tapped.
+                  const venue = boardRowTargetVenue(ticker, data?.board ?? [], data?.tickers ?? []);
+                  go("asset", { symbol: ticker, venue });
                 }}
               />
             </Reveal>
