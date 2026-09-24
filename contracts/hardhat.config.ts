@@ -7,6 +7,12 @@ dotenv.config();
 const PRIVATE_KEY = process.env.PRIVATE_KEY ?? "";
 const accounts = PRIVATE_KEY ? [PRIVATE_KEY] : [];
 
+// BSC uses its own deployer key so the BNB-funded wallet stays separate from Base/Mantle's
+// ETH-funded one; falls back to PRIVATE_KEY so `check:bsc` (which needs no key at all) and a
+// shared-wallet setup both still work.
+const BSC_DEPLOYER_KEY = process.env.BSC_DEPLOYER_KEY || PRIVATE_KEY;
+const bscAccounts = BSC_DEPLOYER_KEY ? [BSC_DEPLOYER_KEY] : [];
+
 const config: HardhatUserConfig = {
   solidity: {
     version: "0.8.24",
@@ -38,6 +44,13 @@ const config: HardhatUserConfig = {
       chainId: 5003,
       accounts,
     },
+    // BNB Smart Chain mainnet (BNB Hack). Spot only, no testnet path in product code, but the
+    // network entry itself is harmless to keep even if a future task needs one for local forking.
+    bsc: {
+      url: process.env.BSC_RPC_URL ?? "https://bsc-dataseed.bnbchain.org",
+      chainId: 56,
+      accounts: bscAccounts,
+    },
   },
   // Etherscan V2: ONE API key verifies across chains. Register every chain explicitly against the
   // V2 unified endpoint (the plugin appends chainid automatically) so Basescan and Mantlescan both
@@ -59,6 +72,11 @@ const config: HardhatUserConfig = {
         network: "mantle",
         chainId: 5000,
         urls: { apiURL: "https://api.etherscan.io/v2/api", browserURL: "https://mantlescan.xyz" },
+      },
+      {
+        network: "bsc",
+        chainId: 56,
+        urls: { apiURL: "https://api.etherscan.io/v2/api", browserURL: "https://bscscan.com" },
       },
     ],
   },
