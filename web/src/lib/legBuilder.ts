@@ -388,10 +388,14 @@ type LegKind = "single" | "route" | "aave" | "kyber" | "binance";
 /**
  * BSC executor leg (ADR-0005): unreachable today because `chain.contracts.deployed` is false
  * for BSC until the human runs the deploy script (Task 10) — Vera's BSC invests go through the
- * direct smart-account path instead (`binanceLegs.directCallsForLeg`, wired in `useInvest.ts` /
- * `/api/invest-plan`). Kept here, inert, so the executor path needs no further plumbing on the
- * day it is switched on: `buildLegs` already routes a "binance"-via asset here once
- * `chain.contracts.deployed` flips to true (see the entry-classification loop below).
+ * direct smart-account path instead. `binanceLegs.directCallsForLeg` is exported for
+ * `/api/invest-plan` to call server-side and return as `InvestPlanResult.calls`; `useInvest.ts`
+ * already forwards whatever `calls` a plan response carries, verbatim, as one sponsored user op
+ * (after `assertExecCallsAreSafe` in `lib/execution.ts` checks every recipient) — wiring
+ * `directCallsForLeg` into `/api/invest-plan` itself is the piece still missing. Kept here,
+ * inert, so the executor path needs no further plumbing on the day it is switched on: `buildLegs`
+ * already routes a "binance"-via asset here once `chain.contracts.deployed` flips to true (see
+ * the entry-classification loop below).
  */
 async function buildBinanceExecutorLeg(chain: StaxChain, asset: Asset, usdcIn: bigint, slippageBps: bigint): Promise<Leg> {
   const leg = await buildBinanceLeg({

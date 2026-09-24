@@ -2,6 +2,7 @@
 // These mirror the JSON the API routes return (all bigints serialized as strings).
 import type { Allocation } from "./allocation-schema";
 import type { ChainKey } from "./chains/types";
+import type { ExecCall } from "./execution";
 
 /** POST /api/allocate response. */
 export interface AllocateResult extends Allocation {
@@ -49,6 +50,15 @@ export interface InvestPlanResult {
   /** Explorer base URL for `chain` (e.g. https://basescan.org) so the client never guesses. */
   explorer: string;
   notes: string[];
+  /**
+   * Direct smart-account path (ADR-0005): present instead of being sent through the executor
+   * when `chain.contracts.deployed` is false (BSC today). The client sends these calls
+   * verbatim, in order, as one sponsored user op — see `assertExecCallsAreSafe` in
+   * `lib/execution.ts`. `plan`/`inference`/`legs`/`usdcTotal` above are still required by the
+   * type (existing callers such as useGifts.ts read them unconditionally on the executor path)
+   * but are meaningless when `calls` is present, and a client on that path ignores them.
+   */
+  calls?: ExecCall[];
 }
 
 /** A receipt-ish summary surfaced to the success screen. */
