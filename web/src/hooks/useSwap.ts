@@ -26,12 +26,13 @@ import { asViemProvider } from "@/lib/provider";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { useRefreshBalances } from "@/hooks/useBalances";
 import { AAVE_POOL_ABI, AGNI_ROUTER_ABI, ERC20_ABI, FLUXION_ROUTER_ABI, UNISWAP_ROUTER02_ABI } from "@/lib/abis";
-import { isRoutable, reverseRoute, type Asset, type RouteHop, type StaxChain } from "@/lib/chains";
+import { isRoutable, reverseRoute, type Asset, type RouteHop, type RwaPlatform, type StaxChain } from "@/lib/chains";
 import { useChain } from "@/lib/chains/active";
 import { encodeV3Path, singleHopSqrtLimit } from "@/lib/swapRouting";
 import { aggregatorRouterFor, fetchSwapQuote, usesAggregator } from "@/lib/swapQuote";
 import { feeOf, STAX_TREASURY } from "@/lib/fees";
 import { usdToRaw } from "@/lib/units";
+import { resolveVenueAddress } from "@/lib/venues";
 
 type Phase = "idle" | "swapping" | "done" | "error";
 
@@ -115,7 +116,15 @@ function singleHopSwapCall(
  */
 async function aggregatorCalls(
   chain: StaxChain,
-  p: { asset: Asset; side: "buy" | "sell"; tokenIn: `0x${string}`; amountIn: bigint; account: `0x${string}`; slippageBps: number },
+  p: {
+    asset: Asset;
+    side: "buy" | "sell";
+    tokenIn: `0x${string}`;
+    amountIn: bigint;
+    account: `0x${string}`;
+    slippageBps: number;
+    venue?: RwaPlatform;
+  },
 ): Promise<{ calls: Call[]; minOut: bigint }> {
   const q = await fetchSwapQuote({
     symbol: p.asset.symbol,
@@ -125,12 +134,21 @@ async function aggregatorCalls(
     recipient: p.account,
     slippageBps: p.slippageBps,
     build: true,
+    venue: p.venue,
   });
   const router = aggregatorRouterFor(chain, p.asset);
   if (!router || q.router.toLowerCase() !== router.toLowerCase() || !q.data) {
     throw new Error("The swap route didn't match this network. Please try again.");
   }
   if (q.amountIn !== p.amountIn) throw new Error("The swap amount changed. Please try again.");
+  // Belt-and-suspenders for the twin-venue bug this guards against elsewhere (TradeScreen's
+  // holding lookup, resolveVenueAddress): the approve below is built from OUR resolved
+  // `p.tokenIn`, so if the server's quote ever disagreed about which token this trade means,
+  // approving `p.tokenIn` while the router pulls a different one would silently move the wrong
+  // token. Catch that here instead of letting a UserOp revert (or worse, half-succeed) explain it.
+  if (q.tokenIn.toLowerCase() !== p.tokenIn.toLowerCase()) {
+    throw new Error("The swap route didn't match the selected venue. Please try again.");
+  }
   // Kyber: reset the allowance to 0 after the swap (mirrors the executor) so a partially
   // consumed approval never lingers on the public router. Binance: the approve is already
   // exact-amount and single-use, and its router expects no such reset — skip the third call.
@@ -175,8 +193,10 @@ export function useSwap() {
       expectedOutRaw: bigint;
       slippageBps: number;
       recipient: string;
+      /** BSC only: the issuer this quote was built against. Ignored elsewhere. */
+      venue?: RwaPlatform;
     }) => {
-      const { asset, amountUsd, expectedOutRaw, slippageBps, recipient: rcpt } = params;
+      const { asset, amountUsd, expectedOutRaw, slippageBps, recipient: rcpt, venue } = params;
       const recipient = rcpt as `0x${string}`;
       setError(null);
       setResult(null);
@@ -228,6 +248,7 @@ export function useSwap() {
             amountIn: netIn,
             account: recipient,
             slippageBps,
+            venue,
           });
           if (agg.minOut < minOut / BigInt(2)) {
             throw new Error("The price moved too much since your quote. Please try again.");
@@ -295,8 +316,11 @@ export function useSwap() {
       recipient: string;
       /** Slippage the aggregator should enforce (Base); defaults to 1%. */
       slippageBps?: number;
+      /** BSC only: which issuer actually holds this position (a twin holding sells its own
+       *  token, not the ticker's default address). Ignored elsewhere. */
+      venue?: RwaPlatform;
     }) => {
-      const { asset, amountIn, minUsdcOut, estUsdcValue, recipient: rcpt } = params;
+      const { asset, amountIn, minUsdcOut, estUsdcValue, recipient: rcpt, venue } = params;
       const slippageBps = params.slippageBps ?? 100;
       const recipient = rcpt as `0x${string}`;
       setError(null);
@@ -318,6 +342,11 @@ export function useSwap() {
           asset.address && (asset.via === "aave_v3" ? Boolean(chain.routers.aavePool) : aggregator || asset.pool || route);
         if (!sellable) throw new Error(`${asset.symbol} can't be sold here yet.`);
         if (amountIn <= BigInt(0)) throw new Error("Nothing to sell.");
+        // A twin holding (e.g. NVDAon when the default is bStock's NVDAB) sells its OWN token,
+        // never the ticker's default address — resolveVenueAddress is the same rule the
+        // portfolio rows and the buy quote use, so a sell can't approve the wrong contract.
+        const venueToken = resolveVenueAddress(chain, asset, venue);
+        if (!venueToken) throw new Error(`Couldn't find ${asset.symbol} for that venue.`);
 
         const usdc = chain.usdc.address;
         let calls: Call[];
@@ -333,10 +362,11 @@ export function useSwap() {
           const agg = await aggregatorCalls(chain, {
             asset,
             side: "sell",
-            tokenIn: asset.address!,
+            tokenIn: venueToken.address,
             amountIn,
             account: recipient,
             slippageBps,
+            venue,
           });
           if (agg.minOut < minUsdcOut / BigInt(2)) {
             throw new Error("The price moved too much since your quote. Please try again.");

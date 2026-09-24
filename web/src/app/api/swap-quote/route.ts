@@ -26,6 +26,7 @@ import { chainFromRequest } from "@/lib/server/chain";
 import { KyberError, KyberNoRoute, kyberBuild, kyberRoute } from "@/lib/server/kyber";
 import { BinanceLegError, BinanceLegRefusal, bscLegUsdValue, buildBinanceLeg, checkBscBuyable } from "@/lib/server/binanceLegs";
 import { getBinanceWeb3 } from "@/lib/server/binance";
+import { resolveVenueAddress } from "@/lib/venues";
 import { requireApproved } from "@/lib/server/admin";
 import { verifyRequest } from "@/lib/server/privyAuth";
 import { rateLimit } from "@/lib/server/rateLimit";
@@ -52,6 +53,8 @@ const SwapQuoteRequestSchema = z.object({
   recipient: z.string().refine((a) => isAddress(a), "Invalid recipient."), // must equal sender (checked below)
   slippageBps: z.number().int().min(0).max(2000).optional(),
   build: z.boolean().optional(),
+  /** BSC only: which issuer to trade (bStock vs Ondo). Ignored off BSC. */
+  venue: z.enum(["bstock", "ondo"]).optional(),
 });
 
 export interface SwapQuoteResponse {
@@ -97,9 +100,17 @@ export async function POST(req: NextRequest) {
   const amountIn = BigInt(body.amountIn);
   if (amountIn <= BigInt(0)) return badRequest("Amount too small.");
 
+  // `venue` only matters on BSC (resolveVenueAddress ignores it everywhere else): the asset's
+  // own address by default, the twin's when the caller names it, 400 for a venue this ticker
+  // doesn't have. Every check below — the buyable gate, the $6 floor, the quote itself — uses
+  // this RESOLVED address, never `asset.address`, so a chosen Ondo trade can't accidentally
+  // price or gate against bStock's token.
+  const resolved = resolveVenueAddress(chain, asset, body.venue);
+  if (!resolved) return badRequest(`${asset.symbol} isn't listed on ${body.venue} on ${chain.name}.`);
+
   const usdc = chain.usdc.address;
-  const tokenIn = body.side === "buy" ? usdc : asset.address;
-  const tokenOut = body.side === "buy" ? asset.address : usdc;
+  const tokenIn = body.side === "buy" ? usdc : resolved.address;
+  const tokenOut = body.side === "buy" ? resolved.address : usdc;
   const slippageBps = body.slippageBps ?? DEFAULT_SLIPPAGE_BPS;
   const sender = body.sender as `0x${string}`;
   const recipient = body.recipient as `0x${string}`;
@@ -132,7 +143,7 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       return serverError("swap-quote", err);
     }
-    const gate = checkBscBuyable(tokens, asset.address!, asset.symbol, Date.now());
+    const gate = checkBscBuyable(tokens, resolved.address, asset.symbol, Date.now());
     if (!gate.ok) return jsonError(409, gate.message);
     const usdValue = bscLegUsdValue(body.side, chain, amountIn, asset, gate.row);
 

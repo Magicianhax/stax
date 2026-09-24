@@ -10,7 +10,7 @@
 // Receipt. `swap` is owned by LiteApp so the swap survives the route change to
 // Placing; this screen only reads its state and fires buy()/sell().
 import { useState } from "react";
-import { isRoutable, type Asset } from "@/lib/chains";
+import { isRoutable, type Asset, type RwaPlatform } from "@/lib/chains";
 import { useChain } from "@/lib/chains/active";
 import { useQuote, useSellQuote } from "@/hooks/useQuote";
 import type { useSwap } from "@/hooks/useSwap";
@@ -25,6 +25,9 @@ import { describeNextChange } from "@/lib/marketHours";
 import { usd, tokenQty, fromUnits } from "@/lib/format";
 import { feeUsd, feeOf } from "@/lib/fees";
 import { usdToRaw } from "@/lib/units";
+import { quoteErrorMessage } from "@/lib/swapQuote";
+import { holdingVenue } from "@/lib/venues";
+import { PLATFORM_LABEL } from "@/components/lite/rwa/VenuePicker";
 import { haptic } from "@/lib/haptics";
 import { iconBtn } from "./primitives";
 import { ReviewSheet } from "./ReviewSheet";
@@ -40,17 +43,23 @@ export function TradeScreen({
   go,
   symbol,
   initialSide = "buy",
+  venue,
   swap,
   draft,
 }: {
   go: (target: string | number, params?: Record<string, unknown>) => void;
   symbol: string;
   initialSide?: "buy" | "sell";
+  /** BSC only: which issuer this trade uses — the venue picked on AssetDetail for a buy, or the
+   *  venue of the holding being sold. Undefined off BSC, and safe to omit (every hook below
+   *  ignores it there). */
+  venue?: RwaPlatform;
   swap: ReturnType<typeof useSwap>;
   /** Restored form state when a trade bounced back here with an error. */
   draft?: TradeDraft;
 }) {
   const chain = useChain();
+  const bsc = chain.key === "bsc";
   const asset: Asset = chain.assets.all.find((a) => a.symbol === symbol) ?? chain.assets.all[0];
   const d = displayFor(asset.symbol, asset.name);
   const ticker = d.ticker ?? asset.symbol;
@@ -70,7 +79,14 @@ export function TradeScreen({
   const { data: bal } = useUsdcBalance(address ?? undefined);
   const { data: port } = usePortfolio(address ?? undefined);
   const balance = bal?.value ?? 0;
-  const holding = port?.holdings.find((h) => h.asset.symbol === asset.symbol);
+  // `wantVenue` narrows which row is "the position" when a ticker has two (one per issuer). It
+  // must default to the asset's own platform, not "the first row" — the portfolio sorts twin
+  // rows by value, so the Ondo twin can be first even when nothing was explicitly picked, and
+  // matching on `venue === undefined` there sold the wrong issuer's token under the default
+  // label. Off BSC `holdingVenue` returns undefined and every row still matches, so nothing
+  // changes there.
+  const wantVenue = holdingVenue(chain, asset, venue);
+  const holding = port?.holdings.find((h) => h.asset.symbol === asset.symbol && (!bsc || h.venue === wantVenue));
 
   const [side, setSide] = useState<"buy" | "sell">(initialSide);
   // The amount is the shared keypad state: one rule set, and the cash on hand is
@@ -85,17 +101,26 @@ export function TradeScreen({
   const [review, setReview] = useState(false);
 
   const n = pad.amount;
-  const { data: quote, isFetching } = useQuote(side === "buy" ? asset : null, n);
+  const {
+    data: quote,
+    isFetching,
+    error: quoteError,
+  } = useQuote(side === "buy" ? asset : null, n, bsc ? venue : undefined);
+  // Review Focus #1 / #3: a refused quote (market closed, below the $6 minimum) must read as a
+  // real message, not a blank amount — swap-quote's own text, surfaced verbatim.
+  const quoteErrorText = quoteErrorMessage(quoteError);
 
   // Sell side: share of the held position to sell. No default — "All" is a chip.
   const [sellPct, setSellPct] = useState(draft?.sellPct ?? 0);
   const heldRaw = holding?.raw ?? BigInt(0);
   const sellRaw = (heldRaw * BigInt(Math.round(sellPct))) / BigInt(100);
   const sellQty = holding ? fromUnits(sellRaw, decimals) : 0;
-  const { data: sellQuote, isFetching: sellFetching } = useSellQuote(
-    side === "sell" && sellable ? asset : null,
-    side === "sell" ? sellRaw : BigInt(0),
-  );
+  const {
+    data: sellQuote,
+    isFetching: sellFetching,
+    error: sellQuoteError,
+  } = useSellQuote(side === "sell" && sellable ? asset : null, side === "sell" ? sellRaw : BigInt(0), bsc ? venue : undefined);
+  const sellQuoteErrorText = quoteErrorMessage(sellQuoteError);
 
   const over = side === "buy" && n > balance + 1e-6;
   // What the line under the amount says. `over` is a value that no longer fits
@@ -165,6 +190,7 @@ export function TradeScreen({
         expectedOutRaw: quote.expectedOutRaw,
         slippageBps: TOL_BPS[tol],
         recipient: address,
+        venue: bsc ? venue : undefined,
       });
     } else {
       if (!sellQuote) return;
@@ -176,6 +202,7 @@ export function TradeScreen({
         estUsdcValue: sellQuote.expectedUsd,
         recipient: address,
         slippageBps: TOL_BPS[tol],
+        venue: bsc ? venue : undefined,
       });
     }
     setReview(false);
@@ -184,6 +211,7 @@ export function TradeScreen({
 
   const sellEmpty = side === "sell" && (!sellable || !holding || heldRaw <= BigInt(0));
   const canReview = side === "buy" ? canBuy : canSell;
+  const bannerError = swap.error ?? (side === "buy" ? quoteErrorText : sellQuoteErrorText);
 
   // Every amount change clears a stale swap error along with it, so the screen
   // never shows a failure for a trade the person has already edited away.
@@ -191,6 +219,12 @@ export function TradeScreen({
     setAmt(next);
     if (swap.error) swap.reset();
   };
+
+  // Which issuer this trade uses, in words — Review Focus and the manual-trade spec both want
+  // the person to see who they're actually buying from/selling to, not just a silent address.
+  // Same default as the holding lookup, so "via bStock/Ondo" shows even when no venue was
+  // explicitly passed (the common case — see the LiteApp follow-up in the review this fixed).
+  const venueLabel = wantVenue ? PLATFORM_LABEL[wantVenue] : undefined;
 
   // The primary action, rendered inside the keypad frame on buy and pinned at
   // the bottom on sell. Same markup either way.
@@ -203,6 +237,7 @@ export function TradeScreen({
         {side === "sell" || chain.key === "bsc"
           ? "No fee · no network cost"
           : `${n > 0 ? usd(fee) : usd(feeUsd(100))} fee · no network cost`}
+        {venueLabel ? ` · via ${venueLabel}` : ""}
       </div>
       <button
         className="btn btn-primary btn-block btn-lg tap"
@@ -500,12 +535,16 @@ export function TradeScreen({
         </>
       )}
 
-      {swap.error && !sellEmpty && (
+      {/* One error surface for both kinds of failure: a submitted trade that reverted (swap.error,
+          dismissable — the person edits the form and it clears) and a refused quote (market
+          closed, below the $6 minimum) that never let them get this far, which just describes
+          why the confirm button below stays disabled until something changes. */}
+      {bannerError && !sellEmpty && (
         <div style={{ padding: "14px 22px 0" }}>
           <div
-            role="button"
-            aria-label="Dismiss error"
-            onClick={swap.reset}
+            role={swap.error ? "button" : "status"}
+            aria-label={swap.error ? "Dismiss error" : undefined}
+            onClick={swap.error ? swap.reset : undefined}
             style={{
               background: "color-mix(in srgb, var(--neg) 14%, var(--surface))",
               color: "var(--neg)",
@@ -515,7 +554,7 @@ export function TradeScreen({
               fontWeight: 500,
             }}
           >
-            {swap.error}
+            {bannerError}
           </div>
         </div>
       )}

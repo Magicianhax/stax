@@ -14,7 +14,7 @@
 // amountOutMinimum (and Kyber's own minReturn) is the real protection.
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { isRoutable, reverseRoute, type Asset } from "@/lib/chains";
+import { isRoutable, reverseRoute, type Asset, type RwaPlatform } from "@/lib/chains";
 import { useChain } from "@/lib/chains/active";
 import { fromUnits } from "@/lib/format";
 import { quoteAlongRoute, quoteSingleHop } from "@/lib/swapRouting";
@@ -48,7 +48,7 @@ export interface Quote {
  * rounded amount (plus a 400ms input debounce on aggregator chains); keyed by chain
  * so a network switch re-quotes. Returns no data while disabled/loading.
  */
-export function useQuote(asset: Asset | null, amountUsd: number) {
+export function useQuote(asset: Asset | null, amountUsd: number, venue?: RwaPlatform) {
   const chain = useChain();
   const { address } = useSmartAccount();
   const aggregator = usesAggregator(chain, asset);
@@ -60,10 +60,13 @@ export function useQuote(asset: Asset | null, amountUsd: number) {
   const canQuote = aggregator ? Boolean(address) || Boolean(asset?.pool) : true;
   const enabled = Boolean(asset && asset.decimals && cents > 0 && isRoutable(chain, asset.symbol) && canQuote);
   return useQuery({
-    queryKey: ["quote", chain.key, asset?.symbol, "buy", cents, aggregator ? address : null],
+    queryKey: ["quote", chain.key, asset?.symbol, "buy", cents, aggregator ? address : null, venue ?? null],
     enabled,
     staleTime: 10_000,
     refetchInterval: 15_000,
+    // A refusal (closed market, sub-$6) is the server's final word, not a transient failure —
+    // retrying it burns another call against Binance's 5-per-window budget for the same answer.
+    retry: false,
     queryFn: async (): Promise<Quote> => {
       const a = asset!;
       // Chain-aware: `10_000` * cents is only correct on 6-decimal USDC. BSC's cash is
@@ -83,6 +86,7 @@ export function useQuote(asset: Asset | null, amountUsd: number) {
             amountIn: amountInRaw,
             sender: address,
             recipient: address,
+            venue,
           });
           expectedOutRaw = q.amountOut;
           minOutRaw = q.minOut;
@@ -123,7 +127,7 @@ export interface SellQuote {
  * their route in REVERSE (asset -> ... -> USDC). Returns no data while
  * disabled/loading.
  */
-export function useSellQuote(asset: Asset | null, tokenQtyRaw: bigint) {
+export function useSellQuote(asset: Asset | null, tokenQtyRaw: bigint, venue?: RwaPlatform) {
   const chain = useChain();
   const { address } = useSmartAccount();
   const aggregator = usesAggregator(chain, asset);
@@ -133,10 +137,12 @@ export function useSellQuote(asset: Asset | null, tokenQtyRaw: bigint) {
   const canQuote = aggregator ? Boolean(address) || Boolean(asset?.pool) : true;
   const enabled = Boolean(asset && asset.decimals && qtyKey !== "0" && isRoutable(chain, asset.symbol) && canQuote);
   return useQuery({
-    queryKey: ["sell-quote", chain.key, asset?.symbol, "sell", qtyKey, aggregator ? address : null],
+    queryKey: ["sell-quote", chain.key, asset?.symbol, "sell", qtyKey, aggregator ? address : null, venue ?? null],
     enabled,
     staleTime: 10_000,
     refetchInterval: 15_000,
+    // Same reasoning as useQuote: a refusal is final, so retrying just doubles the Binance call.
+    retry: false,
     queryFn: async (): Promise<SellQuote> => {
       const a = asset!;
       const amountInRaw = BigInt(qtyKey);
@@ -153,6 +159,7 @@ export function useSellQuote(asset: Asset | null, tokenQtyRaw: bigint) {
             amountIn: amountInRaw,
             sender: address,
             recipient: address,
+            venue,
           });
           expectedUsdcRaw = q.amountOut;
           minUsdcRaw = q.minOut;

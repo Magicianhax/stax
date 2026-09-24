@@ -13,7 +13,9 @@ import { ERC20_ABI } from "@/lib/abis";
 import type { ChainKey, StaxChain } from "@/lib/chains/types";
 import { priceAll } from "@/lib/prices";
 import { fromUnits } from "@/lib/format";
+import { buildAssetRows, type PortfolioHoldingRow } from "@/lib/portfolioRows";
 import { chainFromRequest, serverClient } from "@/lib/server/chain";
+import { getBinanceWeb3 } from "@/lib/server/binance";
 import { getDaySummary } from "@/lib/server/marketData";
 import { rateLimit, clientIp } from "@/lib/server/rateLimit";
 import { badRequest, tooManyRequests, serverError } from "@/lib/server/respond";
@@ -33,17 +35,23 @@ function cachedPrices(chain: StaxChain) {
   return value;
 }
 
-interface PortfolioHolding {
-  symbol: string;
-  /** Raw balance as a decimal string (bigint-safe for JSON). */
-  raw: string;
-  qty: number;
-  priceUsd: number | null;
-  valueUsd: number | null;
-  dayChangePct: number | null;
-  spark: number[] | null;
-  /** Supply APY (percent) for yield assets like aUSDC, when known. */
-  apy: number | null;
+/**
+ * `RwaToken.tokenPrice` for every address the Binance catalog lists, on BSC only — the same
+ * per-venue price the RWA catalog (Task 9) shows, so a twin holding's value agrees with what the
+ * Venues panel says that issuer's token is worth right now, not the default venue's price
+ * borrowed for lack of anything better. `getBinanceWeb3().rwaTokens()` holds its own cache
+ * (Task 7), so this is never a fresh Binance call on every page view. Off BSC, or on any error,
+ * an empty map means every twin row prices as null rather than guessing.
+ */
+async function twinPricesByAddress(chain: StaxChain): Promise<Map<string, number>> {
+  if (chain.key !== "bsc") return new Map();
+  try {
+    const tokens = await getBinanceWeb3().rwaTokens();
+    return new Map(tokens.map((t) => [t.tokenContractAddress.toLowerCase(), t.tokenPrice]));
+  } catch (err) {
+    console.warn("[portfolio] twin prices unavailable:", err instanceof Error ? err.message : err);
+    return new Map();
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -58,8 +66,11 @@ export async function GET(req: NextRequest) {
 
   try {
     const assets = chain.assets.all.filter((a) => a.address && a.decimals);
-    const [results, prices, day] = await Promise.all([
-      // USDC first, then the asset universe — one multicall, one RPC request.
+    // Assets with a twin (BSC only — see chains/bsc.assets.ts) get a second balance read at the
+    // twin's own address, appended after the main asset list so both live in the one multicall.
+    const twinned = assets.filter((a) => a.twin);
+    const [results, prices, day, twinPrices] = await Promise.all([
+      // USDC first, then the asset universe, then twin addresses — one multicall, one RPC request.
       client.multicall({
         contracts: [
           { address: chain.usdc.address, abi: ERC20_ABI, functionName: "balanceOf" as const, args: [address as `0x${string}`] },
@@ -69,36 +80,52 @@ export async function GET(req: NextRequest) {
             functionName: "balanceOf" as const,
             args: [address as `0x${string}`] as const,
           })),
+          ...twinned.map((asset) => ({
+            address: asset.twin!.address,
+            abi: ERC20_ABI,
+            functionName: "balanceOf" as const,
+            args: [address as `0x${string}`] as const,
+          })),
         ],
       }),
       cachedPrices(chain),
       getDaySummary(chain).catch(() => ({}) as Awaited<ReturnType<typeof getDaySummary>>),
+      twinPricesByAddress(chain),
     ]);
 
     const usdcRead = results[0];
     const cashUsd =
       usdcRead.status === "success" ? fromUnits(usdcRead.result as bigint, chain.usdc.decimals) : 0;
 
-    const holdings: PortfolioHolding[] = [];
+    const twinOffset = 1 + assets.length;
+    const twinRawBySymbol = new Map<string, bigint>();
+    for (let j = 0; j < twinned.length; j++) {
+      const r = results[twinOffset + j];
+      if (r.status === "success") twinRawBySymbol.set(twinned[j].symbol, r.result as bigint);
+    }
+
+    const holdings: PortfolioHoldingRow[] = [];
     for (let i = 0; i < assets.length; i++) {
       const r = results[i + 1];
-      if (r.status !== "success") continue; // one bad token never hides the rest
-      const raw = r.result as bigint;
-      if (raw === BigInt(0)) continue;
       const asset = assets[i];
-      const qty = fromUnits(raw, asset.decimals!); // registry decimals (8 for B20 stocks)
+      const twinRaw = asset.twin ? twinRawBySymbol.get(asset.symbol) : undefined;
+      // A failed default-address read reads as "not held" (0n), same as before — but it must
+      // not also hide a twin balance that DID read successfully, so this never `continue`s past
+      // the twin row the way skipping the whole iteration would.
+      if (r.status !== "success" && twinRaw === undefined) continue;
       const p = prices[asset.symbol];
-      const priceUsd = p?.priceUsd ?? null;
-      holdings.push({
-        symbol: asset.symbol,
-        raw: raw.toString(),
-        qty,
-        priceUsd,
-        valueUsd: priceUsd !== null ? qty * priceUsd : null,
-        dayChangePct: day[asset.symbol]?.dayChangePct ?? null,
-        spark: day[asset.symbol]?.spark ?? null,
-        apy: p?.apy ?? null,
-      });
+      holdings.push(
+        ...buildAssetRows({
+          asset,
+          defaultRaw: r.status === "success" ? (r.result as bigint) : BigInt(0),
+          defaultPriceUsd: p?.priceUsd ?? null,
+          twinRaw,
+          twinPriceUsd: asset.twin ? (twinPrices.get(asset.twin.address.toLowerCase()) ?? null) : undefined,
+          dayChangePct: day[asset.symbol]?.dayChangePct ?? null,
+          spark: day[asset.symbol]?.spark ?? null,
+          apy: p?.apy ?? null,
+        }),
+      );
     }
 
     // Largest value first, unpriced last.
