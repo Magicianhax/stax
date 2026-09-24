@@ -271,12 +271,58 @@ const MANTLE_SEEDS: Seed[] = [
   },
 ];
 
+// BSC curated baskets (Task 12): only tickers in bsc.assets.ts, no leveraged ETFs (SOXL/TQQQ
+// are listed there but never belong in a "buy and hold" curated basket), and every leg must
+// clear Binance's $6 minimum at the $100 default invest amount (BasketDetailScreen) — the
+// smallest weight below is 15%, i.e. $15, well clear. `curatedBaskets()` still filters at read
+// time by `isRoutable`, same as Base/Mantle; live buyability (market hours, issuer pauses) is
+// checked fresh at invest time by the direct path, not baked into this list.
+const BSC_SEEDS: Seed[] = [
+  {
+    slug: "us-tech-giants",
+    name: "US Tech Giants",
+    tagline: "Five names that already run a chunk of the internet.",
+    icon: "building",
+    color: "#3b5bdb",
+    items: [
+      { symbol: "NVDA", weightPct: 25, reason: "The chips behind most of today's AI." },
+      { symbol: "MSFT", weightPct: 20, reason: "Windows, Office, and a huge cloud business." },
+      { symbol: "GOOGL", weightPct: 20, reason: "Search, YouTube, and cloud income in one company." },
+      { symbol: "META", weightPct: 20, reason: "Billions of daily users, mostly paid for by ads." },
+      { symbol: "AMZN", weightPct: 15, reason: "The world's biggest online store, plus its cloud arm." },
+    ],
+  },
+  {
+    slug: "chip-makers",
+    name: "Chip Makers",
+    tagline: "The companies whose chips run modern computing.",
+    icon: "cpu",
+    color: "#4a7d2c",
+    items: [
+      { symbol: "NVDA", weightPct: 35, reason: "The AI chip leader by a wide margin." },
+      { symbol: "AVGO", weightPct: 30, reason: "Networking and custom AI chips for the biggest cloud names." },
+      { symbol: "TSM", weightPct: 20, reason: "Manufactures most of the world's advanced chips." },
+      { symbol: "QCOM", weightPct: 15, reason: "The chips inside most of the world's phones." },
+    ],
+  },
+  {
+    slug: "broad-market",
+    name: "Broad Market",
+    tagline: "Hundreds of companies at once. A classic first step.",
+    icon: "globe",
+    color: "#1f6f54",
+    items: [
+      { symbol: "SPY", weightPct: 60, reason: "The 500 largest US companies in one fund." },
+      { symbol: "QQQ", weightPct: 40, reason: "The 100 biggest Nasdaq names, tech-heavy." },
+    ],
+  },
+];
+
 /** Every curated seed, per chain — unfiltered. Use `curatedBaskets(chain)` for what to show. */
 export const CURATED_BASKETS: Record<ChainKey, Basket[]> = {
   base: curated("base", BASE_SEEDS),
   mantle: curated("mantle", MANTLE_SEEDS),
-  // BSC baskets arrive with Vera on BSC, built only from tickers the RWA catalog can trade.
-  bsc: [],
+  bsc: curated("bsc", BSC_SEEDS),
 };
 
 /** A curated basket by its static id ("base:big-tech") on `chain`, unfiltered — check `isBasketInvestable` before buying. */

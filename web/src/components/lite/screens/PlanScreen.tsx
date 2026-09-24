@@ -72,6 +72,10 @@ export function PlanScreen({
 }) {
   const risk = riskMeta(allocation.riskScore);
   const { chain, ready } = useChainReady();
+  // useChainReady's `ready` only tracks the executor. BSC (ADR-0005) has no executor yet and
+  // never will need one for this direct smart-account path, so it reads investable here
+  // whenever the Binance aggregator is configured, not only once `contracts.deployed` flips.
+  const investable = ready || Boolean(chain.routers.binance);
   const { save } = useBaskets();
   const { notify } = useToast();
   const [saveOpen, setSaveOpen] = useState(false);
@@ -317,9 +321,9 @@ export function PlanScreen({
           background: "linear-gradient(to top, var(--paper), var(--paper) 62%, transparent)",
         }}
       >
-        {ready ? (
+        {investable ? (
           <div style={{ textAlign: "center", fontSize: 12.5, color: "var(--ink-2)", marginBottom: 10 }}>
-            {STAX_FEE_LABEL} fee ({usd(feeUsd(amount))}) · gas on us
+            {chain.key === "bsc" ? "No fee" : `${STAX_FEE_LABEL} fee (${usd(feeUsd(amount, chain.key))})`} · gas on us
           </div>
         ) : (
           <div style={{ marginBottom: 10 }}>
@@ -336,7 +340,7 @@ export function PlanScreen({
             </span>
           </button>
         ) : (
-          <HoldButton onComplete={onInvest} disabled={rethinking || busy || !ready} className="btn-lg">
+          <HoldButton onComplete={onInvest} disabled={rethinking || busy || !investable} className="btn-lg">
             {`Hold to invest ${usd(amount)}`}
           </HoldButton>
         )}
