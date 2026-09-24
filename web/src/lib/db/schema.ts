@@ -4,7 +4,7 @@
 //   npm run db:migrate    → applies it over DATABASE_URL_UNPOOLED
 // Never hand-write SQL against production.
 //
-// Conventions: `chain` is the ChainKey ("base" | "mantle") enforced by a CHECK;
+// Conventions: `chain` is the ChainKey ("base" | "mantle" | "bsc") enforced by a CHECK;
 // money is `numeric` (read back as strings — callers Number() them); every
 // table carries `created_at timestamptz default now()`.
 import { sql } from "drizzle-orm";
@@ -26,7 +26,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 const chainCheck = (name: string, col: AnyPgColumn) =>
-  check(name, sql`${col} in ('base', 'mantle')`);
+  check(name, sql`${col} in ('base', 'mantle', 'bsc')`);
 
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 
