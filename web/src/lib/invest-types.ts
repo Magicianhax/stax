@@ -2,6 +2,7 @@
 // These mirror the JSON the API routes return (all bigints serialized as strings).
 import type { Allocation } from "./allocation-schema";
 import type { ChainKey } from "./chains/types";
+import type { DryRun } from "./dryRun";
 import type { ExecCall } from "./execution";
 
 /** POST /api/allocate response. */
@@ -59,6 +60,12 @@ export interface InvestPlanResult {
    * but are meaningless when `calls` is present, and a client on that path ignores them.
    */
   calls?: ExecCall[];
+  /**
+   * Direct path only: one Binance Transaction API dry run per leg in `calls`, same order as
+   * the allocation's legs. Never claims a check that didn't run — the client must not send
+   * this plan if any entry here has status "failed" (see lib/dryRun.ts).
+   */
+  dryRuns?: DryRun[];
 }
 
 /** A receipt-ish summary surfaced to the success screen. */

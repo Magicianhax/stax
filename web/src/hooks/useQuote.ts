@@ -19,6 +19,7 @@ import { useChain } from "@/lib/chains/active";
 import { fromUnits } from "@/lib/format";
 import { quoteAlongRoute, quoteSingleHop } from "@/lib/swapRouting";
 import { fetchSwapQuote, usesAggregator } from "@/lib/swapQuote";
+import type { DryRun } from "@/lib/dryRun";
 import { usdToRaw } from "@/lib/units";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 
@@ -41,6 +42,8 @@ export interface Quote {
   pricePerToken: number; // USDC per whole token
   /** Aggregator quotes: the floor Kyber will enforce at the default slippage (raw). */
   minOutRaw?: bigint;
+  /** BSC only, and only on a build=true quote: the Binance check this trade would face. */
+  dryRun?: DryRun;
 }
 
 /**
@@ -76,6 +79,7 @@ export function useQuote(asset: Asset | null, amountUsd: number, venue?: RwaPlat
       const route = chain.routes[a.symbol];
       let expectedOutRaw: bigint;
       let minOutRaw: bigint | undefined;
+      let dryRun: DryRun | undefined;
       if (a.via === "aave_v3") {
         expectedOutRaw = amountInRaw; // supply(USDC) mints aUSDC 1:1
       } else if (aggregator && address) {
@@ -90,6 +94,7 @@ export function useQuote(asset: Asset | null, amountUsd: number, venue?: RwaPlat
           });
           expectedOutRaw = q.amountOut;
           minOutRaw = q.minOut;
+          dryRun = q.dryRun;
         } catch (e) {
           if (!a.pool) throw e;
           expectedOutRaw = await quoteSingleHop(
@@ -109,7 +114,14 @@ export function useQuote(asset: Asset | null, amountUsd: number, venue?: RwaPlat
       }
       const expectedOutQty = fromUnits(expectedOutRaw, a.decimals!);
       const pricePerToken = expectedOutQty > 0 ? cents / 100 / expectedOutQty : 0;
-      return { amountInRaw, expectedOutRaw, expectedOutQty, pricePerToken, ...(minOutRaw !== undefined ? { minOutRaw } : {}) };
+      return {
+        amountInRaw,
+        expectedOutRaw,
+        expectedOutQty,
+        pricePerToken,
+        ...(minOutRaw !== undefined ? { minOutRaw } : {}),
+        ...(dryRun ? { dryRun } : {}),
+      };
     },
   });
 }
@@ -120,6 +132,8 @@ export interface SellQuote {
   expectedUsd: number;
   /** Aggregator quotes: the USDC floor Kyber will enforce at the default slippage (raw). */
   minUsdcRaw?: bigint;
+  /** BSC only, and only on a build=true quote: the Binance check this trade would face. */
+  dryRun?: DryRun;
 }
 
 /**
@@ -149,6 +163,7 @@ export function useSellQuote(asset: Asset | null, tokenQtyRaw: bigint, venue?: R
       const route = chain.routes[a.symbol];
       let expectedUsdcRaw: bigint;
       let minUsdcRaw: bigint | undefined;
+      let dryRun: DryRun | undefined;
       if (a.via === "aave_v3") {
         expectedUsdcRaw = amountInRaw; // withdraw returns USDC 1:1
       } else if (aggregator && address) {
@@ -163,6 +178,7 @@ export function useSellQuote(asset: Asset | null, tokenQtyRaw: bigint, venue?: R
           });
           expectedUsdcRaw = q.amountOut;
           minUsdcRaw = q.minOut;
+          dryRun = q.dryRun;
         } catch (e) {
           if (!a.pool) throw e;
           expectedUsdcRaw = await quoteSingleHop(
@@ -181,7 +197,13 @@ export function useSellQuote(asset: Asset | null, tokenQtyRaw: bigint, venue?: R
         );
       }
       const expectedUsd = fromUnits(expectedUsdcRaw, chain.usdc.decimals);
-      return { amountInRaw, expectedUsdcRaw, expectedUsd, ...(minUsdcRaw !== undefined ? { minUsdcRaw } : {}) };
+      return {
+        amountInRaw,
+        expectedUsdcRaw,
+        expectedUsd,
+        ...(minUsdcRaw !== undefined ? { minUsdcRaw } : {}),
+        ...(dryRun ? { dryRun } : {}),
+      };
     },
   });
 }

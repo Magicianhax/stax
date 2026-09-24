@@ -5,6 +5,7 @@
 // fetched immediately before the UserOp is sent — Kyber routes are good for ~10s).
 import { authedFetch } from "@/lib/authedFetch";
 import type { Asset, RwaPlatform, StaxChain } from "@/lib/chains";
+import type { DryRun } from "@/lib/dryRun";
 
 /** Wire shape of /api/swap-quote (amounts are raw-unit decimal strings). */
 export interface SwapQuoteWire {
@@ -16,6 +17,8 @@ export interface SwapQuoteWire {
   minOut: string;
   data?: `0x${string}`;
   expiresAt: number;
+  /** BSC only, present only when the request had build=true. See lib/dryRun.ts. */
+  dryRun?: DryRun;
 }
 
 export interface SwapQuote {
@@ -27,6 +30,7 @@ export interface SwapQuote {
   minOut: bigint;
   data?: `0x${string}`;
   expiresAt: number;
+  dryRun?: DryRun;
 }
 
 export interface SwapQuoteArgs {
@@ -77,6 +81,17 @@ export function quoteErrorMessage(error: unknown): string | undefined {
   return error instanceof Error ? error.message : undefined;
 }
 
+/**
+ * Binance's own dry run is the final word only when it actually ran and said this exact trade
+ * would revert. Called right before a swap is sent (useSwap's aggregatorCalls); "skipped" (no
+ * approval yet — the common case for a first trade of a token) and "passed" both let it
+ * through, and no dry run at all (any non-BSC chain) is a no-op.
+ */
+export function assertDryRunAllowsSend(dryRun: DryRun | undefined): void {
+  if (dryRun?.status !== "failed") return;
+  throw new Error(dryRun.reason ?? "Binance checked this trade and it wouldn't go through right now.");
+}
+
 export async function fetchSwapQuote(args: SwapQuoteArgs): Promise<SwapQuote> {
   const res = await authedFetch("/api/swap-quote", {
     method: "POST",
@@ -95,6 +110,7 @@ export async function fetchSwapQuote(args: SwapQuoteArgs): Promise<SwapQuote> {
     amountOut: BigInt(json.amountOut),
     minOut: BigInt(json.minOut),
     ...(json.data ? { data: json.data } : {}),
+    ...(json.dryRun ? { dryRun: json.dryRun } : {}),
     expiresAt: json.expiresAt,
   };
 }

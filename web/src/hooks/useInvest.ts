@@ -154,6 +154,13 @@ export function useInvest(): UseInvest {
         if (plan.chain !== chain.key) {
           throw new Error("That plan was built for a different network. Please try again.");
         }
+        // Binance's own dry run is the final word when it actually ran: "failed" means it
+        // simulated this exact trade and it would revert, so it is never sent — "skipped"
+        // (the common case for a brand-new token) and "passed" both proceed as normal.
+        const failedCheck = plan.dryRuns?.find((d) => d.status === "failed");
+        if (failedCheck) {
+          throw new Error(failedCheck.reason ?? "Binance checked this trade and it wouldn't go through right now.");
+        }
 
         let calls: Call[];
         let verification: InvestSuccess["verification"];
