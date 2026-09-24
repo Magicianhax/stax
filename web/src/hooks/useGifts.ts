@@ -29,6 +29,7 @@ import type { StaxChain } from "@/lib/chains";
 import { displayFor } from "@/lib/displayAssets";
 import { ERC20_ABI, STAX_EXECUTOR_ABI } from "@/lib/abis";
 import { STAX_TREASURY } from "@/lib/fees";
+import { usdToRaw } from "@/lib/units";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { useRefreshBalances } from "@/hooks/useBalances";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
@@ -393,7 +394,7 @@ export function useSendGift(): UseSendGift {
         const investCalls: Call[] = [];
         // The fee is skimmed on the invest leg only, so it is sized against
         // `investUsd`. The cash slice pays none.
-        const feeRaw = BigInt(Math.round(reserved.investUsd * 1_000_000)) - usdcTotal;
+        const feeRaw = usdToRaw(chain, reserved.investUsd) - usdcTotal;
         if (feeRaw > BigInt(0)) {
           investCalls.push({
             to: chain.usdc.address,

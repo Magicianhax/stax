@@ -31,6 +31,7 @@ import { useChain } from "@/lib/chains/active";
 import { encodeV3Path, singleHopSqrtLimit } from "@/lib/swapRouting";
 import { fetchSwapQuote, usesAggregator } from "@/lib/swapQuote";
 import { feeOf, STAX_TREASURY } from "@/lib/fees";
+import { usdToRaw } from "@/lib/units";
 
 type Phase = "idle" | "swapping" | "done" | "error";
 
@@ -193,7 +194,7 @@ export function useSwap() {
         }
 
         const usdc = chain.usdc.address;
-        const amountIn = BigInt(Math.round(amountUsd * 1_000_000));
+        const amountIn = usdToRaw(chain, amountUsd);
         if (amountIn <= BigInt(0)) throw new Error("Enter an amount first.");
         // Platform fee skimmed to the treasury (gasless, batched below); the rest
         // is what we actually swap. expectedOutRaw was quoted for the gross amount,

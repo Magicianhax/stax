@@ -24,6 +24,7 @@ import { useAmountKeypad } from "@/hooks/useAmountKeypad";
 import { describeNextChange } from "@/lib/marketHours";
 import { usd, tokenQty, fromUnits } from "@/lib/format";
 import { feeUsd, feeOf } from "@/lib/fees";
+import { usdToRaw } from "@/lib/units";
 import { haptic } from "@/lib/haptics";
 import { iconBtn } from "./primitives";
 import { ReviewSheet } from "./ReviewSheet";
@@ -116,7 +117,7 @@ export function TradeScreen({
   const fee = side === "buy" ? feeUsd(n) : 0;
   let netOutRaw = BigInt(0);
   if (quote && n > 0) {
-    const amountIn = BigInt(Math.round(n * 1_000_000));
+    const amountIn = usdToRaw(chain, n);
     const netIn = amountIn - feeOf(amountIn);
     netOutRaw = amountIn > BigInt(0) ? (quote.expectedOutRaw * netIn) / amountIn : BigInt(0);
   }
