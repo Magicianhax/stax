@@ -3,6 +3,12 @@
 // same sponsored UserOp as the trade, so the user signs once and pays no gas.
 // Config-driven so it's tunable without a redeploy. Client-safe (NEXT_PUBLIC) so
 // the client (batches the transfer) and the server (sizes legs to the net) agree.
+//
+// BSC is fee-free (ADR-0007): the hack's judged flow never sends `feePercent` /
+// `feeSource` / a referrer wallet to Binance, and Stax skims nothing of its own
+// on top. Every fee function below takes an optional chain key; every existing
+// caller that passes nothing keeps today's behaviour unchanged (Base, Mantle).
+import type { ChainKey } from "./chains/types";
 
 const RAW_BPS = Number(process.env.NEXT_PUBLIC_STAX_FEE_BPS ?? "25"); // 0.25%
 /** Platform fee in basis points (clamped 0–1000 = 0–10%). */
@@ -17,18 +23,19 @@ export const STAX_TREASURY = (process.env.NEXT_PUBLIC_STAX_TREASURY ||
 
 const BPS = BigInt(10_000);
 
-/** Fee on a raw token amount (e.g. USDC 6dp). */
-export function feeOf(amountRaw: bigint): bigint {
-  if (STAX_FEE_BPS <= 0) return BigInt(0);
+/** Fee on a raw token amount (e.g. USDC 6dp). Zero on BSC (ADR-0007). */
+export function feeOf(amountRaw: bigint, chainKey?: ChainKey): bigint {
+  if (chainKey === "bsc" || STAX_FEE_BPS <= 0) return BigInt(0);
   return (amountRaw * BigInt(STAX_FEE_BPS)) / BPS;
 }
 
 /** Amount actually deployed after the fee. */
-export function netOf(amountRaw: bigint): bigint {
-  return amountRaw - feeOf(amountRaw);
+export function netOf(amountRaw: bigint, chainKey?: ChainKey): bigint {
+  return amountRaw - feeOf(amountRaw, chainKey);
 }
 
-/** Fee in USD for a USD amount (display helper). */
-export function feeUsd(amountUsd: number): number {
+/** Fee in USD for a USD amount (display helper). Zero on BSC (ADR-0007). */
+export function feeUsd(amountUsd: number, chainKey?: ChainKey): number {
+  if (chainKey === "bsc") return 0;
   return (amountUsd * STAX_FEE_BPS) / 10_000;
 }

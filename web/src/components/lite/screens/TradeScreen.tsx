@@ -114,11 +114,12 @@ export function TradeScreen({
 
   // Buy: the quote is for the gross amount; the fee comes off first, so the
   // shares you actually get are scaled to the net (mirrors useSwap.buy).
-  const fee = side === "buy" ? feeUsd(n) : 0;
+  // BSC is fee-free (ADR-0007) — feeUsd/feeOf already zero out for chain.key === "bsc".
+  const fee = side === "buy" ? feeUsd(n, chain.key) : 0;
   let netOutRaw = BigInt(0);
   if (quote && n > 0) {
     const amountIn = usdToRaw(chain, n);
-    const netIn = amountIn - feeOf(amountIn);
+    const netIn = amountIn - feeOf(amountIn, chain.key);
     netOutRaw = amountIn > BigInt(0) ? (quote.expectedOutRaw * netIn) / amountIn : BigInt(0);
   }
   const unit = asset.tier === "stock" ? "shares" : ticker;
@@ -199,9 +200,9 @@ export function TradeScreen({
         className="tnum"
         style={{ textAlign: "center", marginBottom: 12, fontSize: 12.5, color: "var(--ink-3)" }}
       >
-        {side === "buy"
-          ? `${n > 0 ? usd(fee) : usd(feeUsd(100))} fee · no network cost`
-          : "No fee · no network cost"}
+        {side === "sell" || chain.key === "bsc"
+          ? "No fee · no network cost"
+          : `${n > 0 ? usd(fee) : usd(feeUsd(100))} fee · no network cost`}
       </div>
       <button
         className="btn btn-primary btn-block btn-lg tap"
