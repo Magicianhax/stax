@@ -267,6 +267,29 @@ export function describeNextChange(s: MarketStatus, now: Date = new Date()): str
   return s.open ? formatNextClose(s.nextChange) : formatNextOpen(s.nextChange, now);
 }
 
+// ── The one local-time "opens ..." formatter (design critique P0 #1) ──
+//
+// Before this, the same fact had three spellings: MarketScreen's header said "opens Mon 9:30am
+// ET" (formatNextOpen above, always America/New_York), MarketStatusBadge and AssetDetailScreen
+// each rolled their own bare `toLocaleString` with no zone label, and the server refusal in
+// binanceLegs.ts also said "ET". A viewer in Mumbai read three different clocks for the same
+// closed market. This is the only place any BSC-facing surface should format a next-open
+// instant: it reads in the caller's OWN local zone (`Intl.DateTimeFormat` with no `timeZone`
+// resolves to the runtime's — the viewer's — zone) and always says so ("your time"), so nobody
+// has to know what "ET" means.
+const LOCAL_OPEN_TIME_FMT = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+const LOCAL_OPEN_DAY_FMT = new Intl.DateTimeFormat("en-US", { weekday: "short" });
+
+/** "opens 6:30 PM your time" (today), or "opens Mon 6:30 PM your time" (a different local day). */
+export function formatOpensLocal(nextOpenMs: number, nowMs: number = Date.now()): string {
+  const next = new Date(nextOpenMs);
+  const now = new Date(nowMs);
+  const sameLocalDay =
+    next.getFullYear() === now.getFullYear() && next.getMonth() === now.getMonth() && next.getDate() === now.getDate();
+  const day = sameLocalDay ? "" : `${LOCAL_OPEN_DAY_FMT.format(next)} `;
+  return `opens ${day}${LOCAL_OPEN_TIME_FMT.format(next)} your time`;
+}
+
 // ── BSC RWA catalog support (docs/BINANCE-WEB3.md §2) ──
 //
 // bStock rows report no session at all (`marketStatus`/`nextOpenTime`/`nextCloseTime` are

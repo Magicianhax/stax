@@ -1,40 +1,30 @@
 "use client";
 
-// PriceGap — the token's premium or discount against the real share it tracks,
-// e.g. "+0.4% vs NVDA". When the ticker is dual-listed, the other issuer's figure
-// follows in parentheses so both venues stay readable in one line without a
-// second row. `null` gaps (lib/rwa.ts's gapPct — no usable reference) are simply
-// left out rather than shown as a fake 0%.
+// PriceGap — what the CHOSEN issuer's token costs against the real share, as a sentence: "You pay
+// 0.40% more than the real share ($180.70)". Design critique P0 #3: the old "+0.40% vs NVDA" read
+// as a price change (a signed percent next to a ticker is exactly what a day's gain/loss looks
+// like everywhere else in this app), and it always led with whichever venue happened to be
+// first in the list, not the one the person is actually about to buy from. `lib/plainCopy.ts`'s
+// `gapSentence` is the one place that wording lives, so this and VenuePicker's per-row `gapWords`
+// never drift apart on the 0.05% "same price" threshold.
 import type { CSSProperties } from "react";
-import type { RwaPlatform } from "@/lib/chains";
-
-const PLATFORM_LABEL: Record<RwaPlatform, string> = { bstock: "bStock", ondo: "Ondo" };
-
-function fmtGap(pct: number): string {
-  return `${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`;
-}
+import type { VenueView } from "@/lib/rwa";
+import { gapSentence } from "@/lib/plainCopy";
 
 export interface PriceGapProps {
-  /** The underlying ticker, e.g. "NVDA" — the "vs NVDA" clause. */
-  ticker: string;
-  venues: { platform: RwaPlatform; gapPct: number | null }[];
+  /** The venue the buy will actually use — never "whichever is first" (design critique P0 #3). */
+  venue: VenueView | undefined;
   style?: CSSProperties;
 }
 
-export function PriceGap({ ticker, venues, style }: PriceGapProps) {
-  const shown = venues.filter((v): v is { platform: RwaPlatform; gapPct: number } => v.gapPct !== null);
-  if (shown.length === 0) return null;
-  const [first, ...rest] = shown;
+export function PriceGap({ venue, style }: PriceGapProps) {
+  if (!venue || venue.gapPct === null) return null;
+  const text = gapSentence(venue.gapPct, venue.referencePrice);
+  if (!text) return null;
 
   return (
     <span className="tnum" style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink-2)", ...style }}>
-      {fmtGap(first.gapPct)} vs {ticker}
-      {rest.length > 0 && (
-        <span style={{ color: "var(--ink-3)", fontWeight: 500 }}>
-          {" "}
-          ({rest.map((v) => `${PLATFORM_LABEL[v.platform]} ${fmtGap(v.gapPct)}`).join(", ")})
-        </span>
-      )}
+      {text}
     </span>
   );
 }
