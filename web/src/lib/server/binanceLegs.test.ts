@@ -20,6 +20,7 @@ import {
   bscLegUsdValue,
   buildBinanceLeg,
   checkBscBuyable,
+  cryptoLegUsdValue,
   directCallsForLeg,
   type BinanceLeg,
 } from "./binanceLegs";
@@ -318,5 +319,22 @@ describe("bscLegUsdValue", () => {
     // 0.05 tokens at $200/token = $10, using an 18-decimal raw amount.
     const amountIn = BigInt(5) * BigInt(10) ** BigInt(16);
     expect(bscLegUsdValue("sell", bsc, amountIn, asset, row({ tokenPrice: 200 }))).toBeCloseTo(10, 6);
+  });
+});
+
+describe("cryptoLegUsdValue", () => {
+  const btcb = bsc.assets.all.find((a) => a.tier === "crypto")!;
+
+  it("values a crypto buy off the cash amount", () => {
+    expect(cryptoLegUsdValue("buy", bsc, usdToRaw(bsc, 7), btcb, undefined)).toBeCloseTo(7, 6);
+  });
+
+  it("values a crypto sell at the quoted coin price", () => {
+    const amountIn = BigInt(10) ** BigInt(14); // 0.0001 coin
+    expect(cryptoLegUsdValue("sell", bsc, amountIn, btcb, 80_000)).toBeCloseTo(8, 6);
+  });
+
+  it("is NaN (refused downstream) when a sell has no price", () => {
+    expect(cryptoLegUsdValue("sell", bsc, BigInt(1), btcb, undefined)).toBeNaN();
   });
 });

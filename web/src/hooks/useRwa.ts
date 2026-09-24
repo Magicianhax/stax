@@ -9,6 +9,7 @@
 // never as "closed", so nothing here can fake a market status it doesn't have.
 import { useQuery } from "@tanstack/react-query";
 import { useChain } from "@/lib/chains/active";
+import { assetBySymbol } from "@/lib/chains";
 import { authedFetch } from "@/lib/authedFetch";
 import type { RwaListResponse, RwaTickerView, VenueView } from "@/lib/rwa";
 
@@ -85,7 +86,10 @@ export function bscBuyGate(params: {
 
 /** `bscBuyGate` wired to the live catalog query, for the one screen that gates a buy on it. */
 export function useBscBuyGate(symbol: string | undefined, address: string | undefined): BscBuyGate {
+  const chain = useChain();
   const { data, isLoading, isError } = useRwa();
+  // Crypto (BTCB, ETH, BNB) isn't in the RWA catalog and has no market hours: always open.
+  if (symbol && assetBySymbol(chain, symbol)?.tier === "crypto") return { status: "ready", buyable: true, venue: undefined };
   const ticker = symbol ? data?.tickers.find((t) => t.ticker === symbol) : undefined;
   return bscBuyGate({ ticker, address, isLoading, isError });
 }

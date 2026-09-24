@@ -229,3 +229,21 @@ export function directCallsForLeg(leg: BinanceLeg): ExecCall[] {
     { to: leg.router, data: leg.swapData },
   ];
 }
+
+/**
+ * USD value of a BSC crypto leg (BTCB, ETH, BNB), for the $6 floor. Crypto has no RWA row and no
+ * market hours, so it skips checkBscBuyable entirely; a buy reads the cash amount, a sell prices
+ * the coins at `priceUsd` (the same Binance quote price the app shows). No price gives NaN, which
+ * buildBinanceLeg refuses rather than letting an unpriced sell past the floor.
+ */
+export function cryptoLegUsdValue(
+  side: "buy" | "sell",
+  chain: StaxChain,
+  amountIn: bigint,
+  asset: Asset,
+  priceUsd: number | undefined,
+): number {
+  if (side === "buy") return rawToUsd(chain, amountIn);
+  if (priceUsd === undefined || !Number.isFinite(priceUsd) || priceUsd <= 0) return Number.NaN;
+  return fromUnits(amountIn, asset.decimals ?? 18) * priceUsd;
+}

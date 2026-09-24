@@ -22,9 +22,10 @@ import type { NextRequest } from "next/server";
 import { isAddress } from "viem";
 import { z } from "zod";
 import { assetBySymbol, isRoutable } from "@/lib/chains";
-import { chainFromRequest } from "@/lib/server/chain";
 import { KyberError, KyberNoRoute, kyberBuild, kyberRoute } from "@/lib/server/kyber";
-import { BinanceLegError, BinanceLegRefusal, bscLegUsdValue, buildBinanceLeg, checkBscBuyable } from "@/lib/server/binanceLegs";
+import { BinanceLegError, BinanceLegRefusal, bscLegUsdValue, buildBinanceLeg, checkBscBuyable, cryptoLegUsdValue } from "@/lib/server/binanceLegs";
+import { priceAsset } from "@/lib/prices";
+import { chainFromRequest, serverClient } from "@/lib/server/chain";
 import { getBinanceWeb3 } from "@/lib/server/binance";
 import { dryRunBscSwap } from "@/lib/server/dryRun";
 import type { DryRun } from "@/lib/dryRun";
@@ -146,15 +147,23 @@ export async function POST(req: NextRequest) {
   if (binanceVenue) {
     // Review Focus #1: refuse before ever asking Binance for a quote when the issuer isn't
     // trading this token right now (fails closed if the catalog doesn't even list it).
-    let tokens: Awaited<ReturnType<ReturnType<typeof getBinanceWeb3>["rwaTokens"]>>;
-    try {
-      tokens = await getBinanceWeb3().rwaTokens();
-    } catch (err) {
-      return serverError("swap-quote", err);
+    // Crypto (BTCB, ETH, BNB) has no RWA row and no market hours: it trades whenever the
+    // aggregator quotes it, so it skips the closed-market gate on both sides.
+    let usdValue: number;
+    if (asset.tier === "crypto") {
+      const priceUsd = body.side === "sell" ? (await priceAsset(chain, serverClient(chain), asset)).priceUsd : undefined;
+      usdValue = cryptoLegUsdValue(body.side, chain, amountIn, asset, priceUsd);
+    } else {
+      let tokens: Awaited<ReturnType<ReturnType<typeof getBinanceWeb3>["rwaTokens"]>>;
+      try {
+        tokens = await getBinanceWeb3().rwaTokens();
+      } catch (err) {
+        return serverError("swap-quote", err);
+      }
+      const gate = checkBscBuyable(tokens, resolved.address, asset.symbol, Date.now());
+      if (!gate.ok) return Response.json({ error: gate.message, nextOpenMs: gate.nextOpenMs ?? null }, { status: 409 });
+      usdValue = bscLegUsdValue(body.side, chain, amountIn, asset, gate.row);
     }
-    const gate = checkBscBuyable(tokens, resolved.address, asset.symbol, Date.now());
-    if (!gate.ok) return jsonError(409, gate.message);
-    const usdValue = bscLegUsdValue(body.side, chain, amountIn, asset, gate.row);
 
     try {
       const leg = await buildBinanceLeg({
