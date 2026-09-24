@@ -17,6 +17,7 @@ import { SPREAD_HISTORY_DAYS, SPREAD_SNAPSHOT_SPACING_MINUTES, type SpreadPoint 
 import { redisCredentials } from "./cache";
 
 const KEY_PREFIX = "stax:spread:history:";
+const TICK_KEY_PREFIX = "stax:spread:tick:";
 const MAX_AGE_MS = SPREAD_HISTORY_DAYS * 24 * 60 * 60 * 1000;
 const SPACING_MS = SPREAD_SNAPSHOT_SPACING_MINUTES * 60 * 1000;
 // A hard backstop above the exact "history days / spacing" count, so a cron that ticks a little
@@ -46,6 +47,37 @@ function warnOncePerMinute(op: string, err: unknown) {
 
 // ── in-memory fallback ───────────────────────────────────────────────────────
 const memory = new Map<string, SpreadPoint[]>();
+// chainKey -> the nowMs at/after which the next tick may be claimed.
+const memoryTickClaims = new Map<string, number>();
+
+/**
+ * Claims one snapshot tick for `chainKey`, at most once per `windowMs` (see app/api/rwa/spread's
+ * header for why this exists instead of a dedicated cron: Vercel Hobby only allows a daily cron,
+ * so the board's own GET claims a 15-minute tick and records the catalog snapshot it already has
+ * in hand). Backed by Redis `SET key val NX EX` so every instance and region shares one claim;
+ * the memory fallback compares against the passed `nowMs` rather than the wall clock so it's
+ * deterministic in tests and degrades the same way `cache.ts`/`rateLimit.ts` do without Redis
+ * configured. A Redis error fails OPEN (claims true) — the follow-up write into `readPoints` /
+ * `writePoints` hits the same outage and warns once a minute on its own; refusing the claim here
+ * too would just mean the tick is silently skipped instead.
+ */
+export async function claimSpreadTick(chainKey: string, nowMs: number, windowMs: number): Promise<boolean> {
+  const key = `${TICK_KEY_PREFIX}${chainKey}`;
+  const r = getRedis();
+  if (!r) {
+    const next = memoryTickClaims.get(key) ?? 0;
+    if (nowMs < next) return false;
+    memoryTickClaims.set(key, nowMs + windowMs);
+    return true;
+  }
+  try {
+    const ok = await r.set(key, String(nowMs), { nx: true, ex: Math.max(1, Math.ceil(windowMs / 1000)) });
+    return ok === "OK";
+  } catch (err) {
+    warnOncePerMinute("SET NX", err);
+    return true;
+  }
+}
 
 async function readPoints(key: string): Promise<SpreadPoint[]> {
   const r = getRedis();

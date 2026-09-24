@@ -12,6 +12,7 @@ import {
   issuerDiffSentence,
   issuerDifference,
   isMarketClosedState,
+  isOutsideRegularHours,
   platformLabel,
   rankIssuerBoard,
 } from "./spread";
@@ -31,6 +32,21 @@ describe("isMarketClosedState", () => {
   });
 });
 
+describe("isOutsideRegularHours", () => {
+  it("is true for every closed state plus pre/post market — the reference price is stale in all of them", () => {
+    expect(isOutsideRegularHours("closed")).toBe(true);
+    expect(isOutsideRegularHours("overnight")).toBe(true);
+    expect(isOutsideRegularHours("paused")).toBe(true);
+    expect(isOutsideRegularHours("unsupported")).toBe(true);
+    expect(isOutsideRegularHours("premarket")).toBe(true);
+    expect(isOutsideRegularHours("postmarket")).toBe(true);
+  });
+
+  it("is false only while the regular session is open", () => {
+    expect(isOutsideRegularHours("open")).toBe(false);
+  });
+});
+
 describe("classifySpread", () => {
   it("flags a premium only once the market is shut AND the gap clears the threshold", () => {
     const shutAndUp = classifySpread({ gapPct: PREMIUM_THRESHOLD_PCT + 2, buyable: true, state: "closed" });
@@ -45,6 +61,16 @@ describe("classifySpread", () => {
     // Shut but under the threshold isn't flagged either.
     const shutButSmall = classifySpread({ gapPct: PREMIUM_THRESHOLD_PCT - 0.1, buyable: true, state: "closed" });
     expect(shutButSmall.label).not.toBe("premium");
+  });
+
+  it("flags a premium after-hours too — postmarket and premarket are outside the regular session", () => {
+    const postmarket = classifySpread({ gapPct: PREMIUM_THRESHOLD_PCT + 2, buyable: true, state: "postmarket" });
+    expect(postmarket.label).toBe("premium");
+    expect(postmarket.sentence).toMatch(/real share/i);
+    expect(postmarket.sentence).not.toMatch(/spread|gap|venue|bps/i);
+
+    const premarket = classifySpread({ gapPct: PREMIUM_THRESHOLD_PCT + 2, buyable: true, state: "premarket" });
+    expect(premarket.label).toBe("premium");
   });
 
   it("flags a discount only while buyable AND below the threshold", () => {

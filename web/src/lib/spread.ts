@@ -35,6 +35,25 @@ export function isMarketClosedState(state: MarketState): boolean {
   return CLOSED_MARKET_STATES.has(state);
 }
 
+/**
+ * States outside the NYSE regular session — the closed states plus pre/post market. DESIGN.md's
+ * "Market hours & reference price" section is explicit that the reference price (Chainlink) only
+ * moves while the regular session is open, so a token trading above it during premarket or
+ * postmarket is exactly the same "you'd be overpaying against a stale reference" story as a full
+ * weekend premium. `isMarketClosedState` stays narrower (actually shut, not just outside the
+ * regular session) because other callers may care about that distinction; this is the set the
+ * premium rule needs.
+ */
+const OUTSIDE_REGULAR_HOURS_STATES: ReadonlySet<MarketState> = new Set([
+  ...CLOSED_MARKET_STATES,
+  "premarket",
+  "postmarket",
+]);
+
+export function isOutsideRegularHours(state: MarketState): boolean {
+  return OUTSIDE_REGULAR_HOURS_STATES.has(state);
+}
+
 export interface SpreadInput {
   gapPct: number | null;
   buyable: boolean;
@@ -55,8 +74,11 @@ export function classifySpread(
   const premiumPct = thresholds.premiumPct ?? PREMIUM_THRESHOLD_PCT;
   const discountPct = thresholds.discountPct ?? DISCOUNT_THRESHOLD_PCT;
   if (v.gapPct === null) return { label: "unknown", sentence: "No price to compare right now." };
-  if (isMarketClosedState(v.state) && v.gapPct >= premiumPct) {
-    return { label: "premium", sentence: `${v.gapPct.toFixed(1)}% more than the real share while the market is closed` };
+  if (isOutsideRegularHours(v.state) && v.gapPct >= premiumPct) {
+    // "Closed for the day" only when it actually is; premarket/postmarket still has a session
+    // today, it's just not open yet or already done, so "outside normal hours" reads true there.
+    const when = isMarketClosedState(v.state) ? "closed for the day" : "outside normal hours";
+    return { label: "premium", sentence: `${v.gapPct.toFixed(1)}% more than the real share while the stock market is ${when}` };
   }
   if (v.buyable && v.gapPct <= -discountPct) {
     return { label: "discount", sentence: `${Math.abs(v.gapPct).toFixed(1)}% less than the real share right now` };
@@ -174,8 +196,29 @@ export interface SpreadBoardRow extends IssuerDiff {
   sentence: string;
 }
 
+/** One venue's premium/discount call as the board API reports it. */
+export interface SpreadVenueCall {
+  platform: RwaPlatform;
+  call: SpreadCall;
+}
+
+/**
+ * One ticker's per-venue calls plus which issuer to buy from right now (brief ideas 2 and 3).
+ * Present for every catalog ticker, including a single-issuer one — `cheaperIssuer` is only
+ * null when there's nothing to compare (see `cheaperIssuerNow`), never because the ticker was
+ * left out.
+ */
+export interface SpreadTickerCall {
+  ticker: string;
+  venues: SpreadVenueCall[];
+  cheaperIssuer: RwaPlatform | null;
+}
+
 /** `GET /api/rwa/spread?chain=bsc`'s payload. */
 export interface SpreadBoardResponse {
   asOf: number;
+  /** Dual-listed tickers only, ranked by the issuer gap — the "who's cheaper" board. */
   board: SpreadBoardRow[];
+  /** Every catalog ticker's premium/discount call, including single-issuer ones. */
+  tickers: SpreadTickerCall[];
 }

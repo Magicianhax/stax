@@ -7,7 +7,7 @@
 // Map can't leak state between tests.
 import { describe, expect, it } from "vitest";
 import { SPREAD_HISTORY_DAYS, SPREAD_SNAPSHOT_SPACING_MINUTES, type SpreadPoint } from "@/lib/spread";
-import { foldSpreadPoint, getSpreadHistory, recordCatalogSnapshot, recordSpreadPoint } from "./spreadStore";
+import { claimSpreadTick, foldSpreadPoint, getSpreadHistory, recordCatalogSnapshot, recordSpreadPoint } from "./spreadStore";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SPACING_MS = SPREAD_SNAPSHOT_SPACING_MINUTES * 60 * 1000;
@@ -68,6 +68,23 @@ describe("recordSpreadPoint / getSpreadHistory (memory fallback)", () => {
     await recordSpreadPoint("bsc", "TEST4", "bstock", point(SPACING_MS + 1));
     const history = await getSpreadHistory("bsc", "TEST4", ["bstock"]);
     expect(history[0].points).toHaveLength(2);
+  });
+});
+
+describe("claimSpreadTick", () => {
+  it("claims the first tick in a window and refuses a second one inside it", async () => {
+    expect(await claimSpreadTick("bsc-tick-1", 0, SPACING_MS)).toBe(true);
+    expect(await claimSpreadTick("bsc-tick-1", SPACING_MS - 1, SPACING_MS)).toBe(false);
+  });
+
+  it("allows a new claim once the window has passed", async () => {
+    expect(await claimSpreadTick("bsc-tick-2", 0, SPACING_MS)).toBe(true);
+    expect(await claimSpreadTick("bsc-tick-2", SPACING_MS, SPACING_MS)).toBe(true);
+  });
+
+  it("keeps separate chain keys independent", async () => {
+    expect(await claimSpreadTick("bsc-tick-3a", 0, SPACING_MS)).toBe(true);
+    expect(await claimSpreadTick("bsc-tick-3b", 0, SPACING_MS)).toBe(true);
   });
 });
 
