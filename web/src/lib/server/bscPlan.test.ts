@@ -447,6 +447,22 @@ describe("parseCryptoMix", () => {
     expect(mix.cryptoPct).toBeGreaterThan(0);
     expect(mix.cryptoPct).toBeLessThan(50);
   });
+
+  it("treats a negated crypto mention as no request at all, not the catch-all default", () => {
+    expect(parseCryptoMix("no crypto please")).toBeNull();
+    expect(parseCryptoMix("stocks only, avoid bitcoin")).toBeNull();
+    expect(parseCryptoMix("I don't want bitcoin")).toBeNull();
+    expect(parseCryptoMix("tech stocks, never touch btc")).toBeNull();
+  });
+
+  it("never reads 'BNB Chain' (the network name) as a request for the BNB coin", () => {
+    expect(parseCryptoMix("invest $100 in tech stocks on BNB Chain")).toBeNull();
+    expect(parseCryptoMix("buy some ETFs on BNB Smart Chain")).toBeNull();
+  });
+
+  it("still reads bare 'bnb' as the coin when it isn't naming the chain", () => {
+    expect(parseCryptoMix("put a bit of bnb in with my stocks")).not.toBeNull();
+  });
 });
 
 describe("applyCryptoMix", () => {

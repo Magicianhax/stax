@@ -50,6 +50,8 @@ interface BscPromptInfo {
   unavailable: string[];
   /** Set only when the user's goal actually asked for a stocks/crypto mix (Wave 5 direction B). */
   cryptoMix?: CryptoMixRequest;
+  /** True when every stock market is shut right now AND crypto was asked for — see bscRules below. */
+  stocksClosed?: boolean;
 }
 
 function systemPrompt(chain: StaxChain, universe: Asset[], bsc?: BscPromptInfo): string {
@@ -70,11 +72,15 @@ function systemPrompt(chain: StaxChain, universe: Asset[], bsc?: BscPromptInfo):
               `- These names are NOT in the list above and must never be picked, because they aren't tradeable right now: ${bsc.unavailable.join("; ")}. If the user's goal mentions one of them by name, say in your rationale that it's temporarily unavailable (market closed or paused) and suggest a close alternative from the list instead.`,
             ]
           : []),
-        ...(bsc.cryptoMix
+        ...(bsc.stocksClosed
           ? [
-              `- The user asked for about ${bsc.cryptoMix.cryptoPct}% crypto and ${100 - bsc.cryptoMix.cryptoPct}% stocks. Split the total weight close to that: 'crypto' tier picks should add up near ${bsc.cryptoMix.cryptoPct}%, 'stock' tier picks near ${100 - bsc.cryptoMix.cryptoPct}%.`,
+              `- Every stock market is closed right now, so no 'stock' tier asset is in the list above at all: this plan can ONLY use 'crypto' tier picks. Say plainly in your rationale that the stock market is shut right now and this plan puts the money into crypto instead.`,
             ]
-          : []),
+          : bsc.cryptoMix
+            ? [
+                `- The user asked for about ${bsc.cryptoMix.cryptoPct}% crypto and ${100 - bsc.cryptoMix.cryptoPct}% stocks. Split the total weight close to that: 'crypto' tier picks should add up near ${bsc.cryptoMix.cryptoPct}%, 'stock' tier picks near ${100 - bsc.cryptoMix.cryptoPct}%.`,
+              ]
+            : []),
       ]
     : [];
 
@@ -113,15 +119,25 @@ export async function buildAllocation(
   if (chain.key === "bsc") {
     const catalog = await bscCatalogSnapshot(Date.now());
     const buyable = buyableTickers(catalog.tickers);
-    if (buyable.length === 0) {
-      throw new AllocationRefusal(allClosedMessage(catalog.tickers, Date.now()));
-    }
     const buyableSymbols = new Set(buyable.map((t) => t.ticker));
-    const cryptoMix = parseCryptoMix(goal) ?? undefined;
+    let cryptoMix = parseCryptoMix(goal) ?? undefined;
     // Crypto has no market hours and isn't in the RWA catalog at all, so it's judged solely by
     // isRoutable (always tradeable) rather than the stock catalog's buyable-right-now gate — and
     // it only joins Vera's universe when the goal actually asked for it (default: stocks only).
     const cryptoUniverse = cryptoMix ? chain.assets.crypto.filter((a) => isRoutable(chain, a.symbol)) : [];
+    // Every BSC gate must treat crypto as always tradeable (Wave 5 direction A), so "all
+    // buyable" is computed across BOTH universes before the all-closed refusal fires — a
+    // weekend "put $50 in bitcoin" must still get a plan even though every stock is shut.
+    if (buyable.length === 0 && cryptoUniverse.length === 0) {
+      throw new AllocationRefusal(allClosedMessage(catalog.tickers, Date.now()));
+    }
+    // Stocks are shut but crypto was asked for and is available: the whole amount goes to
+    // crypto rather than honouring a stocks/crypto split against a stock universe that's
+    // empty right now (a strict 80/20 read would otherwise leave 80% of the money unallocated).
+    const stocksClosed = buyable.length === 0;
+    if (stocksClosed && cryptoMix) {
+      cryptoMix = { cryptoPct: 100 };
+    }
     universe = [...universe.filter((a) => buyableSymbols.has(a.symbol)), ...cryptoUniverse];
     catalogBySymbol = new Map(catalog.tickers.map((t) => [t.ticker, t]));
     const maxLegs = maxBscLegs(amountUsd);
@@ -134,6 +150,7 @@ export async function buildAllocation(
       minWeightPct: Math.ceil((BSC_MIN_LEG_USD / amountUsd) * 100),
       unavailable: catalog.tickers.filter((t) => !buyableSymbols.has(t.ticker)).map((t) => unavailableNote(t, Date.now())),
       cryptoMix,
+      stocksClosed: stocksClosed && Boolean(cryptoMix),
     };
   }
 

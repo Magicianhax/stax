@@ -248,6 +248,54 @@ describe("buildAllocation on BSC: crypto mix (Wave 5 direction A/B)", () => {
       expect((a.weightPct / 100) * 20).toBeGreaterThanOrEqual(6 - 1e-6);
     }
   });
+
+  it("keeps the default stocks-only when crypto is negated or 'bnb' only names the chain", async () => {
+    // Reviewer finding: CRYPTO_WORDS used to match bare 'bnb' inside 'BNB Chain', and nothing
+    // caught a negated mention, so both wrongly forced a 20% BTCB leg into a stocks-only ask.
+    for (const goal of ["no crypto please, just NVDA", "stocks only, avoid bitcoin", "invest $100 in tech stocks on BNB Chain"]) {
+      oneNvdaCatalog();
+      generateObjectSpy.mockReset().mockResolvedValue(objectResult([{ symbol: "NVDA", weightPct: 100, reason: "why" }]));
+
+      const result = await buildAllocation(bsc, goal, 100);
+
+      const { system } = generateObjectSpy.mock.calls[0][0] as { system: string };
+      expect(system).not.toMatch(/BTCB/);
+      for (const a of result.allocations) {
+        expect(["BTCB", "ETH", "BNB"]).not.toContain(a.symbol);
+      }
+    }
+  });
+});
+
+describe("buildAllocation on BSC: crypto stays tradeable when every stock is closed", () => {
+  it("builds a crypto plan instead of refusing when 'all in bitcoin' is asked for and every stock is shut", async () => {
+    bscCatalogSnapshotSpy.mockResolvedValue({
+      asOf: NOW,
+      tickers: [
+        ticker({ ticker: "NVDA", bestVenue: null, venues: [venue({ buyable: false, state: "closed", nextOpenMs: NOW + 3600_000 })] }),
+      ],
+    });
+    generateObjectSpy.mockResolvedValue(objectResult([{ symbol: "BTCB", weightPct: 100, reason: "why" }]));
+
+    const result = await buildAllocation(bsc, "all in bitcoin", 100);
+
+    expect(result.allocations).toHaveLength(1);
+    expect(result.allocations[0]).toMatchObject({ symbol: "BTCB", weightPct: 100 });
+    const { system } = generateObjectSpy.mock.calls[0][0] as { system: string };
+    expect(system).toMatch(/closed right now/i);
+  });
+
+  it("still refuses with the all-closed message when neither stocks nor crypto were asked for", async () => {
+    bscCatalogSnapshotSpy.mockResolvedValue({
+      asOf: NOW,
+      tickers: [
+        ticker({ ticker: "NVDA", bestVenue: null, venues: [venue({ buyable: false, state: "closed", nextOpenMs: NOW + 3600_000 })] }),
+      ],
+    });
+
+    await expect(buildAllocation(bsc, "grow it", 100)).rejects.toBeInstanceOf(AllocationRefusal);
+    expect(generateObjectSpy).not.toHaveBeenCalled();
+  });
 });
 
 describe("buildAllocation on Base", () => {

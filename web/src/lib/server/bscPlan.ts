@@ -142,7 +142,14 @@ export interface CryptoMixRequest {
 }
 
 const CRYPTO_MIX_TOLERANCE_PCT = 5;
-const CRYPTO_WORDS = /\b(crypto|bitcoin|btc|ethereum|eth|bnb|binance coin)\b/i;
+// "bnb" alone means the coin, but "BNB Chain" / "BNB Smart Chain" is the network name a
+// hackathon judge is far more likely to type ("invest in tech stocks on BNB Chain") — that
+// phrasing must never be read as a crypto request, so the lookahead excludes it.
+const CRYPTO_WORDS = /\b(crypto|bitcoin|btc|ethereum|eth|binance coin)\b|\bbnb\b(?!\s*(smart\s*)?chain)/i;
+// A crypto word within a few words of a negation ("no crypto", "avoid bitcoin", "don't want
+// bitcoin", "stocks only, never touch btc") means the user is opting OUT, not asking for a
+// mix — the stocks-only default must win, not the catch-all 20% below.
+const CRYPTO_NEGATION = /\b(no|not|without|avoid|never|skip|exclude|zero|0\s*%)\b(?:\s+\S+){0,3}?\s+(crypto|bitcoin|btc|ethereum|eth|bnb|binance coin)\b|\b(don'?t|do not)\s+want\b(?:\s+\S+){0,3}?\s+(crypto|bitcoin|btc|ethereum|eth|bnb|binance coin)\b/i;
 
 function clampPct(n: number): number {
   if (!Number.isFinite(n)) return 20;
@@ -153,10 +160,13 @@ function clampPct(n: number): number {
  * Reads a stocks/crypto mix straight out of a plain-language goal ("80% stocks, 20% crypto",
  * "mostly stocks with a bit of bitcoin"), so asking for a mix needs no separate control —
  * typing it into the goal box is the whole UI (the "so simple even a web2-naive person can use
- * it" bar). Returns null when crypto isn't mentioned at all: the default stays stocks-only.
+ * it" bar). Returns null when crypto isn't mentioned at all, when the only mention is negated
+ * ("no crypto please", "stocks only, avoid bitcoin"), or when the only crypto-shaped word is
+ * "BNB" naming the chain itself ("stocks on BNB Chain"): the default stays stocks-only.
  */
 export function parseCryptoMix(goal: string): CryptoMixRequest | null {
   if (!CRYPTO_WORDS.test(goal)) return null;
+  if (CRYPTO_NEGATION.test(goal)) return null;
 
   const cryptoPctMatch = goal.match(/(\d{1,3}(?:\.\d+)?)\s*%\s*(?:in\s+|of\s+)?(?:crypto|bitcoin|btc|ethereum|eth|bnb)\b/i);
   if (cryptoPctMatch) return { cryptoPct: clampPct(Number(cryptoPctMatch[1])) };
