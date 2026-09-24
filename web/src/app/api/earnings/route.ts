@@ -28,13 +28,21 @@ export async function GET(req: NextRequest) {
   try {
     const symbols = getChain("bsc").assets.stocks.map((asset) => asset.symbol);
     const earnings = await getNextEarnings(symbols);
+    // A snapshot with an "unavailable" entry is never a stale-but-good answer — it's a source
+    // that failed and (as of the earnings.ts cache fix) is already free to retry on its own next
+    // call. Holding the edge's copy of THIS response for the full 12h stale-while-revalidate
+    // window would still sit on that gap far longer than the underlying retry needs, so a gap
+    // gets a short window instead of the long one a fully-resolved snapshot is allowed.
+    const hasGap = Object.values(earnings).some((info) => info.source === "unavailable");
     return Response.json(
       { earnings, asOf: Date.now() },
       {
-        // Edge/browser cache 1h, stale-while-revalidate up to 12h — matched to the underlying
-        // per-ticker cache TTL so a client is never told to refetch sooner than a fresher answer
-        // could actually exist.
-        headers: { "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=43200" },
+        // Edge/browser cache 1h, stale-while-revalidate up to 12h when every entry resolved —
+        // matched to the underlying per-ticker cache TTL so a client is never told to refetch
+        // sooner than a fresher answer could actually exist.
+        headers: {
+          "Cache-Control": `public, s-maxage=3600, stale-while-revalidate=${hasGap ? 900 : 43200}`,
+        },
       },
     );
   } catch (err) {

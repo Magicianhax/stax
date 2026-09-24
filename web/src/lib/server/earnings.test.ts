@@ -78,6 +78,25 @@ describe("getNextEarnings", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("does not cache a failed fetch: a later call retries and can return the real date", async () => {
+    // Regression for caching UNAVAILABLE at the full 12h TTL: a 429/timeout on the one cold
+    // refresh used to freeze "not announced yet" for every reader for 12h even though Yahoo had
+    // the date. The fix makes a failure reject instead of resolve, so `cached()` never writes it
+    // (cache.ts: "fn rejections are not cached") and the very next call is free to try again.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, text: () => Promise.resolve("") })
+      .mockResolvedValueOnce({ ok: true, text: () => Promise.resolve(pageWith(1794945600, "2026-11-17", false)) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await getNextEarnings(["EARN_C1"]);
+    expect(first.EARN_C1).toEqual({ nextMs: null, confirmed: false, source: "unavailable" });
+
+    const second = await getNextEarnings(["EARN_C1"]);
+    expect(second.EARN_C1).toEqual({ nextMs: 1794945600_000, confirmed: true, source: "yahoo" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("resolves every symbol to its own result, not a shared or shuffled one", async () => {
     const fetchMock = vi.fn().mockImplementation((url: string) => {
       if (url.includes("EARN_B1")) return Promise.resolve({ ok: true, text: () => Promise.resolve(pageWith(1794945600, "2026-11-17", false)) });

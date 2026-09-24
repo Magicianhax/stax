@@ -19,9 +19,11 @@ import "server-only";
 //     the same `calendarEvents` data as escaped JSON inside a `<script>` tag, reachable with a
 //     plain `fetch` + a browser User-Agent, no crumb, no cookie (confirmed live 2026-09-25 for
 //     NVDA/MSFT/TSLA — see liveFindings). This is the source. It's HTML-scraping of a page
-//     Yahoo could reshape at any time, which is why every call is wrapped to fail into `null`
-//     rather than throw, and why the parse itself (`parseYahooEarningsHtml`) is a small pure
-//     function a fixture can pin independent of the network.
+//     Yahoo could reshape at any time, which is why a failed call ultimately surfaces to callers
+//     as `null` rather than throwing (see `cachedEarnings`'s doc comment for why the failure
+//     itself is a rejection, not a resolved value, until it crosses that boundary), and why the
+//     parse itself (`parseYahooEarningsHtml`) is a small pure function a fixture can pin
+//     independent of the network.
 //
 // `isEarningsDateEstimate` is Yahoo's own word for "announced" vs. "our estimate" — that maps
 // directly onto `confirmed`, so this module only ever relays what the source already knows,
@@ -66,26 +68,35 @@ export function parseYahooEarningsHtml(html: string): { nextMs: number; confirme
   return { nextMs: rawSeconds * 1000, confirmed: m[2] === "false" };
 }
 
+/**
+ * Throws on any failure (non-2xx, timeout, DNS, a reshaped page) instead of resolving to
+ * UNAVAILABLE. That's deliberate: `cachedEarnings` below relies on `cached()` never caching a
+ * rejection (cache.ts: "fn rejections are not cached"), so a transient failure costs a retry on
+ * the next call instead of being written to Redis as a 12h-long false "no date" for a ticker
+ * Yahoo actually has one for.
+ */
 async function fetchYahooEarnings(symbol: string): Promise<EarningsInfo> {
-  try {
-    const res = await fetch(`https://finance.yahoo.com/quote/${encodeURIComponent(symbol)}/`, {
-      headers: { "User-Agent": USER_AGENT, Accept: "text/html" },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-    if (!res.ok) return UNAVAILABLE;
-    const parsed = parseYahooEarningsHtml(await res.text());
-    return parsed ? { nextMs: parsed.nextMs, confirmed: parsed.confirmed, source: "yahoo" } : UNAVAILABLE;
-  } catch {
-    // Timeout, DNS, a reshaped page that throws mid-parse — a missing date is never worth
-    // failing the rest of the catalog for. See the module doc comment.
-    return UNAVAILABLE;
-  }
+  const res = await fetch(`https://finance.yahoo.com/quote/${encodeURIComponent(symbol)}/`, {
+    headers: { "User-Agent": USER_AGENT, Accept: "text/html" },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`yahoo earnings ${symbol}: HTTP ${res.status}`);
+  const parsed = parseYahooEarningsHtml(await res.text());
+  if (!parsed) throw new Error(`yahoo earnings ${symbol}: page had no calendarEvents match`);
+  return { nextMs: parsed.nextMs, confirmed: parsed.confirmed, source: "yahoo" };
 }
 
 /** One entry, cached independently per ticker (same idiom as marketData.ts's `getHistory`), so
- *  a cold ticker among 41 warm ones costs one fetch, not a whole-catalog refetch. */
+ *  a cold ticker among 41 warm ones costs one fetch, not a whole-catalog refetch.
+ *
+ *  Only a successful parse is ever written to the cache — see `fetchYahooEarnings`'s doc comment.
+ *  The `.catch` here is what turns an uncached rejection into the honest, un-cached UNAVAILABLE
+ *  the rest of this module expects; it must stay outside the `cached()` call, not inside
+ *  `fetchYahooEarnings`, or a failure would resolve instead of reject and get cached again. */
 function cachedEarnings(symbol: string): Promise<EarningsInfo> {
-  return cached(`earnings:${symbol}`, EARNINGS_TTL_SECONDS, () => fetchYahooEarnings(symbol));
+  return cached(`earnings:${symbol}`, EARNINGS_TTL_SECONDS, () => fetchYahooEarnings(symbol)).catch(
+    () => UNAVAILABLE,
+  );
 }
 
 /** Runs `fn` over `items` with at most `limit` in flight. */
