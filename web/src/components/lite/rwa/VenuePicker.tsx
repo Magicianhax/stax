@@ -30,13 +30,19 @@ export interface VenuePickerProps {
 }
 
 export function VenuePicker({ venues, bestVenue, onSelect, style }: VenuePickerProps) {
+  // Without `onSelect` a click has nowhere to go: the buy flow (Task 12) is what turns a picked
+  // row into a different quote, and until that's wired, letting the ring move on a tap would
+  // show a choice the buy ignores — the ring stays locked to whatever the caller says is the
+  // buy target (`bestVenue`) instead of tracking clicks.
+  const interactive = Boolean(onSelect);
   const [picked, setPicked] = useState<RwaPlatform | null>(bestVenue);
+  const shown = interactive ? picked : bestVenue;
   if (venues.length === 0) return null;
 
   return (
     <div className="card" role="group" aria-label="Venue" style={{ padding: "2px 14px", ...style }}>
       {venues.map((v, i) => {
-        const on = picked === v.platform;
+        const on = shown === v.platform;
         const off = !v.buyable;
         return (
           <button
@@ -46,7 +52,7 @@ export function VenuePicker({ venues, bestVenue, onSelect, style }: VenuePickerP
             aria-disabled={off}
             aria-label={`${PLATFORM_LABEL[v.platform]}, ${usd(v.tokenPrice)}${off ? ", not tradeable right now" : ""}`}
             onClick={() => {
-              if (off) return;
+              if (off || !interactive) return;
               setPicked(v.platform);
               onSelect?.(v.platform);
             }}
@@ -65,7 +71,7 @@ export function VenuePicker({ venues, bestVenue, onSelect, style }: VenuePickerP
               // say "not tradeable" — washing out the price and label too just costs
               // contrast for no extra information (the app dims disabled *buttons* this
               // way, but this row's label stays worth reading).
-              cursor: off ? "default" : "pointer",
+              cursor: off || !interactive ? "default" : "pointer",
             }}
           >
             <span

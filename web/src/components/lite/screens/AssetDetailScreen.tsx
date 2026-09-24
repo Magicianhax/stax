@@ -17,7 +17,7 @@ import { useAssetPrice } from "@/hooks/usePrices";
 import { useMarketHistory, type MarketRange } from "@/hooks/useMarket";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { useBaskets } from "@/hooks/useBaskets";
-import { useRwaTicker, primaryVenue } from "@/hooks/useRwa";
+import { useRwaTicker, primaryVenue, useBscBuyGate } from "@/hooks/useRwa";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { displayFor } from "@/lib/displayAssets";
 import { Icon, AssetTile, PriceChart, SectionTitle, Stat, MarketStatus, type PricePoint } from "@/components/design";
@@ -100,7 +100,14 @@ export function AssetDetailScreen({
   const bsc = chain.key === "bsc";
   const rwaTicker = useRwaTicker(asset.symbol);
   const venue = rwaTicker ? primaryVenue(rwaTicker) : undefined;
-  const bscBuyable = rwaTicker ? rwaTicker.bestVenue !== null : undefined;
+  // The buy gate has to agree with what a manual buy actually does: `go("trade", { symbol })`
+  // resolves straight to `asset.address` (the default venue), never to `rwaTicker.bestVenue` —
+  // so a paused default with a buyable twin must still block Buy, and the gate must fail closed
+  // (not open) before the catalog has answered at all. bscBuyGate in useRwa.ts is the single
+  // tested rule; this screen just reads its verdict.
+  const bscGate = useBscBuyGate(asset.symbol, asset.address);
+  const buyVenue = bscGate.status === "ready" ? bscGate.venue : undefined;
+  const bscBuyable = bsc ? bscGate.status === "ready" && bscGate.buyable : undefined;
   const [r, setR] = useState(2);
   const range = RANGES[r] as MarketRange;
   const [hover, setHover] = useState<(PricePoint & { index: number }) | null>(null);
@@ -197,13 +204,20 @@ export function AssetDetailScreen({
     bscOpensAt !== undefined
       ? new Date(bscOpensAt).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })
       : undefined;
+  // "Checking…" and "unavailable" are distinct from a confirmed closed market: a quick tap
+  // before the catalog loads, or a `/api/rwa` error, must never read as an open invitation, but
+  // it also shouldn't claim a close nobody confirmed.
   const reason = coming
     ? `Not buyable on ${chain.name} yet: there’s no liquid market for it. We’ll switch it on as soon as there is.`
-    : bscBuyable === false
-      ? bscOpensLabel
-        ? `Market closed · opens ${bscOpensLabel}`
-        : "Market closed right now — check back shortly."
-      : undefined;
+    : bsc && bscGate.status === "loading"
+      ? "Checking market…"
+      : bsc && bscGate.status === "unavailable"
+        ? "Market status unavailable"
+        : bscBuyable === false
+          ? bscOpensLabel
+            ? `Market closed · opens ${bscOpensLabel}`
+            : "Market closed right now — check back shortly."
+          : undefined;
 
   return (
     <div className="screen screen-pad-top" style={{ paddingBottom: 0 }}>
@@ -298,7 +312,11 @@ export function AssetDetailScreen({
       {bsc && rwaTicker && rwaTicker.venues.length > 0 && (
         <div style={{ padding: "18px 22px 0" }}>
           <SectionTitle>Venues</SectionTitle>
-          <VenuePicker venues={rwaTicker.venues} bestVenue={rwaTicker.bestVenue} />
+          {/* No `onSelect`: a manual buy always resolves to `asset.address` regardless of which
+              row is highlighted (Task 12 wires a real choice into the trade), so the picker
+              stays display-only and highlights the venue Buy will actually use, not whichever
+              is priced closest to the reference. */}
+          <VenuePicker venues={rwaTicker.venues} bestVenue={buyVenue?.platform ?? rwaTicker.bestVenue} />
         </div>
       )}
 
@@ -499,7 +517,15 @@ export function AssetDetailScreen({
             disabled={coming || bscBuyable === false}
             onClick={() => go("trade", { symbol: asset.symbol, side: "buy" })}
           >
-            {coming ? "Coming soon" : bscBuyable === false ? "Market closed" : "Buy"}
+            {coming
+              ? "Coming soon"
+              : bsc && bscGate.status === "loading"
+                ? "Checking market…"
+                : bsc && bscGate.status === "unavailable"
+                  ? "Market status unavailable"
+                  : bscBuyable === false
+                    ? "Market closed"
+                    : "Buy"}
           </button>
         </div>
       </div>
