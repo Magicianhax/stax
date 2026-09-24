@@ -1,0 +1,14 @@
+{
+  "status": "SUCCESS",
+  "failReason": "",
+  "balanceChanges": [],
+  "allowanceChanges": [
+    {
+      "tokenAddress": "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+      "owner": "0x10ed43c718714eb63d5aa57b78b54704e256024e",
+      "spender": "0x10ed43c718714eb63d5aa57b78b54704e256024e",
+      "preAmount": "0",
+      "postAmount": "0"
+    }
+  ]
+}
