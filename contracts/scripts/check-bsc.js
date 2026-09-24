@@ -53,6 +53,16 @@ function assert(ok, msg) {
   if (!ok) failures++;
 }
 
+/** Scheme + host only: a keyed RPC URL carries its key in the path or query. */
+function maskRpc(url) {
+  try {
+    const u = new URL(url);
+    return `${u.protocol}//${u.host}${u.pathname.length > 1 || u.search ? "/…" : ""}`;
+  } catch {
+    return "<rpc>";
+  }
+}
+
 async function main() {
   // Pick the first RPC that answers with chainId 56.
   let pc, rpc;
@@ -65,12 +75,12 @@ async function main() {
       rpc = url;
       break;
     } catch (e) {
-      console.log(`rpc ${url} unusable (${e.shortMessage || e.message}); trying next`);
+      console.log(`rpc ${maskRpc(url)} unusable (${e.shortMessage || e.message}); trying next`);
     }
   }
   if (!pc) throw new Error("no usable BSC RPC");
   const head = await withRetry(() => pc.getBlockNumber(), "blockNumber");
-  console.log(`BSC mainnet via ${rpc}  (block ${head})\n`);
+  console.log(`BSC mainnet via ${maskRpc(rpc)}  (block ${head})\n`);
 
   const read = (address, abi, functionName, args = []) =>
     withRetry(() => pc.readContract({ address, abi, functionName, args }), `${functionName}@${address.slice(0, 10)}`);

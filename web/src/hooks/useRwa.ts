@@ -10,21 +10,15 @@
 import { useQuery } from "@tanstack/react-query";
 import { useChain } from "@/lib/chains/active";
 import { authedFetch } from "@/lib/authedFetch";
-import type { RwaTickerView, VenueView } from "@/lib/rwa";
+import type { RwaListResponse, RwaTickerView, VenueView } from "@/lib/rwa";
 
-export interface RwaResponse {
-  chain: "bsc";
-  tickers: RwaTickerView[];
-  asOf: string;
-}
-
-async function fetchRwa(): Promise<RwaResponse> {
-  const res = await authedFetch("/api/rwa");
+async function fetchRwa(): Promise<RwaListResponse> {
+  const res = await authedFetch("/api/rwa?chain=bsc");
   const json = await res.json();
   if (!res.ok) {
     throw new Error(typeof json?.error === "string" ? json.error : "Couldn't load market data.");
   }
-  return json as RwaResponse;
+  return json as RwaListResponse;
 }
 
 /** The full BSC catalog. Disabled — `data` stays undefined — on every other chain. */

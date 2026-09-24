@@ -298,14 +298,14 @@ export function SettingsScreen({
         </p>
       </div>
 
-      {/* Network — Base is the default; Mantle keeps earlier investments. One
+      {/* Network — Base is the default; BNB Chain carries bStock/Ondo stocks; Mantle keeps earlier investments. One
           segmented control, one sentence, no chain-picker jargon. */}
       <div style={{ padding: "24px 22px 0" }}>
         <div style={sectionLabel}>Network</div>
         <div className="card" style={{ padding: 16 }}>
           <NetworkSwitch />
           <p style={{ margin: "12px 2px 0", fontSize: 13, lineHeight: 1.5, color: "var(--ink-2)" }}>
-            Base is the default. Mantle holds your earlier investments.
+            Base is the default. BNB Chain has tokenized stocks from bStock and Ondo. Mantle holds your earlier investments.
             {!ready && (
               <>
                 {" "}

@@ -14,7 +14,7 @@ const LABEL: Record<MarketState, string> = {
   open: "Open",
   premarket: "Pre-market",
   postmarket: "After hours",
-  overnight: "Closed",
+  overnight: "Overnight",
   closed: "Closed",
   paused: "Paused",
   unsupported: "Unavailable",
@@ -26,12 +26,15 @@ export interface MarketStatusBadgeProps {
   state: MarketState;
   /** Epoch ms of the next regular-session open; the "opens <time>" clause when present. */
   nextOpenMs: number | null;
+  /** Whether the issuer will fill a buy right now. Ondo trades pre-market, after hours and
+   * overnight, so the session name alone can't say "live"; defaults to `state === "open"`. */
+  buyable?: boolean;
   style?: CSSProperties;
 }
 
-export function MarketStatusBadge({ state, nextOpenMs, style }: MarketStatusBadgeProps) {
-  const live = state === "open";
-  const opensAt = state !== "open" && nextOpenMs !== null ? new Date(nextOpenMs).toLocaleString(undefined, OPEN_TIME_FMT) : undefined;
+export function MarketStatusBadge({ state, nextOpenMs, buyable, style }: MarketStatusBadgeProps) {
+  const live = buyable ?? state === "open";
+  const opensAt = !live && nextOpenMs !== null ? new Date(nextOpenMs).toLocaleString(undefined, OPEN_TIME_FMT) : undefined;
   const text = opensAt ? `${LABEL[state]} · opens ${opensAt}` : LABEL[state];
 
   return (

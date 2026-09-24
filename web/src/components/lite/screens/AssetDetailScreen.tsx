@@ -277,7 +277,7 @@ export function AssetDetailScreen({
           <div style={{ marginTop: 14 }}>
             {bsc && rwaTicker ? (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 7 }}>
-                {venue && <MarketStatusBadge state={venue.state} nextOpenMs={venue.nextOpenMs} />}
+                {venue && <MarketStatusBadge state={venue.state} nextOpenMs={venue.nextOpenMs} buyable={venue.buyable} />}
                 <PriceGap ticker={asset.symbol} venues={rwaTicker.venues} />
               </div>
             ) : (

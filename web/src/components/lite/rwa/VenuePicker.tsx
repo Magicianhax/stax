@@ -35,8 +35,11 @@ export function VenuePicker({ venues, bestVenue, onSelect, style }: VenuePickerP
   // show a choice the buy ignores — the ring stays locked to whatever the caller says is the
   // buy target (`bestVenue`) instead of tracking clicks.
   const interactive = Boolean(onSelect);
-  const [picked, setPicked] = useState<RwaPlatform | null>(bestVenue);
-  const shown = interactive ? picked : bestVenue;
+  // Only an explicit tap is stored; until then (and whenever the tapped venue stops trading)
+  // the ring follows `bestVenue`, which arrives after the catalog loads and moves with it.
+  const [picked, setPicked] = useState<RwaPlatform | null>(null);
+  const pickedLive = picked !== null && venues.some((v) => v.platform === picked && v.buyable);
+  const shown = interactive && pickedLive ? picked : bestVenue;
   if (venues.length === 0) return null;
 
   return (
@@ -90,7 +93,7 @@ export function VenuePicker({ venues, bestVenue, onSelect, style }: VenuePickerP
             </span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 600, fontSize: 14.5, color: "var(--ink)" }}>{PLATFORM_LABEL[v.platform]}</div>
-              <MarketStatusBadge state={v.state} nextOpenMs={v.nextOpenMs} style={{ marginTop: 4 }} />
+              <MarketStatusBadge state={v.state} nextOpenMs={v.nextOpenMs} buyable={v.buyable} style={{ marginTop: 4 }} />
             </div>
             <div style={{ textAlign: "right", flex: "none" }}>
               <div className="tnum" style={{ fontWeight: 600, fontSize: 14.5, color: "var(--ink)" }}>

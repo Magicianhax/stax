@@ -41,8 +41,8 @@ function txDate(sec?: number): string {
   return `${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })} · ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
 }
 
-/** Net USDC per week (in +, out −) for the last `n` weeks ending at `nowMs`, oldest first. */
-function weeklyCashFlow(txs: WalletTx[], nowMs: number, n = 8): { label: string; value: number; in: number; out: number }[] {
+/** Net cash (the chain's dollar token) per week (in +, out −) for the last `n` weeks ending at `nowMs`, oldest first. */
+function weeklyCashFlow(txs: WalletTx[], cash: string, nowMs: number, n = 8): { label: string; value: number; in: number; out: number }[] {
   const end = nowMs + 1; // inclusive of "now"
   const start = end - n * WEEK;
   const weeks = Array.from({ length: n }, (_, i) => ({
@@ -52,7 +52,7 @@ function weeklyCashFlow(txs: WalletTx[], nowMs: number, n = 8): { label: string;
     out: 0,
   }));
   for (const t of txs) {
-    if (t.symbol !== "USDC" || !t.timestamp) continue;
+    if (t.symbol !== cash || !t.timestamp) continue;
     const ms = t.timestamp * 1000;
     if (ms < start || ms >= end) continue;
     const w = weeks[Math.min(n - 1, Math.floor((ms - start) / WEEK))];
@@ -150,7 +150,7 @@ export function WalletScreen({
   // Cash flow by week, straight from the transfer list (nothing invented).
   // "Now" is fixed for the life of the screen; the demo anchors to DEMO_NOW.
   const [nowMs] = useState(() => (demo ? DEMO_NOW : Date.now()));
-  const weeks = useMemo(() => weeklyCashFlow(txList, nowMs), [txList, nowMs]);
+  const weeks = useMemo(() => weeklyCashFlow(txList, chain.usdc.symbol, nowMs), [txList, chain.usdc.symbol, nowMs]);
   const flowIn = weeks.reduce((s, w) => s + w.in, 0);
   const flowOut = weeks.reduce((s, w) => s + w.out, 0);
 
@@ -237,13 +237,13 @@ export function WalletScreen({
         <SectionTitle>Cash</SectionTitle>
         <button
           className="card row tap"
-          onClick={() => go("send", { symbol: "USDC" })}
+          onClick={() => go("send", { symbol: chain.usdc.symbol })}
           style={{ width: "100%", padding: "14px 16px", display: "flex", alignItems: "center", gap: 13, textAlign: "left" }}
         >
-          <TokenLogo symbol="USDC" size={38} />
+          <TokenLogo symbol={chain.usdc.symbol} size={38} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: 600, fontSize: 15.5, letterSpacing: "-.01em" }}>US Dollar</div>
-            <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 2 }}>USDC · spendable cash</div>
+            <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 2 }}>{chain.usdc.symbol} · spendable cash</div>
           </div>
           <div className="tnum" style={{ fontWeight: 700, fontSize: 16 }}>{hide ? DOTS : usd(cash)}</div>
         </button>
@@ -441,7 +441,7 @@ export function WalletScreen({
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: "2px 2px 8px" }}>
             <p style={{ margin: 0, fontSize: 14.5, color: "var(--ink-2)", lineHeight: 1.55 }}>
-              Add money with a card or bank is available on Base. On {chain.name}, send USDC to your address
+              Add money with a card or bank is available on Base. On {chain.name}, send {chain.usdc.symbol} to your address
               instead. It arrives in under a minute.
             </p>
             <button
@@ -469,7 +469,7 @@ export function WalletScreen({
       <BottomSheet open={receiveOpen} onClose={() => setReceiveOpen(false)} title="Receive">
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16, padding: "4px 4px 8px" }}>
           <p style={{ margin: 0, fontSize: 14, color: "var(--ink-2)", textAlign: "center", lineHeight: 1.5 }}>
-            Send <b style={{ color: "var(--ink)" }}>USDC on {chain.name}</b> to this address. It arrives in under a minute.
+            Send <b style={{ color: "var(--ink)" }}>{chain.usdc.symbol} on {chain.name}</b> to this address. It arrives in under a minute.
           </p>
           {addrLoading || !address ? (
             <div style={{ width: 196, height: 196, display: "grid", placeItems: "center" }}><Spinner /></div>

@@ -50,6 +50,8 @@ const CRYPTO_ICON = "https://cdn.jsdelivr.net/npm/cryptocurrency-icons@0.18.1/sv
 const DISPLAY: Record<string, AssetDisplay> = {
   // Cash — the spendable dollar (USDC). Real Circle logo, self-hosted.
   USDC: { name: "US Dollar", ticker: "USDC", logo: "/icons/usdc.svg", color: "#2775CA", kind: "safe", cat: "Cash", desc: "USDC is a digital dollar that always aims to be worth $1. It's your spendable cash on Stax: add it, invest it, or send it.", price: 1, apy: undefined, day: 0, spark: [8, 8, 8, 8, 8, 8, 8, 8, 8, 8] },
+  // BSC's cash is Tether's USDT (18 decimals on BNB Chain), not USDC.
+  USDT: { name: "US Dollar", ticker: "USDT", logo: "/icons/usdt.svg", color: "#26A17B", kind: "safe", cat: "Cash", desc: "USDT is a digital dollar that always aims to be worth $1. On BNB Chain it's your spendable cash on Stax: add it, invest it, or send it.", price: 1, apy: undefined, day: 0, spark: [8, 8, 8, 8, 8, 8, 8, 8, 8, 8] },
 
   // --- Big tech (Base: Coinbase tokenized stocks · Mantle: Backed xStocks) ---
   AAPL: { name: "Apple", ticker: "AAPL", logo: logoUrl("AAPLx"), color: "#8b939c", kind: "stock", cat: "Big tech", desc: "Apple makes the iPhone, Mac, and iPad, and earns a steady, growing income from services like the App Store and iCloud. It's one of the most valuable companies in the world.", price: 228.42, day: 0.82, spark: [4, 5, 4, 6, 7, 6, 8, 9, 8, 10] },

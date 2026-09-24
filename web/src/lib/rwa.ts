@@ -52,6 +52,12 @@ export interface RwaTickerView {
   bestVenue: RwaPlatform | null;
 }
 
+/** `GET /api/rwa?chain=bsc` (Task 9). `asOf` is epoch ms of the catalog snapshot. */
+export interface RwaListResponse {
+  tickers: RwaTickerView[];
+  asOf: number;
+}
+
 /** An issuer trades a token only when it is open AND its reason code says TRADING. */
 export function isBuyable(s: { openState: boolean; reasonCode: RwaReasonCode }): boolean {
   return s.openState && s.reasonCode === "TRADING";
