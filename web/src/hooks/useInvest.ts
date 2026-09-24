@@ -22,6 +22,7 @@ import { asViemProvider } from "@/lib/provider";
 import { ERC20_ABI, STAX_EXECUTOR_ABI } from "@/lib/abis";
 import { useChain } from "@/lib/chains/active";
 import { STAX_TREASURY } from "@/lib/fees";
+import { usdToRaw } from "@/lib/units";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { useRefreshBalances } from "@/hooks/useBalances";
 import { authedFetch } from "@/lib/authedFetch";
@@ -198,7 +199,7 @@ export function useInvest(): UseInvest {
 
         // 3. Platform fee (gross − the net the server deployed) → treasury,
         //    batched first into the same sponsored UserOp.
-        const grossRaw = BigInt(Math.round(amountUsd * 1_000_000));
+        const grossRaw = usdToRaw(chain, amountUsd);
         const feeRaw = grossRaw - usdcTotal;
         const feeCall: Call | null = feeRaw > BigInt(0)
           ? { to: usdc, data: encodeFunctionData({ abi: ERC20_ABI, functionName: "transfer", args: [STAX_TREASURY, feeRaw] }) }

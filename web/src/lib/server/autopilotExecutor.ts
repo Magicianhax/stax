@@ -22,6 +22,7 @@ import { getServerSmartAccountClient } from "@/lib/server/privySmartAccount";
 import { buildLegs } from "@/lib/legBuilder";
 import { buildPlanId, recHash, signRiskInference } from "@/lib/eip712";
 import { netOf, STAX_TREASURY } from "@/lib/fees";
+import { rawToUsd, usdToRaw } from "@/lib/units";
 import { ERC20_ABI, STAX_EXECUTOR_ABI } from "@/lib/abis";
 
 const RISK_HEADROOM_BPS = 1500;
@@ -66,14 +67,14 @@ export async function runAutopilot(
   const executor = chain.contracts.executor;
   const usdc = chain.usdc.address;
 
-  // 1. Available cash in the smart account (USDC, 6dp).
+  // 1. Available cash in the smart account (this chain's cash asset, its own decimals).
   const bal = (await client.readContract({
     address: usdc,
     abi: ERC20_ABI,
     functionName: "balanceOf",
     args: [working.smartAccount],
   })) as bigint;
-  const availableUsd = Number(bal) / 10 ** chain.usdc.decimals;
+  const availableUsd = rawToUsd(chain, bal);
 
   // 2. The plan: the basket's fixed weights, or Vera's allocation for the saved goal.
   const plan = await planForAutopilot(working, chain);
@@ -93,7 +94,7 @@ export async function runAutopilot(
   }
 
   // 4. Build the plan exactly like /api/invest-plan (net deployed; fee skimmed).
-  const grossTotal = BigInt(Math.round(working.amountUsd * 1_000_000));
+  const grossTotal = usdToRaw(chain, working.amountUsd);
   const usdcTotal = netOf(grossTotal);
   const feeRaw = grossTotal - usdcTotal;
 

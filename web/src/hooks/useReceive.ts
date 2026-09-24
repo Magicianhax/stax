@@ -1,8 +1,8 @@
 "use client";
 
-// Receive on Base — data + actions for the three ways money comes in
-// (docs/RECEIVE.md). Everything the sheet needs lives here so the components
-// stay presentational:
+// Receive — data + actions for the three ways money comes in (docs/RECEIVE.md), on
+// whichever chain is active (Base's USDC or BSC's USDT is the destination cash asset).
+// Everything the sheet needs lives here so the components stay presentational:
 //
 //   useReceiveNetworks()          curated networks + tokens (GET /api/receive/networks)
 //   useDepositAddress()           mutation → one reusable address per network+token
@@ -19,6 +19,7 @@ import { createWalletClient, custom, parseUnits, type Hex } from "viem";
 import { authedFetch } from "@/lib/authedFetch";
 import { ERC20_ABI } from "@/lib/abis";
 import { BASE } from "@/lib/chains/base";
+import { useChain } from "@/lib/chains/active";
 import { builderCodeSuffix } from "@/lib/builderCode";
 import { getPublicClient } from "@/lib/wagmi";
 import { fromUnits } from "@/lib/format";
@@ -150,17 +151,21 @@ export interface DepositAddressInput {
 /** POST /api/receive/deposit-address → the address card payload. Reusable per (network, token). */
 export function useDepositAddress() {
   const demo = useDemo();
+  const chain = useChain();
   return useMutation({
     mutationFn: async (input: DepositAddressInput): Promise<DepositAddressResponse> => {
       if (demo) {
         await sleep(600);
-        const own = input.originChainId === BASE.id && input.originCurrency.toLowerCase() === BASE.usdc.address.toLowerCase();
+        // The active chain's own cash asset landing on the chain itself needs no bridge —
+        // true for Base + USDC and equally for BSC + USDT, so this checks the live chain
+        // rather than hardcoding Base.
+        const own = input.originChainId === chain.id && input.originCurrency.toLowerCase() === chain.usdc.address.toLowerCase();
         const vm = input.vm ?? "evm";
         return {
           address: own ? demo.address : DEMO_DEPOSIT_ADDRESS[vm],
           originChainId: input.originChainId,
           originCurrency: input.originCurrency,
-          symbol: input.symbol ?? "USDC",
+          symbol: input.symbol ?? chain.usdc.symbol,
           vm,
           minUsd: own ? 0 : 5,
           feeUsd: own ? 0 : 0.8,
