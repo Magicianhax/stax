@@ -18,7 +18,7 @@ import {
 } from "../rwa";
 import { getBinanceWeb3 } from "./binance";
 import type { RwaToken } from "./binance/types";
-import { cached } from "./cache";
+import { cached, cacheDel } from "./cache";
 
 /** 1 = stock, 3 = ETF (docs/BINANCE-WEB3.md §2); 2 (pre-IPO) has never been seen live. */
 function tickerType(assetType: RwaToken["assetType"]): RwaTickerView["type"] {
@@ -40,12 +40,29 @@ function nextOpenMsFor(platform: RwaPlatform, state: MarketState, nextOpenTime: 
   return nextUsOpenMs(nowMs);
 }
 
+/**
+ * `state` for one row. `marketStateFrom` reads the API's own session — bStock's statusInfo
+ * carries no session at all (`marketStatus` always null) so it always falls through, but so
+ * does an Ondo row that gives no session either, and both need the same two fallbacks in
+ * order: first, a non-TRADING reason the issuer already flagged as not open (`openState`
+ * false) is Stax's own "paused" state, not a guess — e.g. bStock's MARKET_PAUSED/ASSET_PAUSED
+ * days, which used to read as whatever the US clock said, TRADING reason or not. Only when
+ * the row gives no signal at all does the US-hours calendar stand in.
+ */
+function stateFor(token: RwaToken, nowMs: number): MarketState {
+  const fromApi = marketStateFrom(token.statusInfo);
+  if (fromApi !== null) return fromApi;
+  if (!token.statusInfo.openState && token.statusInfo.reasonCode !== "TRADING") return "paused";
+  return usMarketState(nowMs);
+}
+
 function buildVenue(token: RwaToken, nowMs: number): VenueView {
-  // bStock's statusInfo carries no session at all, so its display state is always Stax's own
-  // US-market calendar, never a local fallback layered on top of a (nonexistent) API session.
-  const state: MarketState =
-    token.platformId === "bstock" ? usMarketState(nowMs) : (marketStateFrom(token.statusInfo) ?? usMarketState(nowMs));
-  const buyable = isBuyable(token.statusInfo);
+  const state = stateFor(token, nowMs);
+  // `state` and `isBuyable` come from independent signals (the calendar vs. the issuer's own
+  // flags) and can disagree — an issuer that still claims TRADING after Stax's own clock says
+  // the market is closed must never read as buyable: that is exactly the weekend-premium buy
+  // Vera is supposed to refuse. The calendar wins.
+  const buyable = state === "closed" ? false : isBuyable(token.statusInfo);
   return {
     platform: token.platformId,
     symbol: token.tokenSymbol,
@@ -119,6 +136,11 @@ export function buildCatalog(tokens: RwaToken[], assets: Asset[], nowMs: number)
  * and never a fabricated "market closed": Review Focus #1 asks for the honest state, not a
  * guess. The primary slot still does all the normal cache-hit work (this is layered on top
  * of it, not instead of it), so the Binance-facing call rate is unaffected.
+ *
+ * The fallback slot is only ever refreshed from inside the primary loader — i.e. only on a
+ * genuine reload, not on every call — so `cached()`'s own "write only on a miss" rule can't
+ * leave it pinned to whichever value happened to be first in some window. `cacheDel` before
+ * the write is what makes that a refresh and not another no-op miss-check.
  */
 export async function cachedWithFallback<T>(
   key: string,
@@ -128,11 +150,12 @@ export async function cachedWithFallback<T>(
 ): Promise<T> {
   const fallbackKey = `${key}:lastGood`;
   try {
-    const value = await cached(key, ttlSeconds, fn);
-    // Best-effort refresh of the fallback slot. `cached()` only invokes its loader on a miss,
-    // so this is a no-op read most of the time and never blocks the response on its result.
-    void cached(fallbackKey, fallbackTtlSeconds, async () => value).catch(() => undefined);
-    return value;
+    return await cached(key, ttlSeconds, async () => {
+      const value = await fn();
+      await cacheDel(fallbackKey);
+      await cached(fallbackKey, fallbackTtlSeconds, async () => value);
+      return value;
+    });
   } catch (err) {
     return cached(fallbackKey, fallbackTtlSeconds, async () => {
       throw err;

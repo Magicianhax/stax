@@ -3,9 +3,10 @@
 // rwa_tokens.json fixture (14 rows: NVDA/TSLA/META/MSFT/GOOGL dual-listed, MEI paused, LECO
 // unsupported, INTW bstock-only, HYGW ondo-only), plus small synthetic variants for the cases
 // the fixture doesn't cover on its own (a Sunday snapshot, a curated venue missing from the
-// token list, a tie broken by gap size).
-import { describe, expect, it } from "vitest";
-import { buildCatalog } from "./rwaCatalog";
+// token list, and a best-venue pick pinned against a synthetic gap so a naive "just take the
+// default venue" implementation can't pass by accident).
+import { beforeEach, describe, expect, it } from "vitest";
+import { buildCatalog, cachedWithFallback } from "./rwaCatalog";
 import type { Asset } from "../chains/types";
 import type { RwaToken } from "./binance/types";
 import rwaTokensFixture from "./binance/__fixtures__/rwa_tokens.json";
@@ -17,7 +18,34 @@ const NOW = new Date("2026-09-22T14:00:00.000Z").getTime();
 // every fixture row too (set per-test below), so nothing anywhere should be buyable.
 const SUNDAY = new Date("2026-09-27T16:00:00.000Z").getTime();
 
-const tokens = rwaTokensFixture as unknown as RwaToken[];
+// Task 7's fixture is the raw wire response (`wireRwaToken` in binance/rwa.ts): every numeric
+// field arrives as a string, and the real client parses each one to `number` before anything
+// downstream ever sees it. Casting the raw JSON straight to `RwaToken` would leave
+// tokenPrice/referencePrice as strings — `gapPct`'s `Number.isFinite` guard rejects those, so
+// every gap in this file would silently evaluate to null and `pickBestVenue` would never
+// actually compare two gaps. This mirrors binance/rwa.ts's own wire-to-`RwaToken` conversion.
+interface RawFixtureToken extends Omit<RwaToken, "decimals" | "tokenToShareRatio" | "tokenPrice" | "referencePrice" | "volume24H" | "marketCap"> {
+  decimals: string;
+  tokenToShareRatio: string;
+  tokenPrice: string;
+  referencePrice: string;
+  volume24H: string;
+  marketCap: string | null;
+}
+
+function parseFixtureToken(raw: RawFixtureToken): RwaToken {
+  return {
+    ...raw,
+    decimals: Number(raw.decimals),
+    tokenToShareRatio: Number(raw.tokenToShareRatio),
+    tokenPrice: Number(raw.tokenPrice),
+    referencePrice: Number(raw.referencePrice),
+    volume24H: Number(raw.volume24H),
+    marketCap: raw.marketCap === null ? 0 : Number(raw.marketCap),
+  };
+}
+
+const tokens = (rwaTokensFixture as unknown as RawFixtureToken[]).map(parseFixtureToken);
 
 const stock = (a: Omit<Asset, "tier" | "via" | "decimals">): Asset => ({
   ...a,
@@ -106,6 +134,31 @@ describe("buildCatalog", () => {
     expect(nvda.bestVenue).toBe("bstock");
   });
 
+  it("picks the smaller gap by size, not by which venue is the curated default", () => {
+    // NVDA's default venue is bstock (see `assets` above). Set ondo's token price equal to its
+    // own reference (gap 0%) while bstock keeps its fixture gap (~+0.078%), so a `bestVenue`
+    // that just returns the default or the first buyable venue — which would also pass every
+    // other test in this file — is pinned wrong here: the smaller gap is now the non-default,
+    // second-pushed venue.
+    const withZeroGapOndo = tokens.map((t) =>
+      t.underlyingTicker === "NVDA" && t.platformId === "ondo" ? { ...t, tokenPrice: t.referencePrice } : t,
+    );
+    const nvda = buildCatalog(withZeroGapOndo, assets, NOW).find((t) => t.ticker === "NVDA")!;
+    expect(nvda.bestVenue).toBe("ondo");
+  });
+
+  it("compares gap by absolute size, so a negative gap can still beat a smaller-looking positive one", () => {
+    // bstock discount of -0.5% vs. ondo premium of +0.2%: |0.2| < |0.5|, so ondo wins even
+    // though -0.5 < 0.2 numerically — this pins Math.abs, not a signed comparison.
+    const skewed = tokens.map((t) => {
+      if (t.underlyingTicker !== "NVDA") return t;
+      if (t.platformId === "bstock") return { ...t, tokenPrice: t.referencePrice * 0.995 };
+      return { ...t, tokenPrice: t.referencePrice * 1.002 };
+    });
+    const nvda = buildCatalog(skewed, assets, NOW).find((t) => t.ticker === "NVDA")!;
+    expect(nvda.bestVenue).toBe("ondo");
+  });
+
   it("tolerates a curated venue missing from the token list: the ticker keeps its other venue", () => {
     // AAPL's ondo row is present; its bstock twin (AAPLB) is real but absent from /tokens,
     // exactly the case docs/BINANCE-WEB3.md §7.2 records — buildCatalog must not drop AAPL
@@ -136,6 +189,35 @@ describe("buildCatalog", () => {
     expect(nvda.venues.find((v) => v.platform === "bstock")!.state).toBe("open");
   });
 
+  it("never reports a closed venue as buyable, even one whose own flags still say TRADING", () => {
+    // The unmodified fixture's bStock rows carry openState:true / reasonCode:"TRADING" — the
+    // API never itself reports a session, so nothing in the row changes on a Sunday. Only
+    // Stax's own US-market calendar (via `nowMs`) can catch that the market is actually
+    // closed, and `buyable` must defer to it rather than to the issuer's stale-looking flags:
+    // this is the exact weekend-premium buy Vera is supposed to refuse.
+    const cat = buildCatalog(tokens, assets, SUNDAY);
+    const nvdaBstock = cat.find((t) => t.ticker === "NVDA")!.venues.find((v) => v.platform === "bstock")!;
+    expect(nvdaBstock.state).toBe("closed");
+    expect(nvdaBstock.buyable).toBe(false);
+    expect(nvdaBstock.nextOpenMs).toEqual(expect.any(Number));
+  });
+
+  it("maps a non-TRADING reason with no session info to paused, not to whatever the clock says", () => {
+    // A synthetic bStock-shaped row: marketStatus is still null (bStock never sends one), but
+    // reasonCode says the issuer itself paused the asset. During US market hours the naive
+    // calendar fallback would read "open"; the issuer's own flag must win instead.
+    const nvdaBstock = tokens.find((t) => t.underlyingTicker === "NVDA" && t.platformId === "bstock")!;
+    const pausedBstock: RwaToken = {
+      ...nvdaBstock,
+      statusInfo: { ...nvdaBstock.statusInfo, openState: false, reasonCode: "ASSET_PAUSED", marketStatus: null },
+    };
+    const others = tokens.filter((t) => !(t.underlyingTicker === "NVDA" && t.platformId === "bstock"));
+    const nvda = buildCatalog([pausedBstock, ...others], assets, NOW).find((t) => t.ticker === "NVDA")!;
+    const bstock = nvda.venues.find((v) => v.platform === "bstock")!;
+    expect(bstock.state).toBe("paused");
+    expect(bstock.buyable).toBe(false);
+  });
+
   it("a Sunday snapshot: every venue not buyable across the whole catalog", () => {
     const closed = tokens.map((t) => ({ ...t, statusInfo: { ...t.statusInfo, openState: false } }));
     const cat = buildCatalog(closed, assets, SUNDAY);
@@ -144,13 +226,15 @@ describe("buildCatalog", () => {
   });
 
   it("a ticker whose only buyable venue is the twin gets bestVenue = the twin", () => {
-    // TSLA's default venue (bstock) forced unbuyable; only the ondo twin stays TRADING.
+    // TSLA's default venue (bstock) forced unbuyable; only the ondo twin stays TRADING. The
+    // paused reason with no session info also reconciles to state "paused", not "open".
     const withBstockPaused = tokens.map((t) =>
       t.underlyingTicker === "TSLA" && t.platformId === "bstock"
         ? { ...t, statusInfo: { ...t.statusInfo, openState: false, reasonCode: "MARKET_PAUSED" } }
         : t,
     );
     const tsla = buildCatalog(withBstockPaused, assets, NOW).find((t) => t.ticker === "TSLA")!;
+    expect(tsla.venues.find((v) => v.platform === "bstock")!.state).toBe("paused");
     expect(tsla.venues.find((v) => v.platform === "bstock")!.buyable).toBe(false);
     expect(tsla.bestVenue).toBe("ondo");
   });
@@ -163,5 +247,41 @@ describe("buildCatalog", () => {
         else expect(typeof v.nextOpenMs).toBe("number");
       }
     }
+  });
+});
+
+// cachedWithFallback: the stale-on-outage layer under bscCatalogSnapshot / cachedRwaProfile /
+// cachedCandles. Exercised directly against the real (in-memory, no Redis configured in this
+// environment) cache module — no mocking needed, since the whole point is the interaction
+// between `cached()`'s "loader only runs on a miss" rule and the fallback slot's own TTL.
+describe("cachedWithFallback", () => {
+  let n = 0;
+  beforeEach(() => {
+    n += 1; // a fresh key per test so the in-memory cache carries nothing over between them
+  });
+
+  it("serves the newest good value on a failure, not whichever value the fallback slot saw first", async () => {
+    const key = `test:cachedWithFallback:${n}`;
+    // ttl 0: every call is a genuine primary-cache miss, so each one re-runs `fn` and (on
+    // success) refreshes the fallback slot — the behaviour this test exists to pin.
+    expect(await cachedWithFallback(key, 0, 600, async () => "A")).toBe("A");
+    expect(await cachedWithFallback(key, 0, 600, async () => "B")).toBe("B");
+    // This failure has nothing to serve but the fallback slot. Before the fix, `cached()`'s
+    // "write only on a miss" rule meant the slot was written once (with "A") and never
+    // touched again inside its 600s window, so this would have returned "A" — a snapshot a
+    // full cycle stale — instead of "B", the most recent good load.
+    const served = await cachedWithFallback(key, 0, 600, async () => {
+      throw new Error("binance down");
+    });
+    expect(served).toBe("B");
+  });
+
+  it("rejects when a failure has no cached value to fall back on, so the route can 503", async () => {
+    const key = `test:cachedWithFallback:none:${n}`;
+    await expect(
+      cachedWithFallback(key, 0, 600, async () => {
+        throw new Error("binance down");
+      }),
+    ).rejects.toThrow("binance down");
   });
 });
