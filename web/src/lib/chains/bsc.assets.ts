@@ -382,4 +382,40 @@ export const BSC_STOCKS: Asset[] = [
   }),
 ];
 
-export const BSC_ASSETS = { stocks: BSC_STOCKS, safe: [] as Asset[], crypto: [] as Asset[], all: BSC_STOCKS };
+// Crypto on BSC (Wave 5 direction A): plain ERC-20s traded through the same Binance aggregator
+// as the tokenized stocks, so `via: "binance"` and `isRoutable` treat them identically — no
+// `platform`/`twin` (they aren't RWA tokens, so there's only one address, no issuer choice) and
+// no market hours (crypto trades every hour of every day). Addresses verified live 2026-09-24:
+// each has on-chain code and 18 decimals (a direct `decimals()`/`getCode` read against a public
+// BSC RPC) and is quotable through the aggregator for a $6 USDT leg (one `quote` call each,
+// via the read-only scratch script — never signed, built or broadcast).
+export const BSC_CRYPTO: Asset[] = [
+  {
+    symbol: "BTCB",
+    name: "Bitcoin",
+    tier: "crypto",
+    via: "binance",
+    address: "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c",
+    decimals: 18,
+  },
+  {
+    // Binance-Peg Ethereum Token — the on-chain contract symbol is plainly "ETH".
+    symbol: "ETH",
+    name: "Ethereum",
+    tier: "crypto",
+    via: "binance",
+    address: "0x2170Ed0880ac9A755fd29B2688956BD959F933F8",
+    decimals: 18,
+  },
+  {
+    // Held as WBNB (BNB has no ERC-20 form of its own; WBNB is what the aggregator swaps).
+    symbol: "BNB",
+    name: "BNB",
+    tier: "crypto",
+    via: "binance",
+    address: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+    decimals: 18,
+  },
+];
+
+export const BSC_ASSETS = { stocks: BSC_STOCKS, safe: [] as Asset[], crypto: BSC_CRYPTO, all: [...BSC_STOCKS, ...BSC_CRYPTO] };

@@ -23,7 +23,7 @@
 // the price you trade at. Reads are issued in parallel — the server client's
 // multicall batching folds them into one eth_call.
 import "server-only";
-import type { PublicClient } from "viem";
+import { zeroAddress, type PublicClient } from "viem";
 import { AAVE_POOL_ABI, AGGREGATOR_V3_ABI, B20_ABI, V3_POOL_ABI } from "./abis";
 import type { Asset, RouteHop, StaxChain } from "./chains/types";
 import { getBinanceWeb3 } from "./server/binance";
@@ -217,6 +217,41 @@ async function priceFromRwaToken(asset: Asset & { address: `0x${string}` }): Pro
   }
 }
 
+// ── Binance aggregator quote price cache (promise-deduped, 30s per chain+asset) ──────────────
+const binanceQuotePriceCache = new Map<string, { at: number; value: Promise<number | undefined> }>();
+/** Reference notional for the crypto price probe, in whole dollars. */
+const BINANCE_QUOTE_PROBE_USD = 100;
+
+/**
+ * Price one whole BSC crypto asset (BTCB/ETH/BNB — not an RWA token, so it has no
+ * `rwa/tokens` row) from the Binance aggregator's own quote for $100 of cash, the same source
+ * `buildBinanceLeg` uses to actually execute a trade — mirrors `priceFromKyber`'s use of a live
+ * aggregator quote as Base's price source for assets with no direct pool. Best-effort: no
+ * route / upstream error => undefined (never invents a price), and failures aren't cached so
+ * the next request retries. The quote is read-only (no `taker` funds are needed to price it),
+ * so a constant placeholder address stands in for one.
+ */
+function priceFromBinanceQuote(chain: StaxChain, asset: Asset & { address: `0x${string}` }): Promise<number | undefined> {
+  const key = `${chain.key}:${asset.symbol}`;
+  const hit = binanceQuotePriceCache.get(key);
+  if (hit && Date.now() - hit.at < KYBER_PRICE_TTL_MS) return hit.value;
+  const decimals = asset.decimals ?? 18;
+  const probeRaw = usdToRaw(chain, BINANCE_QUOTE_PROBE_USD);
+  const value = getBinanceWeb3()
+    .quote({ fromToken: chain.usdc.address, toToken: asset.address, amount: probeRaw, taker: zeroAddress })
+    .then((q) => {
+      const qty = Number(q.toTokenAmount) / Number(pow10(decimals));
+      return qty > 0 ? BINANCE_QUOTE_PROBE_USD / qty : undefined;
+    })
+    .catch(() => undefined)
+    .then((price) => {
+      if (price === undefined) binanceQuotePriceCache.delete(key);
+      return price;
+    });
+  binanceQuotePriceCache.set(key, { at: Date.now(), value });
+  return value;
+}
+
 /** Aave v3 supply APY (percent) for USDC on this chain, from currentLiquidityRate (ray). */
 async function aaveSupplyApy(chain: StaxChain, client: PublicClient): Promise<number | undefined> {
   if (!chain.routers.aavePool) return undefined;
@@ -266,6 +301,11 @@ export async function priceAsset(
   } else if (chain.routes[asset.symbol]) {
     priceUsd = await priceFromRoute(chain, client, chain.routes[asset.symbol].hops);
     if (priceUsd !== undefined) source = "agni_route";
+  } else if (asset.via === "binance" && asset.address && asset.tier === "crypto" && !asset.coming) {
+    // Crypto isn't an RWA token — no reference share price, no `rwa/tokens` row — so it's priced
+    // from the same aggregator quote a trade would actually get, not the RWA Data API.
+    priceUsd = await priceFromBinanceQuote(chain, asset as Asset & { address: `0x${string}` });
+    if (priceUsd !== undefined) source = "binance";
   } else if (asset.via === "binance" && asset.address && !asset.coming) {
     rwa = await priceFromRwaToken(asset as Asset & { address: `0x${string}` });
     if (rwa !== undefined) {

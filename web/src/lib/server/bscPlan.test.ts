@@ -13,7 +13,18 @@ import { getChain } from "@/lib/chains";
 import { usdToRaw } from "@/lib/units";
 import type { RwaToken } from "./binance/types";
 import type { RwaTickerView, VenueView } from "@/lib/rwa";
-import { allClosedMessage, buildBscInvestCalls, buyableTickers, closedMessage, enforceMinLegs, maxBscLegs, unavailableNote, venueAddressFor } from "./bscPlan";
+import {
+  allClosedMessage,
+  applyCryptoMix,
+  buildBscInvestCalls,
+  buyableTickers,
+  closedMessage,
+  enforceMinLegs,
+  maxBscLegs,
+  parseCryptoMix,
+  unavailableNote,
+  venueAddressFor,
+} from "./bscPlan";
 
 const bsc = getChain("bsc");
 const NVDA = "0x02fca66c1d1afb4e2a7884261eb00f63598a7436" as const;
@@ -347,5 +358,149 @@ describe("unavailableNote", () => {
   it("says a ticker with no Binance venue is unlisted, instead of an empty state list", () => {
     const t: RwaTickerView = { ticker: "TSLA", name: "Tesla", type: "stock", venues: [], bestVenue: null };
     expect(unavailableNote(t, Date.UTC(2026, 8, 27, 12))).toBe("TSLA (not listed by Binance right now)");
+  });
+});
+
+const BTCB = "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c" as const;
+
+describe("buildBscInvestCalls: crypto legs", () => {
+  beforeEach(() => {
+    quoteSpy.mockReset().mockImplementation(async (p: { amount: bigint }) => ({ ...goodQuote, fromTokenAmount: p.amount }));
+    buildSwapSpy.mockReset().mockResolvedValue(goodSwap);
+    vi.mocked(getBinanceWeb3).mockReturnValue({
+      quote: quoteSpy,
+      buildSwap: buildSwapSpy,
+    } as unknown as ReturnType<typeof getBinanceWeb3>);
+  });
+
+  it("builds a crypto leg straight from the asset's own address — no RWA catalog, no market-hours gate", async () => {
+    // Neither the catalog nor the tokens list carries BTCB at all (it isn't an RWA token), and
+    // this must still succeed: crypto is always tradeable (Wave 5 direction A).
+    const calls = await buildBscInvestCalls({
+      chain: bsc,
+      allocation: { summary: "s", rationale: "r", riskScore: 7000, allocations: [{ symbol: "BTCB", weightPct: 100, reason: "why" }] },
+      usdcTotal: usdToRaw(bsc, 60),
+      taker: SMART_ACCOUNT,
+      catalog: [],
+      tokens: [],
+      nowMs: NOW,
+    });
+    expect(calls).toHaveLength(2); // approve + swap
+    const allowed = new Set([bsc.usdc.address.toLowerCase(), bsc.routers.binance!.toLowerCase()]);
+    for (const call of calls) expect(allowed.has(call.to.toLowerCase())).toBe(true);
+    expect(quoteSpy).toHaveBeenCalledWith(expect.objectContaining({ toToken: BTCB }));
+  });
+
+  it("mixes a crypto leg and a stock leg in one plan without either blocking the other", async () => {
+    const catalog: RwaTickerView[] = [ticker({ ticker: "NVDA", bestVenue: "bstock", venues: [venue({ address: NVDA })] })];
+    const tokens: RwaToken[] = [row({ tokenContractAddress: NVDA })];
+    const calls = await buildBscInvestCalls({
+      chain: bsc,
+      allocation: {
+        summary: "s",
+        rationale: "r",
+        riskScore: 7000,
+        allocations: [
+          { symbol: "NVDA", weightPct: 80, reason: "why" },
+          { symbol: "BTCB", weightPct: 20, reason: "why" },
+        ],
+      },
+      usdcTotal: usdToRaw(bsc, 100),
+      taker: SMART_ACCOUNT,
+      catalog,
+      tokens,
+      nowMs: NOW,
+    });
+    expect(calls).toHaveLength(4); // 2 legs * (approve + swap)
+  });
+});
+
+describe("parseCryptoMix", () => {
+  it("returns null when crypto isn't mentioned — the default stays stocks-only", () => {
+    expect(parseCryptoMix("grow my savings")).toBeNull();
+    expect(parseCryptoMix("mostly big tech stocks")).toBeNull();
+  });
+
+  it("reads an explicit crypto percentage", () => {
+    expect(parseCryptoMix("80% stocks, 20% crypto")).toEqual({ cryptoPct: 20 });
+    expect(parseCryptoMix("put 15% in bitcoin, the rest in stocks")).toEqual({ cryptoPct: 15 });
+  });
+
+  it("derives the crypto share from an explicit stock percentage", () => {
+    expect(parseCryptoMix("90% stocks and some bitcoin")).toEqual({ cryptoPct: 10 });
+  });
+
+  it("maps a half-and-half phrasing to 50/50", () => {
+    expect(parseCryptoMix("half stocks, half bitcoin")).toEqual({ cryptoPct: 50 });
+    expect(parseCryptoMix("50/50 stocks and crypto")).toEqual({ cryptoPct: 50 });
+  });
+
+  it("maps 'mostly crypto' higher than 'a bit of crypto'", () => {
+    const mostly = parseCryptoMix("mostly crypto")!;
+    const aBit = parseCryptoMix("mostly stocks with a bit of bitcoin")!;
+    expect(mostly.cryptoPct).toBeGreaterThan(aBit.cryptoPct);
+    expect(aBit.cryptoPct).toBeLessThanOrEqual(20);
+  });
+
+  it("gives crypto mentioned with no split at all a modest, non-zero default", () => {
+    const mix = parseCryptoMix("stocks and bitcoin")!;
+    expect(mix.cryptoPct).toBeGreaterThan(0);
+    expect(mix.cryptoPct).toBeLessThan(50);
+  });
+
+  it("treats a negated crypto mention as no request at all, not the catch-all default", () => {
+    expect(parseCryptoMix("no crypto please")).toBeNull();
+    expect(parseCryptoMix("stocks only, avoid bitcoin")).toBeNull();
+    expect(parseCryptoMix("I don't want bitcoin")).toBeNull();
+    expect(parseCryptoMix("tech stocks, never touch btc")).toBeNull();
+  });
+
+  it("never reads 'BNB Chain' (the network name) as a request for the BNB coin", () => {
+    expect(parseCryptoMix("invest $100 in tech stocks on BNB Chain")).toBeNull();
+    expect(parseCryptoMix("buy some ETFs on BNB Smart Chain")).toBeNull();
+  });
+
+  it("still reads bare 'bnb' as the coin when it isn't naming the chain", () => {
+    expect(parseCryptoMix("put a bit of bnb in with my stocks")).not.toBeNull();
+  });
+});
+
+describe("applyCryptoMix", () => {
+  it("leaves the plan alone when it's already within tolerance of the target", () => {
+    const legs = [
+      { symbol: "NVDA", weightPct: 78 },
+      { symbol: "BTCB", weightPct: 22 },
+    ];
+    expect(applyCryptoMix(bsc, legs, { cryptoPct: 20 })).toEqual(legs);
+  });
+
+  it("rescales stock and crypto legs onto the requested split, keeping each group's own relative weights", () => {
+    const legs = [
+      { symbol: "NVDA", weightPct: 30 },
+      { symbol: "MSFT", weightPct: 30 },
+      { symbol: "BTCB", weightPct: 40 },
+    ];
+    const out = applyCryptoMix(bsc, legs, { cryptoPct: 20 });
+    const crypto = out.find((l) => l.symbol === "BTCB")!;
+    const nvda = out.find((l) => l.symbol === "NVDA")!;
+    const msft = out.find((l) => l.symbol === "MSFT")!;
+    expect(crypto.weightPct).toBeCloseTo(20, 5);
+    expect(nvda.weightPct).toBeCloseTo(msft.weightPct, 5); // NVDA/MSFT started equal, stay equal
+    expect(nvda.weightPct + msft.weightPct).toBeCloseTo(80, 5);
+  });
+
+  it("adds a fallback crypto pick when the model asked-for crypto but included none", () => {
+    const legs = [
+      { symbol: "NVDA", weightPct: 60 },
+      { symbol: "MSFT", weightPct: 40 },
+    ];
+    const out = applyCryptoMix(bsc, legs, { cryptoPct: 20 });
+    const cryptoTotal = out.filter((l) => ["BTCB", "ETH", "BNB"].includes(l.symbol)).reduce((s, l) => s + l.weightPct, 0);
+    expect(cryptoTotal).toBeCloseTo(20, 5);
+  });
+
+  it("does nothing when the target is ~0% crypto and none was picked — there's nothing to add", () => {
+    const legs = [{ symbol: "NVDA", weightPct: 100 }];
+    expect(applyCryptoMix(bsc, legs, { cryptoPct: 2 })).toEqual(legs);
   });
 });

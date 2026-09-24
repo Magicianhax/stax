@@ -15,9 +15,21 @@ import "server-only";
 import { generateObject } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { AllocationSchema, type Allocation } from "@/lib/allocation-schema";
-import { investableAssets } from "@/lib/chains";
+import { investableAssets, isRoutable } from "@/lib/chains";
 import type { Asset, StaxChain } from "@/lib/chains/types";
-import { AllocationRefusal, allClosedMessage, buyableTickers, enforceMinLegs, maxBscLegs, unavailableNote, venueAddressFor } from "./bscPlan";
+import {
+  AllocationRefusal,
+  allClosedMessage,
+  applyCryptoMix,
+  buyableTickers,
+  enforceMinLegs,
+  maxBscLegs,
+  minLegFloorMessage,
+  parseCryptoMix,
+  unavailableNote,
+  venueAddressFor,
+  type CryptoMixRequest,
+} from "./bscPlan";
 import { bscCatalogSnapshot } from "./rwaCatalog";
 import { BSC_MIN_LEG_USD, type RwaTickerView } from "@/lib/rwa";
 
@@ -36,6 +48,10 @@ interface BscPromptInfo {
   maxLegs: number;
   minWeightPct: number;
   unavailable: string[];
+  /** Set only when the user's goal actually asked for a stocks/crypto mix (Wave 5 direction B). */
+  cryptoMix?: CryptoMixRequest;
+  /** True when every stock market is shut right now AND crypto was asked for — see bscRules below. */
+  stocksClosed?: boolean;
 }
 
 function systemPrompt(chain: StaxChain, universe: Asset[], bsc?: BscPromptInfo): string {
@@ -56,6 +72,15 @@ function systemPrompt(chain: StaxChain, universe: Asset[], bsc?: BscPromptInfo):
               `- These names are NOT in the list above and must never be picked, because they aren't tradeable right now: ${bsc.unavailable.join("; ")}. If the user's goal mentions one of them by name, say in your rationale that it's temporarily unavailable (market closed or paused) and suggest a close alternative from the list instead.`,
             ]
           : []),
+        ...(bsc.stocksClosed
+          ? [
+              `- Every stock market is closed right now, so no 'stock' tier asset is in the list above at all: this plan can ONLY use 'crypto' tier picks. Say plainly in your rationale that the stock market is shut right now and this plan puts the money into crypto instead.`,
+            ]
+          : bsc.cryptoMix
+            ? [
+                `- The user asked for about ${bsc.cryptoMix.cryptoPct}% crypto and ${100 - bsc.cryptoMix.cryptoPct}% stocks. Split the total weight close to that: 'crypto' tier picks should add up near ${bsc.cryptoMix.cryptoPct}%, 'stock' tier picks near ${100 - bsc.cryptoMix.cryptoPct}%.`,
+              ]
+            : []),
       ]
     : [];
 
@@ -94,21 +119,38 @@ export async function buildAllocation(
   if (chain.key === "bsc") {
     const catalog = await bscCatalogSnapshot(Date.now());
     const buyable = buyableTickers(catalog.tickers);
-    if (buyable.length === 0) {
+    const buyableSymbols = new Set(buyable.map((t) => t.ticker));
+    let cryptoMix = parseCryptoMix(goal) ?? undefined;
+    // Crypto has no market hours and isn't in the RWA catalog at all, so it's judged solely by
+    // isRoutable (always tradeable) rather than the stock catalog's buyable-right-now gate — and
+    // it only joins Vera's universe when the goal actually asked for it (default: stocks only).
+    const cryptoUniverse = cryptoMix ? chain.assets.crypto.filter((a) => isRoutable(chain, a.symbol)) : [];
+    // Every BSC gate must treat crypto as always tradeable (Wave 5 direction A), so "all
+    // buyable" is computed across BOTH universes before the all-closed refusal fires — a
+    // weekend "put $50 in bitcoin" must still get a plan even though every stock is shut.
+    if (buyable.length === 0 && cryptoUniverse.length === 0) {
       throw new AllocationRefusal(allClosedMessage(catalog.tickers, Date.now()));
     }
-    const buyableSymbols = new Set(buyable.map((t) => t.ticker));
-    universe = universe.filter((a) => buyableSymbols.has(a.symbol));
+    // Stocks are shut but crypto was asked for and is available: the whole amount goes to
+    // crypto rather than honouring a stocks/crypto split against a stock universe that's
+    // empty right now (a strict 80/20 read would otherwise leave 80% of the money unallocated).
+    const stocksClosed = buyable.length === 0;
+    if (stocksClosed && cryptoMix) {
+      cryptoMix = { cryptoPct: 100 };
+    }
+    universe = [...universe.filter((a) => buyableSymbols.has(a.symbol)), ...cryptoUniverse];
     catalogBySymbol = new Map(catalog.tickers.map((t) => [t.ticker, t]));
     const maxLegs = maxBscLegs(amountUsd);
     if (maxLegs === 0) {
-      throw new AllocationRefusal(`$${amountUsd} is below Binance's $6 minimum per stock.`);
+      throw new AllocationRefusal(minLegFloorMessage(1));
     }
     bscInfo = {
       maxLegs,
       // ceil so a pick right at the boundary still clears $6 after rounding, not just meets it.
       minWeightPct: Math.ceil((BSC_MIN_LEG_USD / amountUsd) * 100),
       unavailable: catalog.tickers.filter((t) => !buyableSymbols.has(t.ticker)).map((t) => unavailableNote(t, Date.now())),
+      cryptoMix,
+      stocksClosed: stocksClosed && Boolean(cryptoMix),
     };
   }
 
@@ -116,6 +158,7 @@ export async function buildAllocation(
     throw new Error(`No investable assets are live on ${chain.name} yet.`);
   }
   const allowed = new Set(universe.map((a) => a.symbol));
+  const assetsBySymbol = new Map(universe.map((a) => [a.symbol, a]));
 
   const { object } = await generateObject({
     model: anthropic(MODEL),
@@ -135,13 +178,21 @@ export async function buildAllocation(
     throw new Error("Could not build a valid allocation. Try rephrasing the goal.");
   }
   const total = filtered.reduce((s, a) => s + a.weightPct, 0);
-  const normalized = filtered.map((a) => ({
+  let normalized = filtered.map((a) => ({
     ...a,
     weightPct: total > 0 ? Math.round((a.weightPct / total) * 10000) / 100 : 0,
   }));
 
   if (!bscInfo || !catalogBySymbol) {
     return { ...object, allocations: normalized };
+  }
+
+  // Direction B: a pure post-check on what the model actually returned, in case it didn't
+  // follow the ratio rule above (or ignored the crypto ask entirely). Runs before the $6-floor
+  // pass below, which still has the final word — a ratio correction can still shrink once
+  // under-$6 legs are dropped.
+  if (bscInfo.cryptoMix) {
+    normalized = applyCryptoMix(chain, normalized, bscInfo.cryptoMix);
   }
 
   // Enforce the $6 floor again on what the model actually returned (Review Focus #3): drop
@@ -154,6 +205,17 @@ export async function buildAllocation(
     throw new AllocationRefusal(capped.message);
   }
   const allocations = capped.legs.map((l) => {
+    const asset = assetsBySymbol.get(l.symbol);
+    // Crypto isn't an RWA token, so it has no catalog venue to resolve — its address comes
+    // straight from the chain's own asset registry instead.
+    if (asset?.tier === "crypto") {
+      return {
+        symbol: l.symbol,
+        weightPct: Math.round((l.usd / amountUsd) * 10000) / 100,
+        reason: l.reason,
+        ...(asset.address ? { address: asset.address } : {}),
+      };
+    }
     const ticker = bySymbol.get(l.symbol);
     const address = venueAddressFor(ticker);
     return {
