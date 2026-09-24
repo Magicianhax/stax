@@ -319,7 +319,9 @@ export function PlanScreen({
       >
         {investable ? (
           <div style={{ textAlign: "center", fontSize: 12.5, color: "var(--ink-2)", marginBottom: 10 }}>
-            {chain.key === "bsc" ? "No fee" : `${STAX_FEE_LABEL} fee (${usd(feeUsd(amount, chain.key))})`} · gas on us
+            {/* Design critique P2 #14: "gas" is jargon a first-time investor shouldn't need —
+                matches the wording TradeScreen already uses for the same fact. */}
+            {chain.key === "bsc" ? "No fee" : `${STAX_FEE_LABEL} fee (${usd(feeUsd(amount, chain.key))})`} · no network cost
           </div>
         ) : (
           <div style={{ marginBottom: 10 }}>

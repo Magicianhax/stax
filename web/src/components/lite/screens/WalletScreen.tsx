@@ -485,7 +485,15 @@ export function WalletScreen({
           <button onClick={copyAddress} disabled={!address} className="btn btn-primary btn-block tap" style={{ height: 50 }}>Copy address</button>
           <div style={{ display: "flex", alignItems: "flex-start", gap: 9, padding: "11px 13px", borderRadius: 14, background: "var(--accent-soft)", color: "var(--ink-2)", fontSize: 12.5, lineHeight: 1.5 }}>
             <Icon name="info" size={16} stroke={2} style={{ flex: "none", marginTop: 1, color: "var(--accent)" }} />
-            <span>Only send <b style={{ color: "var(--ink)" }}>USDC</b> on the <b style={{ color: "var(--ink)" }}>{chain.name}</b> network. Other tokens or networks may be lost.</span>
+            <span>
+              Only send <b style={{ color: "var(--ink)" }}>{chain.usdc.symbol}</b> on the{" "}
+              <b style={{ color: "var(--ink)" }}>{chain.name}</b> network. Other tokens or networks may be lost.
+              {/* Design critique P1 #13: name Binance's own network label for the one exchange a
+                  first-time investor is most likely funding this from. */}
+              {chain.key === "bsc"
+                ? " On Binance, choose the BNB Smart Chain (BEP20) network. USDT sent on another network can't be recovered."
+                : ""}
+            </span>
           </div>
         </div>
       </BottomSheet>

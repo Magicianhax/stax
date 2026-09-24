@@ -94,10 +94,27 @@ describe("buildBinanceLeg", () => {
     await expect(buildBinanceLeg(args())).rejects.toThrow(/router/);
   });
 
+  it("refuses a leg under the $6 minimum without calling Binance, in plain words with a next step", () => {
+    // Design critique P1 #11: "below Binance's $6 minimum" reads like an error the user caused
+    // and can't act on; "Enter $6 or more" gives them the actual next step. Reviewer follow-up:
+    // side-neutral — buildBinanceLeg prices both buy and sell legs, and "the smallest buy is $6"
+    // told someone selling a $5.70 position (bought at the $6 floor, dipped since) that they
+    // needed to enter a bigger BUY, on a Sell tab with no amount field at all.
+    return expect(buildBinanceLeg(args({ usdValue: 5 }))).rejects.toThrow(/smallest trade is \$6\. Enter \$6 or more/);
+  });
+
   it("refuses a leg under the $6 minimum without calling Binance", async () => {
     await expect(buildBinanceLeg(args({ usdValue: 5 }))).rejects.toThrow(/\$6/);
     expect(quoteSpy).not.toHaveBeenCalled();
     expect(buildSwapSpy).not.toHaveBeenCalled();
+  });
+
+  it("gives the same side-neutral $6 message for a sell as for a buy", async () => {
+    // The old message read the same regardless of side too, but named "buy" explicitly — this
+    // pins that a sell hitting the floor never sees buy-specific wording.
+    const err = await buildBinanceLeg(args({ usdValue: 5 })).catch((e) => e);
+    expect(err.message).not.toMatch(/buy/i);
+    expect(err.message).not.toMatch(/^NVDA:/);
   });
 
   it("sets minOut from the slippage budget, never above what Binance guarantees", async () => {
@@ -211,10 +228,48 @@ describe("checkBscBuyable", () => {
     if (!gate.ok) expect(gate.message).toMatch(/^NVDA is closed right now; it opens /);
   });
 
+  // Design critique P0 #1: the message above is server-readable (kept for logs and any caller
+  // that only has the string), but the CLIENT must format the reopen time itself — in the
+  // viewer's own zone, through marketHours.ts's one shared formatter — so the refusal also
+  // carries the raw instant.
+  it("carries nextOpenMs on a closed refusal, so the client can format it in the viewer's own zone", () => {
+    const gate = checkBscBuyable(
+      [row({ statusInfo: { ...row().statusInfo, openState: false, reasonCode: "MARKET_CLOSED" } })],
+      NVDA,
+      "NVDA",
+      NOW,
+    );
+    expect(gate.ok).toBe(false);
+    if (!gate.ok) {
+      expect(typeof gate.nextOpenMs).toBe("number");
+      expect(gate.nextOpenMs).toBeGreaterThan(NOW);
+    }
+  });
+
+  it("uses the row's own nextOpenTime over the US calendar fallback when Binance gives one", () => {
+    const explicit = NOW + 3_600_000;
+    const gate = checkBscBuyable(
+      [
+        row({
+          statusInfo: { ...row().statusInfo, openState: false, reasonCode: "MARKET_PAUSED", nextOpenTime: explicit },
+        }),
+      ],
+      NVDA,
+      "NVDA",
+      NOW,
+    );
+    expect(gate.ok).toBe(false);
+    if (!gate.ok) expect(gate.nextOpenMs).toBe(explicit);
+  });
+
   it("fails closed when the token isn't in the catalog at all, and says unavailable, not closed", () => {
     const gate = checkBscBuyable([], NVDA, "NVDA", NOW);
     expect(gate.ok).toBe(false);
-    if (!gate.ok) expect(gate.message).toMatch(/isn't available/);
+    if (!gate.ok) {
+      expect(gate.message).toMatch(/isn't available/);
+      // No session to report at all — the client falls back to its own "check back" copy.
+      expect(gate.nextOpenMs).toBeUndefined();
+    }
   });
 });
 
@@ -230,6 +285,14 @@ describe("buildBinanceLeg review fixes", () => {
   it("refuses an unpriceable (NaN) leg instead of letting it past the $6 floor", async () => {
     await expect(buildBinanceLeg(args({ usdValue: Number.NaN }))).rejects.toBeInstanceOf(BinanceLegRefusal);
     expect(quoteSpy).not.toHaveBeenCalled();
+  });
+
+  it("gives an unpriceable leg its own words, never the '$6 minimum' message it never actually failed", async () => {
+    // Reviewer follow-up: the NaN case (an unpriced sell) and the $6 floor are different
+    // problems — conflating them would tell someone whose position just can't be priced right
+    // now that their trade was "too small", which isn't what happened.
+    const err = await buildBinanceLeg(args({ usdValue: Number.NaN })).catch((e) => e);
+    expect(err.message).not.toMatch(/\$6/);
   });
 
   it("refuses a quote for a different input amount than requested", async () => {

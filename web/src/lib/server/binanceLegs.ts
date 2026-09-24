@@ -94,10 +94,19 @@ function wrap(symbol: string, err: unknown): never {
  * what Binance actually guarantees.
  */
 export async function buildBinanceLeg(a: BinanceLegArgs): Promise<BinanceLeg> {
-  // NaN (an unpriceable sell) compares false against everything, so it is refused explicitly.
-  if (!Number.isFinite(a.usdValue) || a.usdValue < BSC_MIN_LEG_USD) {
-    const shown = Number.isFinite(a.usdValue) && a.usdValue >= 0 ? `$${a.usdValue.toFixed(2)}` : "unpriced";
-    throw new BinanceLegRefusal(`${a.symbol}: this trade is ${shown}, below Binance's $${BSC_MIN_LEG_USD} minimum.`);
+  // NaN happens only when a sell's stock side couldn't be priced against the cached catalog —
+  // a different problem from the $6 floor below, so it gets its own words instead of also
+  // claiming the trade was "too small" when its size was never known.
+  if (!Number.isFinite(a.usdValue)) {
+    throw new BinanceLegRefusal("Couldn't price this trade right now. Try again in a moment.");
+  }
+  if (a.usdValue < BSC_MIN_LEG_USD) {
+    // Design critique P1 #11: name the next step, not just the rule that was broken. Reviewer
+    // follow-up: side-neutral wording, and no leading "NVDA:" — buildBinanceLeg prices both buy
+    // and sell legs, and "the smallest buy is $6" told someone selling a $5.70 position (bought
+    // at the $6 floor, dipped since, no amount field on the Sell tab to "enter more" into) that
+    // they needed to make a bigger BUY.
+    throw new BinanceLegRefusal(`The smallest trade is $${BSC_MIN_LEG_USD}. Enter $${BSC_MIN_LEG_USD} or more.`);
   }
   const router = a.chain.routers.binance;
   if (!router) throw new Error(`Binance aggregator isn't configured on ${a.chain.name}.`);
@@ -175,13 +184,23 @@ export function checkBscBuyable(
   tokenAddress: `0x${string}`,
   symbol: string,
   nowMs: number,
-): { ok: true; row: RwaToken } | { ok: false; message: string } {
+): { ok: true; row: RwaToken } | { ok: false; message: string; nextOpenMs?: number } {
   const row = tokens.find((t) => t.tokenContractAddress.toLowerCase() === tokenAddress.toLowerCase());
   if (!row || !isBuyable(row.statusInfo)) {
+    // No row at all means Binance has nothing to say about this address — there is no session to
+    // report, so this is the one case that carries no `nextOpenMs` (design critique P0 #1: the
+    // client falls back to its own "check back" copy rather than inventing a time).
     if (!row) return { ok: false, message: `${symbol} isn't available to trade on BNB Chain right now.` };
     const next = row.statusInfo.nextOpenTime;
     const nextOpenMs = next !== null && next > nowMs ? next : nextUsOpenMs(nowMs);
-    return { ok: false, message: `${symbol} is closed right now; it ${formatNextOpen(new Date(nextOpenMs), new Date(nowMs))}.` };
+    // The message stays readable on its own (server logs, or a caller with no client-side
+    // formatter) in ET; the client re-formats `nextOpenMs` through marketHours.ts's
+    // formatOpensLocal instead of parsing this string, so it always reads in the viewer's zone.
+    return {
+      ok: false,
+      message: `${symbol} is closed right now; it ${formatNextOpen(new Date(nextOpenMs), new Date(nowMs))}.`,
+      nextOpenMs,
+    };
   }
   return { ok: true, row };
 }

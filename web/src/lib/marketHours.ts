@@ -267,6 +267,29 @@ export function describeNextChange(s: MarketStatus, now: Date = new Date()): str
   return s.open ? formatNextClose(s.nextChange) : formatNextOpen(s.nextChange, now);
 }
 
+// ── The one local-time "opens ..." formatter (design critique P0 #1) ──
+//
+// Before this, the same fact had three spellings: MarketScreen's header said "opens Mon 9:30am
+// ET" (formatNextOpen above, always America/New_York), MarketStatusBadge and AssetDetailScreen
+// each rolled their own bare `toLocaleString` with no zone label, and the server refusal in
+// binanceLegs.ts also said "ET". A viewer in Mumbai read three different clocks for the same
+// closed market. This is the only place any BSC-facing surface should format a next-open
+// instant: it reads in the caller's OWN local zone (`Intl.DateTimeFormat` with no `timeZone`
+// resolves to the runtime's — the viewer's — zone) and always says so ("your time"), so nobody
+// has to know what "ET" means.
+const LOCAL_OPEN_TIME_FMT = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+const LOCAL_OPEN_DAY_FMT = new Intl.DateTimeFormat("en-US", { weekday: "short" });
+
+/** "opens 6:30 PM your time" (today), or "opens Mon 6:30 PM your time" (a different local day). */
+export function formatOpensLocal(nextOpenMs: number, nowMs: number = Date.now()): string {
+  const next = new Date(nextOpenMs);
+  const now = new Date(nowMs);
+  const sameLocalDay =
+    next.getFullYear() === now.getFullYear() && next.getMonth() === now.getMonth() && next.getDate() === now.getDate();
+  const day = sameLocalDay ? "" : `${LOCAL_OPEN_DAY_FMT.format(next)} `;
+  return `opens ${day}${LOCAL_OPEN_TIME_FMT.format(next)} your time`;
+}
+
 // ── BSC RWA catalog support (docs/BINANCE-WEB3.md §2) ──
 //
 // bStock rows report no session at all (`marketStatus`/`nextOpenTime`/`nextCloseTime` are
@@ -299,6 +322,28 @@ export function nextUsOpenMs(nowMs: number): number {
     return etInstant(p.y, p.m, p.d, OPEN_MIN).getTime();
   }
   return nextOpenAfter(p.y, p.m, p.d).getTime();
+}
+
+/** What `usMarketClock` reports — a `stateLabel`-ready view of the NYSE calendar clock. */
+export interface UsMarketClock {
+  state: MarketState;
+  buyable: boolean;
+  nextOpenMs: number | null;
+}
+
+/**
+ * The one view of "is the US market open" for surfaces that describe the whole market rather
+ * than one venue — MarketScreen's header and AssetDetailScreen's fallback while a venue hasn't
+ * loaded yet. Before this, the header rendered `<MarketStatus />`, which speaks ET through its
+ * own `describeNextChange`, right above row badges already speaking local time through
+ * `stateLabel`/`formatOpensLocal` (design critique P0 #1) — two clocks answering the same
+ * question differently on one screen. Feeding this shape into `stateLabel` instead can only ever
+ * agree with a row's own badge, because both end in the same formatter.
+ */
+export function usMarketClock(nowMs: number): UsMarketClock {
+  const state = usMarketState(nowMs);
+  const buyable = state === "open";
+  return { state, buyable, nextOpenMs: buyable ? null : nextUsOpenMs(nowMs) };
 }
 
 /** Plain-words reason for a closed market, for the explainer sheet. */
