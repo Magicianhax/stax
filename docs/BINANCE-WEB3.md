@@ -469,6 +469,25 @@ body error.
 Stax sends through ERC-4337 (Pimlico). It does not use `broadcast-transaction`, which takes an
 EOA-signed raw tx.
 
+### Wave 5 dry-run design (LIVE evidence reused, no new calls spent)
+
+`simulate`'s own request shape above is a single `evmTx` object, never a list — there is no
+bundle or batch parameter, and no state-override field. Combined with the §10 point 1 finding
+(a swap from an account that hasn't approved the router yet reverts on the first `transferFrom`
+before the output leg runs, discovered live against a real $6 USDT→NVDAB quote), simulating a
+first-time swap in isolation can only ever prove the allowance failure — never anything about
+the trade itself. `lib/server/dryRun.ts` resolves this by reading the account's on-chain
+allowance to the router first (a free RPC read, no Binance budget spent): only once it already
+covers the trade does it spend the one `simulate` call, otherwise it tells the user plainly that
+the first trade of a token can't be checked yet and skips — never reporting "passed" for a
+check that didn't run. No new live Binance calls were made to reach this design; it follows
+directly from the request schema above and the already-recorded §10 finding. The remaining
+open question — the exact shape of a `SUCCESS` simulate response for a real *swap* (as opposed
+to the `approve`-only fixture in `__fixtures__/simulate_response.json`, whose `balanceChanges`
+is empty) — is still open; `dryRunBscSwap` reads `balanceChanges` defensively (matches on the
+taker's own row, takes the magnitude of `change` regardless of sign) rather than assuming a
+particular sign convention.
+
 ---
 
 ## 6. Wallet API and Address Portfolio, prefix `/api/v1/dex`
