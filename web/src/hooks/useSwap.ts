@@ -141,6 +141,14 @@ async function aggregatorCalls(
     throw new Error("The swap route didn't match this network. Please try again.");
   }
   if (q.amountIn !== p.amountIn) throw new Error("The swap amount changed. Please try again.");
+  // Belt-and-suspenders for the twin-venue bug this guards against elsewhere (TradeScreen's
+  // holding lookup, resolveVenueAddress): the approve below is built from OUR resolved
+  // `p.tokenIn`, so if the server's quote ever disagreed about which token this trade means,
+  // approving `p.tokenIn` while the router pulls a different one would silently move the wrong
+  // token. Catch that here instead of letting a UserOp revert (or worse, half-succeed) explain it.
+  if (q.tokenIn.toLowerCase() !== p.tokenIn.toLowerCase()) {
+    throw new Error("The swap route didn't match the selected venue. Please try again.");
+  }
   // Kyber: reset the allowance to 0 after the swap (mirrors the executor) so a partially
   // consumed approval never lingers on the public router. Binance: the approve is already
   // exact-amount and single-use, and its router expects no such reset — skip the third call.

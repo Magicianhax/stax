@@ -35,3 +35,17 @@ export function resolveVenueAddress(chain: StaxChain, asset: Asset, venue?: RwaP
   }
   return null;
 }
+
+/**
+ * Which venue a manual trade's HOLDING ROW must match, on `chain`. Off BSC there's only ever one
+ * row per symbol (no `platform` at all), so any row matches and this returns undefined. On BSC,
+ * an explicit `venue` wins; with none picked, it's the asset's own platform — never "whichever
+ * row comes first" for the ticker, because the portfolio sorts twin rows by value, so the Ondo
+ * twin can be first even when the trade itself (via resolveVenueAddress) means bStock. The
+ * holding lookup, the "via bStock/Ondo" label and the resolved trade address all call this (or
+ * resolveVenueAddress) so they can't disagree about which issuer a trade means.
+ */
+export function holdingVenue(chain: StaxChain, asset: Asset, venue?: RwaPlatform): RwaPlatform | undefined {
+  if (chain.key !== "bsc") return undefined;
+  return venue ?? asset.platform;
+}

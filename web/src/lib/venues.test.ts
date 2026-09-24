@@ -3,7 +3,7 @@
 // need the same answer, so it is pure and tested here rather than re-derived in each caller.
 import { describe, expect, it } from "vitest";
 import { getChain } from "./chains";
-import { resolveVenueAddress } from "./venues";
+import { holdingVenue, resolveVenueAddress } from "./venues";
 
 const bsc = getChain("bsc");
 const base = getChain("base");
@@ -42,5 +42,27 @@ describe("resolveVenueAddress", () => {
   it("returns null for an asset with no address at all", () => {
     const noAddress = { symbol: "X", name: "X", tier: "stock", via: "route" } as const;
     expect(resolveVenueAddress(bsc, noAddress)).toBeNull();
+  });
+});
+
+describe("holdingVenue", () => {
+  // Regression for the "twin bought, wrong token sold" bug: the portfolio sorts holding rows by
+  // value, so with no venue picked the Ondo twin can be the FIRST row for a ticker. A lookup that
+  // takes "the first row" (or matches on `venue === undefined`) can pick that twin row while the
+  // trade itself resolves and sells the default (bStock) token, because those two decisions used
+  // different rules. `holdingVenue` is the one rule both the holding lookup and the venue label
+  // must use, so they can never disagree about which issuer a trade means.
+  it("defaults to the asset's own platform when no venue is picked", () => {
+    expect(holdingVenue(bsc, nvda)).toBe(nvda.platform);
+  });
+
+  it("returns the picked venue when one is given", () => {
+    expect(holdingVenue(bsc, nvda, nvda.twin!.platform)).toBe(nvda.twin!.platform);
+  });
+
+  it("ignores venue entirely off BSC (there's only ever one row per symbol there)", () => {
+    const nvdaBase = base.assets.all.find((a) => a.symbol === "NVDA");
+    if (!nvdaBase) return;
+    expect(holdingVenue(base, nvdaBase, "ondo")).toBeUndefined();
   });
 });

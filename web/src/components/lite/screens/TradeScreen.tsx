@@ -26,6 +26,7 @@ import { usd, tokenQty, fromUnits } from "@/lib/format";
 import { feeUsd, feeOf } from "@/lib/fees";
 import { usdToRaw } from "@/lib/units";
 import { quoteErrorMessage } from "@/lib/swapQuote";
+import { holdingVenue } from "@/lib/venues";
 import { PLATFORM_LABEL } from "@/components/lite/rwa/VenuePicker";
 import { haptic } from "@/lib/haptics";
 import { iconBtn } from "./primitives";
@@ -78,9 +79,14 @@ export function TradeScreen({
   const { data: bal } = useUsdcBalance(address ?? undefined);
   const { data: port } = usePortfolio(address ?? undefined);
   const balance = bal?.value ?? 0;
-  // `venue` narrows which row is "the position" when a ticker has two (one per issuer); off BSC
-  // (or with no venue given) this is exactly the old lookup, so nothing changes there.
-  const holding = port?.holdings.find((h) => h.asset.symbol === asset.symbol && (venue === undefined || h.venue === venue));
+  // `wantVenue` narrows which row is "the position" when a ticker has two (one per issuer). It
+  // must default to the asset's own platform, not "the first row" — the portfolio sorts twin
+  // rows by value, so the Ondo twin can be first even when nothing was explicitly picked, and
+  // matching on `venue === undefined` there sold the wrong issuer's token under the default
+  // label. Off BSC `holdingVenue` returns undefined and every row still matches, so nothing
+  // changes there.
+  const wantVenue = holdingVenue(chain, asset, venue);
+  const holding = port?.holdings.find((h) => h.asset.symbol === asset.symbol && (!bsc || h.venue === wantVenue));
 
   const [side, setSide] = useState<"buy" | "sell">(initialSide);
   // The amount is the shared keypad state: one rule set, and the cash on hand is
@@ -216,7 +222,9 @@ export function TradeScreen({
 
   // Which issuer this trade uses, in words — Review Focus and the manual-trade spec both want
   // the person to see who they're actually buying from/selling to, not just a silent address.
-  const venueLabel = bsc && venue ? PLATFORM_LABEL[venue] : undefined;
+  // Same default as the holding lookup, so "via bStock/Ondo" shows even when no venue was
+  // explicitly passed (the common case — see the LiteApp follow-up in the review this fixed).
+  const venueLabel = wantVenue ? PLATFORM_LABEL[wantVenue] : undefined;
 
   // The primary action, rendered inside the keypad frame on buy and pinned at
   // the bottom on sell. Same markup either way.
