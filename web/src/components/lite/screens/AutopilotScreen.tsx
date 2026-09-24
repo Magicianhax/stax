@@ -27,6 +27,7 @@ import {
   type AutopilotConfig,
 } from "@/lib/autopilot";
 import { riskWord, type Basket } from "@/lib/baskets";
+import { RULE_CARDS, RULE_DEFAULTS, decodeRuleGoal, describeRule, type Rule, type RuleType } from "@/lib/rules";
 import { useBaskets } from "@/hooks/useBaskets";
 import { BasketRailTile, clusterOf } from "./basketPrimitives";
 import { getChain, explorerTx, type ChainKey } from "@/lib/chains";
@@ -72,6 +73,29 @@ function Projection({ amount, cadence, riskBps }: { amount: number; cadence: Cad
     </div>
   );
 }
+/** One number field for a BSC rule's own knob (e.g. "Drift that triggers a fix"). Plain % input,
+ *  styled like the amount field above — a rule never needs more than two of these. */
+function NumField({ label, value, onChange }: { label: string; value: number; onChange: (n: number) => void }) {
+  return (
+    <label style={{ display: "block", flex: 1, minWidth: 0 }}>
+      <span style={{ fontSize: 12.5, color: "var(--ink-2)" }}>{label}</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, padding: "8px 12px", borderRadius: 12, background: "var(--surface-2)" }}>
+        <input
+          inputMode="decimal"
+          value={String(value)}
+          onChange={(e) => {
+            const n = Number(e.target.value.replace(/[^0-9.]/g, ""));
+            onChange(Number.isFinite(n) ? n : 0);
+          }}
+          className="tnum"
+          style={{ flex: 1, minWidth: 0, border: "none", background: "transparent", outline: "none", fontSize: 16, fontWeight: 700, color: "var(--ink)" }}
+        />
+        <span className="tnum" style={{ fontSize: 13, color: "var(--ink-3)" }}>%</span>
+      </div>
+    </label>
+  );
+}
+
 const RISK_TIERS: { label: string; bps: number }[] = [
   { label: "Careful", bps: 4000 },
   { label: "Balanced", bps: 6000 },
@@ -166,6 +190,32 @@ export function AutopilotScreen({
   const [amount, setAmount] = useState("25");
   const [cadence, setCadence] = useState<Cadence>("weekly");
   const [risk, setRisk] = useState(1); // index into RISK_TIERS
+
+  // BSC only: which of the 5 rule cards Vera runs, and its 1-2 numbers. "schedule_buy" is the
+  // card for today's plain goal/basket plan above — its own numbers ARE amount/cadence/risk,
+  // nothing new. Defaults come straight from lib/rules.ts so a fresh pick is already sensible.
+  const [ruleType, setRuleType] = useState<RuleType>("schedule_buy");
+  const [driftPct, setDriftPct] = useState(RULE_DEFAULTS.rebalance.driftPct);
+  const [discountSymbol, setDiscountSymbol] = useState("NVDA");
+  const [discountPct, setDiscountPct] = useState(RULE_DEFAULTS.buy_discount.discountPct);
+  const [dropPct, setDropPct] = useState(RULE_DEFAULTS.safety_switch.dropPct);
+  const [movePct, setMovePct] = useState(RULE_DEFAULTS.safety_switch.movePct);
+  const [stockPct, setStockPct] = useState(RULE_DEFAULTS.mix_keeper.stockPct);
+
+  /** Fills the rule form's state from a decoded, saved rule (see the load effect below). */
+  const applyLoadedRule = (rule: Rule) => {
+    setRuleType(rule.type);
+    if (rule.type === "rebalance") setDriftPct(rule.driftPct);
+    if (rule.type === "buy_discount") {
+      setDiscountSymbol(rule.symbol);
+      setDiscountPct(rule.discountPct);
+    }
+    if (rule.type === "safety_switch") {
+      setDropPct(rule.dropPct);
+      setMovePct(rule.movePct);
+    }
+    if (rule.type === "mix_keeper") setStockPct(rule.stockPct);
+  };
   const [activeTemplate, setActiveTemplate] = useState<string | null>(null);
   const [runs, setRuns] = useState<RunRow[]>([]);
   const [runPage, setRunPage] = useState(0);
@@ -184,7 +234,8 @@ export function AutopilotScreen({
         const summary = (json?.basket ?? null) as AutopilotBasketSummary | null;
         if (ap) {
           setConfig(ap);
-          setGoal(ap.goal);
+          const decoded = decodeRuleGoal(ap.goal);
+          setGoal(decoded?.displayGoal ?? ap.goal);
           setAmount(String(ap.amountUsd));
           setCadence(ap.cadence);
           setRisk(Math.max(0, RISK_TIERS.findIndex((t) => t.bps === ap.riskCeilingBps)) || 1);
@@ -193,6 +244,7 @@ export function AutopilotScreen({
             setMode("basket");
             setBasketId(ap.basketId);
           }
+          if (decoded) applyLoadedRule(decoded.rule);
         }
       } catch {
         /* leave defaults */
@@ -207,12 +259,25 @@ export function AutopilotScreen({
 
   const amountNum = Number(amount) || 0;
   const riskBps = RISK_TIERS[risk].bps;
+  const isBsc = chain.key === "bsc";
+  // The rule the current form describes — only meaningful on BSC, but always well-typed so
+  // describeRule/encodeRuleGoal never need a null check at the call site.
+  const currentRule: Rule =
+    ruleType === "rebalance"
+      ? { type: "rebalance", driftPct }
+      : ruleType === "buy_discount"
+        ? { type: "buy_discount", symbol: discountSymbol, discountPct }
+        : ruleType === "safety_switch"
+          ? { type: "safety_switch", dropPct, movePct }
+          : ruleType === "mix_keeper"
+            ? { type: "mix_keeper", stockPct }
+            : { type: "schedule_buy" };
   // The picked basket: a local one by id, else the API's summary of the saved target.
   const pick: BasketPick | undefined = byId(basketId ?? undefined) ?? (apBasket && apBasket.id === basketId ? apBasket : undefined);
   const basketMode = mode === "basket";
   // Fixed weights = known risk: refuse up front instead of letting every run be skipped.
   const ceiling = basketMode && pick ? checkBasketCeiling(pick.riskScore, riskBps) : { ok: true };
-  const basketBlocked = basketMode && (!pick || !ceiling.ok);
+  const basketBlocked = basketMode ? !pick || !ceiling.ok : isBsc && ruleType === "rebalance" ? !pick : false;
   // Projection follows what will actually be bought: the basket's risk, else the ceiling.
   const projectionBps = basketMode && pick ? pick.riskScore : riskBps;
   const nextRun = nextRunAfter(Math.floor(now / 1000), cadence) * 1000;
@@ -301,7 +366,11 @@ export function AutopilotScreen({
       notify("Set an amount", "info");
       return;
     }
-    if (basketMode && !pick) {
+    // A rebalance rule needs a target basket exactly like Basket mode does — its target weights
+    // ARE what "close to target" means — even though the goal/basket toggle itself is hidden
+    // while a rule card is picked.
+    const needsBasket = basketMode || (isBsc && ruleType === "rebalance");
+    if (needsBasket && !pick) {
       notify("Pick a basket", "info");
       return;
     }
@@ -314,7 +383,7 @@ export function AutopilotScreen({
       // The server only knows curated ids and stored short ids. A personal basket
       // (localStorage) is published first so the cron can load it by id.
       let targetId: string | null = null;
-      if (basketMode && pick) {
+      if (needsBasket && pick) {
         const local = byId(pick.id);
         const curated = local?.author === "stax" || pick.id.startsWith(`${chain.key}:`);
         if (curated || apBasket?.id === pick.id) targetId = pick.id;
@@ -324,6 +393,9 @@ export function AutopilotScreen({
           if (!targetId) throw new Error("Couldn't save your basket for autopilot. Try again.");
         } else throw new Error("That basket isn't available anymore.");
       }
+      // A rule other than "buy on a schedule" replaces the goal/basket text entirely — the rule
+      // IS the plan, and its own card title is what "Your plan" should show.
+      const ruleActive = isBsc && ruleType !== "schedule_buy";
       const res = await authedFetch("/api/autopilot", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -332,8 +404,13 @@ export function AutopilotScreen({
           walletId,
           owner: ownerAddress,
           smartAccount,
-          goal: basketMode && pick ? `Invest in ${pick.name}` : goal,
-          basketId: targetId,
+          goal: ruleActive
+            ? (RULE_CARDS.find((c) => c.type === ruleType)?.title ?? goal)
+            : basketMode && pick
+              ? `Invest in ${pick.name}`
+              : goal,
+          basketId: ruleActive && ruleType !== "rebalance" ? null : targetId,
+          rule: isBsc ? currentRule : undefined,
           amountUsd: amountNum,
           cadence,
           riskCeilingBps: RISK_TIERS[risk].bps,
@@ -417,7 +494,23 @@ export function AutopilotScreen({
         </p>
       </div>
 
-      {!ready ? (
+      {/* BSC: rules can be set up before the executor is live — a calm, persistent note, never
+          the blocking ChainLaunching card the rest of Autopilot uses while undeployed. */}
+      {isBsc && !ready && (
+        <div className="anim-rise" style={{ padding: "14px 22px 0" }}>
+          <div
+            role="status"
+            style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "12px 14px", borderRadius: 14, background: "var(--surface-2)", fontSize: 13, color: "var(--ink-2)", lineHeight: 1.45 }}
+          >
+            <Icon name="clock" size={17} stroke={2} style={{ flex: "none", marginTop: 1, color: "var(--ink-3)" }} />
+            <span>
+              You can set this up now. Rules start once automatic trading is switched on for BNB Chain.
+            </span>
+          </div>
+        </div>
+      )}
+
+      {!ready && !isBsc ? (
         <div className="anim-rise" style={{ padding: "18px 22px 0" }}>
           <ChainLaunching
             chain={chain}
@@ -482,7 +575,21 @@ export function AutopilotScreen({
               <div style={{ padding: "20px 22px 0" }}>
                 <div style={sectionLabel}>Your plan</div>
                 <div className="card" style={{ padding: 18 }}>
-                  <div style={{ fontWeight: 700, fontSize: 16.5, textAlign: "center", letterSpacing: "-.01em" }}>{config.goal}</div>
+                  {(() => {
+                    const decoded = decodeRuleGoal(config.goal);
+                    return (
+                      <>
+                        <div style={{ fontWeight: 700, fontSize: 16.5, textAlign: "center", letterSpacing: "-.01em" }}>
+                          {decoded?.displayGoal ?? config.goal}
+                        </div>
+                        {decoded && decoded.rule.type !== "schedule_buy" && (
+                          <div style={{ marginTop: 6, fontSize: 12.5, color: "var(--ink-2)", textAlign: "center", lineHeight: 1.4 }}>
+                            {describeRule(decoded.rule)}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                   {apBasket && (
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 8, fontSize: 12.5, color: "var(--ink-2)" }}>
                       <LogoCluster assets={clusterOf(apBasket)} size={20} max={4} />
@@ -655,7 +762,88 @@ export function AutopilotScreen({
           <div style={{ padding: "20px 22px 0" }}>
             <div style={sectionLabel}>Your plan</div>
             <div className="card" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 16 }}>
-              {/* what each run buys: Vera's take on a goal, or a basket's fixed weights */}
+              {/* BSC: pick one of Vera's 5 plain-English rules first. "Buy on a schedule" then
+                  falls straight into the same goal/basket picker Base/Mantle already use below;
+                  the other four each ask for their own one or two numbers instead. */}
+              {isBsc && (
+                <div>
+                  <span style={{ fontSize: 13, color: "var(--ink-2)" }}>How should Vera invest for you?</span>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+                    {RULE_CARDS.map((card) => {
+                      const on = ruleType === card.type;
+                      return (
+                        <button
+                          key={card.type}
+                          onClick={() => { haptic.select(); setRuleType(card.type); setActiveTemplate(null); }}
+                          className="tap"
+                          aria-pressed={on}
+                          style={{
+                            textAlign: "left",
+                            padding: "12px 14px",
+                            borderRadius: 14,
+                            background: on ? "var(--primary-soft)" : "var(--surface-2)",
+                            boxShadow: on ? "inset 0 0 0 1.5px var(--primary)" : "none",
+                          }}
+                        >
+                          <div style={{ fontWeight: 700, fontSize: 14, color: on ? "var(--primary)" : "var(--ink)" }}>{card.title}</div>
+                          <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 3, lineHeight: 1.4 }}>{card.sentence}</div>
+                          <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 4 }}>{card.example}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {isBsc && ruleType === "rebalance" && (
+                <div>
+                  <span style={{ fontSize: 13, color: "var(--ink-2)" }}>Basket to keep balanced</span>
+                  <div style={{ display: "flex", gap: 10, margin: "6px -16px -4px", padding: "2px 16px 6px", overflowX: "auto", scrollSnapType: "x proximity" }}>
+                    {myBaskets.map((b) => (
+                      <BasketRailTile key={b.id} basket={b} selected={basketId === b.id} onClick={() => { haptic.select(); setBasketId(b.id); setActiveTemplate(null); }} />
+                    ))}
+                    {myBaskets.length > 0 && curatedBaskets.length > 0 && (
+                      <span aria-hidden style={{ flex: "none", width: 1, alignSelf: "stretch", margin: "6px 2px", background: "var(--line-2)" }} />
+                    )}
+                    {curatedBaskets.map((b) => (
+                      <BasketRailTile key={b.id} basket={b} selected={basketId === b.id} onClick={() => { haptic.select(); setBasketId(b.id); setActiveTemplate(null); }} />
+                    ))}
+                    <span aria-hidden style={{ flex: "none", width: 6 }} />
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    <NumField label="Drift that triggers a fix" value={driftPct} onChange={setDriftPct} />
+                  </div>
+                </div>
+              )}
+
+              {isBsc && ruleType === "buy_discount" && (
+                <div style={{ display: "flex", gap: 10 }}>
+                  <label style={{ display: "block", flex: 1, minWidth: 0 }}>
+                    <span style={{ fontSize: 12.5, color: "var(--ink-2)" }}>Which stock</span>
+                    <input
+                      value={discountSymbol}
+                      onChange={(e) => setDiscountSymbol(e.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 8))}
+                      style={{ width: "100%", marginTop: 6, padding: "8px 12px", borderRadius: 12, border: "none", background: "var(--surface-2)", outline: "none", fontSize: 15, fontWeight: 700, color: "var(--ink)" }}
+                    />
+                  </label>
+                  <NumField label="Discount to buy at" value={discountPct} onChange={setDiscountPct} />
+                </div>
+              )}
+
+              {isBsc && ruleType === "safety_switch" && (
+                <div style={{ display: "flex", gap: 10 }}>
+                  <NumField label="Market drop that triggers it" value={dropPct} onChange={setDropPct} />
+                  <NumField label="Amount to move to safety" value={movePct} onChange={setMovePct} />
+                </div>
+              )}
+
+              {isBsc && ruleType === "mix_keeper" && (
+                <NumField label="Stocks (the rest is crypto)" value={stockPct} onChange={setStockPct} />
+              )}
+
+              {/* what each run buys: Vera's take on a goal, or a basket's fixed weights — BSC only
+                  shows this while "Buy on a schedule" is the picked rule (today's DCA, unchanged). */}
+              {(!isBsc || ruleType === "schedule_buy") && (
               <div className="seg" role="group" aria-label="What to invest in">
                 <span
                   className="seg-thumb"
@@ -672,8 +860,9 @@ export function AutopilotScreen({
                   </button>
                 ))}
               </div>
+              )}
 
-              {basketMode ? (
+              {(!isBsc || ruleType === "schedule_buy") && (basketMode ? (
                 <div>
                   <span style={{ fontSize: 13, color: "var(--ink-2)" }}>Basket to buy each run</span>
                   {/* rail bleeds to the card edges so tiles can scroll under the padding */}
@@ -703,7 +892,7 @@ export function AutopilotScreen({
                     style={{ width: "100%", marginTop: 6, padding: "11px 12px", borderRadius: 12, border: "none", background: "var(--surface-2)", outline: "none", fontSize: 14.5, color: "var(--ink)" }}
                   />
                 </label>
-              )}
+              ))}
 
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
@@ -755,16 +944,24 @@ export function AutopilotScreen({
                 )}
               </div>
             </div>
-            {/* preview: what the first run will look like */}
-            <div
-              aria-live="polite"
-              style={{ display: "flex", alignItems: "center", gap: 9, margin: "10px 2px 0", fontSize: 13.5, fontWeight: 600, color: "var(--ink)" }}
-            >
-              <Icon name="clock" size={16} stroke={2} style={{ color: "var(--primary)", flex: "none" }} />
-              <span className="tnum">
-                Next run {shortDay(nextRun)} · {wholeUsd(amountNum)} · {basketMode ? (pick?.name ?? "pick a basket") : RISK_TIERS[risk].label}
-              </span>
-            </div>
+            {/* preview: what the first run will look like, or — on BSC, past "buy on a
+                schedule" — the plain "What Vera will do" sentence item D asks for */}
+            {isBsc && ruleType !== "schedule_buy" ? (
+              <div aria-live="polite" style={{ display: "flex", alignItems: "flex-start", gap: 9, margin: "10px 2px 0", fontSize: 13.5, fontWeight: 600, color: "var(--ink)", lineHeight: 1.4 }}>
+                <Icon name="clock" size={16} stroke={2} style={{ color: "var(--primary)", flex: "none", marginTop: 1 }} />
+                <span>{describeRule(currentRule)}</span>
+              </div>
+            ) : (
+              <div
+                aria-live="polite"
+                style={{ display: "flex", alignItems: "center", gap: 9, margin: "10px 2px 0", fontSize: 13.5, fontWeight: 600, color: "var(--ink)" }}
+              >
+                <Icon name="clock" size={16} stroke={2} style={{ color: "var(--primary)", flex: "none" }} />
+                <span className="tnum">
+                  Next run {shortDay(nextRun)} · {wholeUsd(amountNum)} · {basketMode ? (pick?.name ?? "pick a basket") : RISK_TIERS[risk].label}
+                </span>
+              </div>
+            )}
 
             <Reveal style={{ marginTop: 14 }}>
               <Projection amount={amountNum} cadence={cadence} riskBps={projectionBps} />

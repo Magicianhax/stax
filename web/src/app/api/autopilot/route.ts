@@ -9,6 +9,12 @@
 // Basket targets: `basketId` must be a basket the caller can see on that chain — a
 // curated one (in code) or a stored one they saved themselves (baskets.owner_user_id).
 // Anything else is a 400; the executor re-resolves it on every run.
+//
+// Rules (BSC only): an optional `rule` picks one of Autopilot's plain-English rule types
+// (lib/rules.ts) instead of a plain goal/basket. It rides inside the stored `goal` column —
+// `encodeRuleGoal` — because adding a real column needs a migration this effort doesn't have
+// (see lib/rules.ts's header). `schedule_buy` is today's goal/basket behaviour and needs no
+// `rule` at all; the other four are BSC-only (Base/Mantle Autopilot is unchanged).
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { isAddress } from "viem";
@@ -22,7 +28,8 @@ import { resolveAutopilotBasket } from "@/lib/server/autopilotPlan";
 import { getOwnedBasket } from "@/lib/server/basketsStore";
 import { touchUser } from "@/lib/server/users";
 import { curatedBasketById, isBasketShortId, type Basket } from "@/lib/baskets";
-import { getChain, type ChainKey } from "@/lib/chains";
+import { getChain, investableAssets, type ChainKey } from "@/lib/chains";
+import { encodeRuleGoal, sanitizeRule, type Rule } from "@/lib/rules";
 import {
   AUTOPILOT_DEFAULTS,
   CADENCE_SECONDS,
@@ -34,14 +41,23 @@ import {
 export const dynamic = "force-dynamic";
 
 const addr = z.string().refine((a) => isAddress(a), "Invalid address.");
+const RuleInput = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("schedule_buy") }),
+  z.object({ type: z.literal("rebalance"), driftPct: z.number() }),
+  z.object({ type: z.literal("buy_discount"), symbol: z.string().min(1).max(12), discountPct: z.number() }),
+  z.object({ type: z.literal("safety_switch"), dropPct: z.number(), movePct: z.number() }),
+  z.object({ type: z.literal("mix_keeper"), stockPct: z.number() }),
+]);
 const ConfigInput = z.object({
   walletId: z.string().min(1), // Privy embedded-wallet id (server signs for this)
   owner: addr, // embedded EOA (smart-account owner)
   smartAccount: addr, // the AA address that holds funds + executes
-  chain: z.enum(["base", "mantle"]).optional(), // ChainKey; defaults to the request chain
+  chain: z.enum(["base", "mantle", "bsc"]).optional(), // ChainKey; defaults to the request chain
   goal: z.string().min(1).max(600),
   /** Curated id ("base:big-tech") or a stored basket's 8-char short id; null/absent = a Vera goal. */
   basketId: z.string().min(1).max(64).nullable().optional(),
+  /** One of Autopilot's rule types (BSC only) — see file header. */
+  rule: RuleInput.optional(),
   amountUsd: z.number().positive().max(100_000),
   cadence: z.enum(["daily", "weekly", "biweekly", "monthly"]),
   riskCeilingBps: z.number().int().min(0).max(10_000).optional(),
@@ -108,6 +124,20 @@ export async function POST(req: NextRequest) {
       if (!basket) return badRequest("That basket isn't available to invest in.");
     }
 
+    // A rule other than "buy on a schedule" needs a symbol check the type union alone can't do
+    // (buy_discount must name a stock actually tradeable on this chain), then rides inside the
+    // stored goal text (see file header) sanitized to its bounded defaults.
+    let goal = body.goal;
+    if (body.rule && body.rule.type !== "schedule_buy") {
+      if (body.rule.type === "buy_discount") {
+        const symbols = new Set(investableAssets(getChain(chain)).map((a) => a.symbol));
+        if (!symbols.has(body.rule.symbol)) {
+          return badRequest(`${body.rule.symbol} isn't tradeable on this chain right now.`);
+        }
+      }
+      goal = encodeRuleGoal(sanitizeRule(body.rule as Rule), body.goal);
+    }
+
     // Clock at request time (allowed in a handler) — anchors the schedule.
     const now = Math.floor(Date.now() / 1000);
     const existing = await getAutopilot(user.userId);
@@ -118,7 +148,7 @@ export async function POST(req: NextRequest) {
       owner: body.owner as `0x${string}`,
       smartAccount: body.smartAccount as `0x${string}`,
       chain,
-      goal: body.goal,
+      goal,
       basketId: basket?.id ?? null,
       amountUsd: body.amountUsd,
       cadence: body.cadence,

@@ -14,7 +14,13 @@ import { isPermanent } from "@/lib/autopilotRetry";
 // next_run_at advanced — whether the run succeeded or failed.
 // (No per-chain filter: the claim is atomic and global, so filtering after it
 // would leave claimed rows stuck until the 30-minute claim TTL.)
-// Invoked by Vercel Cron (vercel.json) — daily on Hobby, hourly on Pro.
+// Invoked by Vercel Cron (vercel.json) — daily on Hobby, hourly on Pro. The Hobby schedule is
+// 15:00 UTC: 11:00 New York in summer (EDT, UTC-4) and 10:00 in winter (EST, UTC-5), so the one
+// daily tick always lands after the 9:30 ET open — a BSC stock-leg rule (buy_discount, rebalance,
+// safety_switch, mix_keeper) that only wants to trade while the real market is open would
+// otherwise be skipped every single day by a cron that fires before 9:30 ET on the Hobby plan's
+// one-run-a-day budget. Crypto legs don't care (they trade any time), and Base/Mantle's own
+// goal/basket runs don't either — this only matters once BSC rules start evaluating for real.
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 

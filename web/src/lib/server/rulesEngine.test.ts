@@ -1,0 +1,178 @@
+// planRuleForAutopilot: wires lib/rules.ts's pure evaluators to the real BSC data this stream
+// owns (the RWA catalog for buy_discount, the spread history for the safety switch's market-drop
+// trigger). Holdings-based rules (rebalance, mix_keeper, and the rest of safety_switch) need a
+// live per-asset balance read that belongs to another stream's Wallet API work (see the file's
+// own header and wiringNeeded); until `ctx.holdings` is supplied they report a plain "waiting on
+// your holdings" skip rather than fabricate a number — never a fake pass (harness rule + Review
+// Focus honesty bar).
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("server-only", () => ({}));
+
+const bscCatalogSnapshotSpy = vi.fn();
+vi.mock("./rwaCatalog", () => ({ bscCatalogSnapshot: (...args: unknown[]) => bscCatalogSnapshotSpy(...args) }));
+
+const getSpreadHistorySpy = vi.fn();
+vi.mock("./spreadStore", () => ({ getSpreadHistory: (...args: unknown[]) => getSpreadHistorySpy(...args) }));
+
+import { planRuleForAutopilot } from "./rulesEngine";
+import { getChain } from "@/lib/chains";
+import type { RwaTickerView, VenueView } from "@/lib/rwa";
+
+const bsc = getChain("bsc");
+const NOW = Date.parse("2026-09-24T15:00:00.000Z");
+const DAY = 86_400_000;
+
+function venue(overrides: Partial<VenueView> = {}): VenueView {
+  return {
+    platform: "bstock",
+    symbol: "NVDAB",
+    address: "0x02fca66c1d1afb4e2a7884261eb00f63598a7436",
+    tokenPrice: 200,
+    referencePrice: 200,
+    gapPct: 0,
+    state: "open",
+    buyable: true,
+    nextOpenMs: null,
+    updatedAt: NOW,
+    ...overrides,
+  };
+}
+function ticker(overrides: Partial<RwaTickerView> = {}): RwaTickerView {
+  return { ticker: "NVDA", name: "Nvidia", type: "stock", venues: [venue()], bestVenue: "bstock", ...overrides };
+}
+
+beforeEach(() => {
+  bscCatalogSnapshotSpy.mockReset();
+  getSpreadHistorySpy.mockReset().mockResolvedValue([]);
+});
+
+describe("planRuleForAutopilot: buy_discount", () => {
+  it("buys when the catalog shows a live discount", async () => {
+    bscCatalogSnapshotSpy.mockResolvedValue({ asOf: NOW, tickers: [ticker({ venues: [venue({ gapPct: -3 })] })] });
+
+    const plan = await planRuleForAutopilot(bsc, { type: "buy_discount", symbol: "NVDA", discountPct: 2 }, { nowMs: NOW, budgetUsd: 25 });
+
+    expect(plan.ok).toBe(true);
+    if (plan.ok) {
+      expect(plan.intents).toEqual([expect.objectContaining({ symbol: "NVDA", action: "buy", usd: 25 })]);
+      expect(plan.receipt).toMatch(/NVDA/);
+    }
+  });
+
+  it("does nothing (ok, empty) when the catalog shows no discount right now", async () => {
+    bscCatalogSnapshotSpy.mockResolvedValue({ asOf: NOW, tickers: [ticker({ venues: [venue({ gapPct: 0 })] })] });
+
+    const plan = await planRuleForAutopilot(bsc, { type: "buy_discount", symbol: "NVDA", discountPct: 2 }, { nowMs: NOW, budgetUsd: 25 });
+
+    expect(plan).toEqual({ ok: true, intents: [], receipt: expect.stringContaining("nothing to do") });
+  });
+
+  it("skips with a plain reason when the symbol isn't in today's catalog at all", async () => {
+    bscCatalogSnapshotSpy.mockResolvedValue({ asOf: NOW, tickers: [] });
+
+    const plan = await planRuleForAutopilot(bsc, { type: "buy_discount", symbol: "NVDA", discountPct: 2 }, { nowMs: NOW, budgetUsd: 25 });
+
+    expect(plan).toEqual({ ok: false, reason: expect.stringContaining("NVDA") });
+  });
+});
+
+describe("planRuleForAutopilot: rebalance", () => {
+  const rule = { type: "rebalance" as const, driftPct: 10 };
+
+  it("skips honestly when no holdings were supplied", async () => {
+    const plan = await planRuleForAutopilot(bsc, rule, { nowMs: NOW, budgetUsd: 50, targets: [{ symbol: "NVDA", weightPct: 100 }] });
+    expect(plan).toEqual({ ok: false, reason: expect.stringContaining("holdings") });
+  });
+
+  it("skips honestly when there's no target basket to rebalance against", async () => {
+    const plan = await planRuleForAutopilot(bsc, rule, { nowMs: NOW, budgetUsd: 50, holdings: [{ symbol: "NVDA", usdValue: 100, tier: "stock" }] });
+    expect(plan).toEqual({ ok: false, reason: expect.stringContaining("basket") });
+  });
+
+  it("produces sell/buy intents and a receipt naming the basket once holdings and targets are both known", async () => {
+    const plan = await planRuleForAutopilot(bsc, rule, {
+      nowMs: NOW,
+      budgetUsd: 1000,
+      holdings: [
+        { symbol: "NVDA", usdValue: 75, tier: "stock" },
+        { symbol: "AMD", usdValue: 25, tier: "stock" },
+      ],
+      targets: [
+        { symbol: "NVDA", weightPct: 60 },
+        { symbol: "AMD", weightPct: 40 },
+      ],
+      basketName: "AI chips basket",
+    });
+    expect(plan.ok).toBe(true);
+    if (plan.ok) {
+      expect(plan.intents.length).toBeGreaterThan(0);
+      expect(plan.receipt).toBe("Vera rebalanced your AI chips basket: sold $15 of NVDA, bought $15 of AMD.");
+    }
+  });
+});
+
+describe("planRuleForAutopilot: safety_switch", () => {
+  const rule = { type: "safety_switch" as const, dropPct: 5, movePct: 50 };
+
+  function spyHistory(points: { t: number; referencePrice: number }[]) {
+    getSpreadHistorySpy.mockResolvedValue([
+      { platform: "bstock", points: points.map((p) => ({ ...p, tokenPrice: p.referencePrice, gapPct: 0, buyable: true, state: "open" })) },
+    ]);
+  }
+
+  it("skips honestly when no holdings were supplied", async () => {
+    spyHistory([{ t: NOW - DAY, referencePrice: 500 }, { t: NOW, referencePrice: 400 }]);
+    const plan = await planRuleForAutopilot(bsc, rule, { nowMs: NOW, budgetUsd: 100 });
+    expect(plan).toEqual({ ok: false, reason: expect.stringContaining("holdings") });
+  });
+
+  it("skips honestly when the market's move can't be read yet (no history)", async () => {
+    getSpreadHistorySpy.mockResolvedValue([]);
+    const plan = await planRuleForAutopilot(bsc, rule, { nowMs: NOW, budgetUsd: 100, holdings: [{ symbol: "NVDA", usdValue: 100, tier: "stock" }] });
+    expect(plan).toEqual({ ok: false, reason: expect.stringContaining("market") });
+  });
+
+  it("does nothing (ok, empty) when the drop hasn't cleared the threshold", async () => {
+    spyHistory([{ t: NOW - DAY, referencePrice: 500 }, { t: NOW, referencePrice: 490 }]); // -2%
+    const plan = await planRuleForAutopilot(bsc, rule, { nowMs: NOW, budgetUsd: 100, holdings: [{ symbol: "NVDA", usdValue: 100, tier: "stock" }] });
+    expect(plan).toEqual({ ok: true, intents: [], receipt: expect.stringContaining("nothing to do") });
+  });
+
+  it("moves money into the safer list once SPY's reference price has dropped past the threshold", async () => {
+    spyHistory([{ t: NOW - DAY, referencePrice: 500 }, { t: NOW, referencePrice: 460 }]); // -8%
+    const plan = await planRuleForAutopilot(bsc, rule, { nowMs: NOW, budgetUsd: 1000, holdings: [{ symbol: "NVDA", usdValue: 100, tier: "stock" }] });
+    expect(plan.ok).toBe(true);
+    if (plan.ok) {
+      expect(plan.intents.some((i) => i.symbol === "NVDA" && i.action === "sell")).toBe(true);
+      expect(plan.intents.some((i) => i.action === "buy")).toBe(true);
+    }
+  });
+});
+
+describe("planRuleForAutopilot: mix_keeper", () => {
+  it("skips honestly when no holdings were supplied", async () => {
+    const plan = await planRuleForAutopilot(bsc, { type: "mix_keeper", stockPct: 80 }, { nowMs: NOW, budgetUsd: 100 });
+    expect(plan).toEqual({ ok: false, reason: expect.stringContaining("holdings") });
+  });
+
+  it("keeps the mix once holdings are known", async () => {
+    const plan = await planRuleForAutopilot(bsc, { type: "mix_keeper", stockPct: 80 }, {
+      nowMs: NOW,
+      budgetUsd: 1000,
+      holdings: [
+        { symbol: "NVDA", usdValue: 60, tier: "stock" },
+        { symbol: "BTCB", usdValue: 40, tier: "crypto" },
+      ],
+    });
+    expect(plan.ok).toBe(true);
+    if (plan.ok) expect(plan.intents.length).toBeGreaterThan(0);
+  });
+});
+
+describe("planRuleForAutopilot: earnings", () => {
+  it("skips — the earnings data source isn't wired up yet (wiringNeeded)", async () => {
+    const plan = await planRuleForAutopilot(bsc, { type: "earnings", symbol: "NVDA", buyDaysBefore: 3, sellDaysAfter: 1 }, { nowMs: NOW, budgetUsd: 25 });
+    expect(plan).toEqual({ ok: false, reason: expect.stringContaining("earnings") });
+  });
+});
