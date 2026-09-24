@@ -316,6 +316,63 @@ const BSC_SEEDS: Seed[] = [
       { symbol: "QQQ", weightPct: 40, reason: "The 100 biggest Nasdaq names, tech-heavy." },
     ],
   },
+
+  // Wave 5 (brief ideas 7 and 9): a stocks + crypto mix, and more themed baskets, all built only
+  // from tickers already in bsc.assets.ts. No leveraged ETF ever belongs in a buy-and-hold
+  // basket (SOXL/TQQQ are listed there for manual trading only), and Energy is left out on
+  // purpose: nothing in the curated list is an energy company.
+  {
+    slug: "magnificent-7",
+    name: "Magnificent Seven",
+    tagline: "The seven US giants everyone means when they say \"the market.\"",
+    icon: "building",
+    color: "#3b5bdb",
+    items: [
+      { symbol: "AAPL", weightPct: 15, reason: "The steady anchor: a giant with a loyal customer base." },
+      { symbol: "MSFT", weightPct: 15, reason: "Windows, Office, and a huge cloud business." },
+      { symbol: "GOOGL", weightPct: 14, reason: "Search, YouTube, and cloud income in one company." },
+      { symbol: "AMZN", weightPct: 14, reason: "The world's biggest online store, plus its cloud arm." },
+      { symbol: "NVDA", weightPct: 14, reason: "The chips behind most of today's AI." },
+      { symbol: "META", weightPct: 14, reason: "Billions of daily users, mostly paid for by ads." },
+      { symbol: "TSLA", weightPct: 14, reason: "Electric cars, batteries, and a bet on self-driving." },
+    ],
+  },
+  {
+    slug: "buffett-style-value",
+    name: "Buffett-Style Value",
+    tagline: "Profitable, well-known businesses, not this year's hot story.",
+    icon: "gem",
+    color: "#2e6f5e",
+    items: [
+      { symbol: "AAPL", weightPct: 35, reason: "Warren Buffett's own largest stock holding." },
+      { symbol: "IBM", weightPct: 25, reason: "A century-old tech firm that pays a steady dividend." },
+      { symbol: "ORCL", weightPct: 25, reason: "Business software most large companies already pay for." },
+      { symbol: "QCOM", weightPct: 15, reason: "Profitable, and cheaper than most of big tech." },
+    ],
+  },
+  {
+    slug: "pre-ipo",
+    name: "Pre-IPO",
+    tagline: "Two private companies you can't buy shares of anywhere else. Higher risk.",
+    icon: "rocket",
+    color: "#7c6fcf",
+    items: [
+      { symbol: "SPCX", weightPct: 60, reason: "A rare piece of a private space company. Not publicly traded, so expect bigger swings." },
+      { symbol: "CBRS", weightPct: 40, reason: "A private AI chip maker. Not publicly traded, so expect bigger swings." },
+    ],
+  },
+  {
+    slug: "stocks-and-bitcoin",
+    name: "Stocks & Bitcoin",
+    tagline: "Two steady names next to a slice of Bitcoin.",
+    icon: "bitcoin",
+    color: "#d08a2a",
+    items: [
+      { symbol: "NVDA", weightPct: 35, reason: "The AI chip leader." },
+      { symbol: "MSFT", weightPct: 35, reason: "A steady earner with a huge cloud business." },
+      { symbol: "BTCB", weightPct: 30, reason: "Bitcoin, held on BNB Chain. Known for large ups and downs." },
+    ],
+  },
 ];
 
 /** Every curated seed, per chain — unfiltered. Use `curatedBaskets(chain)` for what to show. */
