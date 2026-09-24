@@ -20,7 +20,7 @@ import { useBaskets } from "@/hooks/useBaskets";
 import { useRwaTicker, primaryVenue, useBscBuyGate } from "@/hooks/useRwa";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { displayFor } from "@/lib/displayAssets";
-import { resolveVenueAddress } from "@/lib/venues";
+import { pickHolding, resolveVenueAddress } from "@/lib/venues";
 import { Icon, AssetTile, PriceChart, SectionTitle, Stat, MarketStatus, type PricePoint } from "@/components/design";
 import { MarketStatusBadge } from "@/components/lite/rwa/MarketStatusBadge";
 import { PriceGap } from "@/components/lite/rwa/PriceGap";
@@ -66,9 +66,12 @@ export function AssetDetailScreen({
   go,
   symbol,
   loop,
+  venue: openedVenue,
 }: {
   go: (target: string | number, params?: Record<string, unknown>) => void;
   symbol: string;
+  /** BSC: the issuer whose holding row opened this screen (a twin position), if any. */
+  venue?: RwaPlatform;
   /** After a trade: the position card flashes once (LiteApp's closing-the-loop plumbing). */
   loop?: LoopParams;
 }) {
@@ -78,7 +81,7 @@ export function AssetDetailScreen({
   const d = displayFor(asset.symbol, asset.name);
   const { address } = useSmartAccount();
   const { data: port } = usePortfolio(address ?? undefined);
-  const holding = port?.holdings.find((h) => h.asset.symbol === asset.symbol);
+  const holding = pickHolding(port?.holdings, chain, asset, openedVenue);
   // Cost basis + lots (same query Owned uses at its default range, so it's warm).
   const { data: hist } = usePortfolioHistory(address ?? undefined, "1M");
   const position = hist?.positions.find((p) => p.symbol === asset.symbol);
@@ -343,7 +346,11 @@ export function AssetDetailScreen({
             <Stat
               label="Value"
               value={
-                shownPrice !== undefined ? (
+                // A twin position is priced at its own issuer's token, which the portfolio
+                // already did; the headline price is the default venue's.
+                holding.venue !== undefined && holding.venue !== asset.platform && holding.valueUsd !== undefined ? (
+                  usd(holding.valueUsd)
+                ) : shownPrice !== undefined ? (
                   <Money value={holding.qty * shownPrice} />
                 ) : holding.valueUsd !== undefined ? (
                   usd(holding.valueUsd)

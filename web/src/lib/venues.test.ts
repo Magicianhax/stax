@@ -3,7 +3,7 @@
 // need the same answer, so it is pure and tested here rather than re-derived in each caller.
 import { describe, expect, it } from "vitest";
 import { getChain } from "./chains";
-import { holdingVenue, resolveVenueAddress } from "./venues";
+import { holdingKey, holdingVenue, pickHolding, resolveVenueAddress } from "./venues";
 
 const bsc = getChain("bsc");
 const base = getChain("base");
@@ -64,5 +64,29 @@ describe("holdingVenue", () => {
     const nvdaBase = base.assets.all.find((a) => a.symbol === "NVDA");
     if (!nvdaBase) return;
     expect(holdingVenue(base, nvdaBase, "ondo")).toBeUndefined();
+  });
+});
+
+describe("pickHolding / holdingKey", () => {
+  const rows = [
+    { asset: { symbol: "NVDA" }, venue: "ondo" as const, qty: 3 },
+    { asset: { symbol: "NVDA" }, venue: "bstock" as const, qty: 1 },
+  ];
+
+  it("defaults to the asset's own platform, not the first (highest-value) row", () => {
+    expect(pickHolding(rows, bsc, nvda)?.venue).toBe(nvda.platform);
+  });
+
+  it("shows the venue the screen was opened for", () => {
+    expect(pickHolding(rows, bsc, nvda, "ondo")?.qty).toBe(3);
+  });
+
+  it("still finds a twin-only position", () => {
+    expect(pickHolding([rows[0]], bsc, nvda)?.venue).toBe("ondo");
+  });
+
+  it("gives the two issuers of one symbol different keys", () => {
+    expect(holdingKey(rows[0])).not.toBe(holdingKey(rows[1]));
+    expect(holdingKey({ asset: { symbol: "AAPL" } })).toBe("AAPL");
   });
 });

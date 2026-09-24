@@ -13,7 +13,7 @@ import { getChain } from "@/lib/chains";
 import { usdToRaw } from "@/lib/units";
 import type { RwaToken } from "./binance/types";
 import type { RwaTickerView, VenueView } from "@/lib/rwa";
-import { allClosedMessage, buildBscInvestCalls, buyableTickers, closedMessage, enforceMinLegs, maxBscLegs, venueAddressFor } from "./bscPlan";
+import { allClosedMessage, buildBscInvestCalls, buyableTickers, closedMessage, enforceMinLegs, maxBscLegs, unavailableNote, venueAddressFor } from "./bscPlan";
 
 const bsc = getChain("bsc");
 const NVDA = "0x02fca66c1d1afb4e2a7884261eb00f63598a7436" as const;
@@ -340,5 +340,12 @@ describe("buildBscInvestCalls", () => {
     await expect(
       buildBscInvestCalls({ chain: bsc, allocation, usdcTotal: usdToRaw(bsc, 100), taker: SMART_ACCOUNT, catalog, tokens: staleTokens, nowMs: NOW }),
     ).rejects.toThrow(/MSFT/);
+  });
+});
+
+describe("unavailableNote", () => {
+  it("says a ticker with no Binance venue is unlisted, instead of an empty state list", () => {
+    const t: RwaTickerView = { ticker: "TSLA", name: "Tesla", type: "stock", venues: [], bestVenue: null };
+    expect(unavailableNote(t, Date.UTC(2026, 8, 27, 12))).toBe("TSLA (not listed by Binance right now)");
   });
 });

@@ -59,6 +59,7 @@ export function allClosedMessage(tickers: RwaTickerView[], nowMs: number): strin
 /** One line per unbuyable ticker, e.g. "TSLA (paused)", for Vera's prompt to explain herself. */
 export function unavailableNote(t: RwaTickerView, nowMs: number): string {
   const states = [...new Set(t.venues.map((v) => v.state))];
+  if (states.length === 0) return `${t.ticker} (not listed by Binance right now)`;
   const openMs = soonestOpenMs(t, nowMs);
   return `${t.ticker} (${states.join("/")}, ${formatNextOpen(new Date(openMs), new Date(nowMs))})`;
 }

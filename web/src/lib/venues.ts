@@ -49,3 +49,24 @@ export function holdingVenue(chain: StaxChain, asset: Asset, venue?: RwaPlatform
   if (chain.key !== "bsc") return undefined;
   return venue ?? asset.platform;
 }
+
+/**
+ * The holding row a screen about one ticker shows. With both issuers held, the portfolio has
+ * two rows for one symbol; the detail screen shows the venue it was opened for, else the
+ * asset's own platform, else whichever row exists (a twin-only position is still reachable).
+ */
+export function pickHolding<H extends { asset: { symbol: string }; venue?: RwaPlatform }>(
+  holdings: readonly H[] | undefined,
+  chain: StaxChain,
+  asset: Asset,
+  venue?: RwaPlatform,
+): H | undefined {
+  const rows = (holdings ?? []).filter((h) => h.asset.symbol === asset.symbol);
+  const want = holdingVenue(chain, asset, venue);
+  return rows.find((h) => want === undefined || h.venue === undefined || h.venue === want) ?? rows[0];
+}
+
+/** A stable per-row key: one symbol can hold two rows on BSC (bStock and Ondo). */
+export function holdingKey(h: { asset: { symbol: string }; venue?: RwaPlatform }): string {
+  return h.venue ? `${h.asset.symbol}:${h.venue}` : h.asset.symbol;
+}

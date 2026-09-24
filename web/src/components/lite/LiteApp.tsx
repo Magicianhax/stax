@@ -710,7 +710,14 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
       view = <MarketScreen go={go} />;
       break;
     case "asset":
-      view = <AssetDetailScreen go={go} symbol={String(params.symbol ?? "")} loop={params.loop as LoopParams | undefined} />;
+      view = (
+        <AssetDetailScreen
+          go={go}
+          symbol={String(params.symbol ?? "")}
+          loop={params.loop as LoopParams | undefined}
+          venue={params.venue === "bstock" || params.venue === "ondo" ? params.venue : undefined}
+        />
+      );
       break;
     case "trade":
       view = (
@@ -720,6 +727,7 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
           initialSide={params.side === "sell" ? "sell" : "buy"}
           swap={swap}
           draft={params.draft as TradeDraft | undefined}
+          venue={params.venue === "bstock" || params.venue === "ondo" ? params.venue : undefined}
         />
       );
       break;

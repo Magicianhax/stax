@@ -71,11 +71,7 @@ export function PlanScreen({
   goal?: string;
 }) {
   const risk = riskMeta(allocation.riskScore);
-  const { chain, ready } = useChainReady();
-  // useChainReady's `ready` only tracks the executor. BSC (ADR-0005) has no executor yet and
-  // never will need one for this direct smart-account path, so it reads investable here
-  // whenever the Binance aggregator is configured, not only once `contracts.deployed` flips.
-  const investable = ready || Boolean(chain.routers.binance);
+  const { chain, investable } = useChainReady();
   const { save } = useBaskets();
   const { notify } = useToast();
   const [saveOpen, setSaveOpen] = useState(false);

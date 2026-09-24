@@ -128,12 +128,13 @@ export function TradeScreen({
   // the amount itself is still legal, so this must not gate the button.
   const overNote = over || (side === "buy" && pad.refused);
   const canBuy =
-    side === "buy" && !coming && n > 0 && !over && !!quote && quote.expectedOutRaw > BigInt(0) && !!address;
+    side === "buy" && !coming && n > 0 && !over && !!quote && !quoteError && quote.expectedOutRaw > BigInt(0) && !!address;
   const canSell =
     side === "sell" &&
     sellable &&
     sellRaw > BigInt(0) &&
     !!sellQuote &&
+    !sellQuoteError &&
     sellQuote.expectedUsdcRaw > BigInt(0) &&
     !!address;
 

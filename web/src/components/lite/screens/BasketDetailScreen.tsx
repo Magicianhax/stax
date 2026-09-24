@@ -52,7 +52,7 @@ export function BasketDetailScreen({
   /** A basket decoded from a share link (not in storage yet). */
   shared?: Basket;
 }) {
-  const { chain, ready } = useChainReady();
+  const { chain, investable: ready } = useChainReady();
   const { byId, mine, save, remove, publish } = useBaskets();
   const { notify } = useToast();
   const giftsOn = useGiftsEnabled(); // gift-ui

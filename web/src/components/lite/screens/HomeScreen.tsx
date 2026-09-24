@@ -10,6 +10,7 @@
 //
 // Note on P&L: we don't track cost basis on-chain, so the only gain shown is
 // today's move (real 1D market data per holding), never an invented "all time".
+import { holdingKey } from "@/lib/venues";
 import { useState } from "react";
 import { usePortfolio, type Holding } from "@/hooks/useBalances";
 import { useActivity } from "@/hooks/useActivity";
@@ -338,7 +339,7 @@ export function HomeScreen({
                 const flashed = loop?.flash.includes(h.asset.symbol);
                 return (
                   <div
-                    key={h.asset.symbol}
+                    key={holdingKey(h)}
                     style={{ borderBottom: i < shown.length - 1 ? "1px solid var(--line-2)" : "none" }}
                   >
                     <HoldingRow
@@ -347,7 +348,7 @@ export function HomeScreen({
                       symbol={h.asset.symbol}
                       sub={hideBalance ? catFor(h.asset.symbol, h.asset.name) : undefined}
                       showSpark
-                      onClick={() => go("asset", { symbol: h.asset.symbol })}
+                      onClick={() => go("asset", { symbol: h.asset.symbol, venue: h.venue })}
                       value={hideBalance ? DOTS : h.valueUsd !== undefined ? usd(h.valueUsd) : qty}
                       change={day !== undefined ? { pct: day, label: "today" } : undefined}
                       flashKey={flashed && loop ? `${h.asset.symbol}:${loop.txHash}` : undefined}

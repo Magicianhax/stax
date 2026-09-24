@@ -13,6 +13,7 @@
 // (2026-09-06) it says "since Sep 6", and with no history at all it falls back
 // to the holdings' market series blended by current value ("price movement").
 // Each row shows its unrealized gain against cost when the lots are known.
+import { holdingKey } from "@/lib/venues";
 import { useMemo, useState } from "react";
 import { usePortfolio, type Holding } from "@/hooks/useBalances";
 import { coverageLabel, rangeCovered, usePortfolioHistory } from "@/hooks/usePortfolioHistory";
@@ -302,7 +303,7 @@ export function PortfolioScreen({
               const flashed = loop?.flash.includes(h.asset.symbol);
               return (
                 <div
-                  key={h.asset.symbol}
+                  key={holdingKey(h)}
                   style={{ borderBottom: i < holdings.length - 1 ? "1px solid var(--line-2)" : "none" }}
                 >
                   <HoldingRow
@@ -310,7 +311,7 @@ export function PortfolioScreen({
                     qty={qty}
                     symbol={h.asset.symbol}
                     showSpark={false}
-                    onClick={() => go("asset", { symbol: h.asset.symbol })}
+                    onClick={() => go("asset", { symbol: h.asset.symbol, venue: h.venue })}
                     value={h.valueUsd !== undefined ? usd(h.valueUsd) : qty}
                     change={
                       gain ??

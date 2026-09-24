@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
   // this RESOLVED address, never `asset.address`, so a chosen Ondo trade can't accidentally
   // price or gate against bStock's token.
   const resolved = resolveVenueAddress(chain, asset, body.venue);
-  if (!resolved) return badRequest(`${asset.symbol} isn't listed on ${body.venue} on ${chain.name}.`);
+  if (!resolved) return badRequest(`${asset.symbol} isn't offered by ${body.venue === "ondo" ? "Ondo" : "bStock"} on ${chain.name}.`);
 
   const usdc = chain.usdc.address;
   const tokenIn = body.side === "buy" ? usdc : resolved.address;
