@@ -6,7 +6,7 @@ import "server-only";
 // the $6-per-leg rule, the "what's buyable right now" filter, and the calls this plan hands the
 // client for signing are all testable without mocking Privy auth or standing up a route — the
 // same reasoning binanceLegs.ts gives for keeping checkBscBuyable/bscLegUsdValue pure.
-import { assetBySymbol, type StaxChain } from "@/lib/chains";
+import { assetBySymbol, isRoutable, type StaxChain } from "@/lib/chains";
 import { splitByWeight } from "@/lib/legBuilder";
 import { formatNextOpen, nextUsOpenMs } from "@/lib/marketHours";
 import { BSC_MIN_LEG_USD, type RwaTickerView } from "@/lib/rwa";
@@ -82,6 +82,17 @@ export type EnforceMinLegsResult<T> = { ok: true; legs: T[] } | { ok: false; mes
 export class AllocationRefusal extends Error {}
 
 /**
+ * Plain wording for "not enough per stock" (Wave 5 UX bar: no signed math, name the fix). With
+ * more than one stock in play, the fix that keeps them all is a bigger total; with just one,
+ * "fewer stocks" isn't a real option, so the only fix left is a bigger amount.
+ */
+export function minLegFloorMessage(desiredLegCount: number): string {
+  return desiredLegCount > 1
+    ? `The smallest amount per stock is $${BSC_MIN_LEG_USD}. Try $${BSC_MIN_LEG_USD * desiredLegCount} or fewer stocks.`
+    : `The smallest amount per stock is $${BSC_MIN_LEG_USD}. Try $${BSC_MIN_LEG_USD} or more.`;
+}
+
+/**
  * The $6-per-leg rule (Global Constraint, Review Focus #3), enforced on whatever a caller hands
  * in: drop the smallest legs down to `maxBscLegs(totalUsd)`, then keep dropping the smallest
  * survivor and renormalising while it's still under $6 and more than one leg remains — a
@@ -92,12 +103,12 @@ export class AllocationRefusal extends Error {}
  * this one rule.
  */
 export function enforceMinLegs<T extends BscCandidateLeg>(legs: T[], totalUsd: number): EnforceMinLegsResult<T> {
-  const cap = maxBscLegs(totalUsd);
-  if (cap === 0) {
-    return { ok: false, message: `$${totalUsd} is below Binance's $${BSC_MIN_LEG_USD} minimum per stock.` };
-  }
   if (legs.length === 0) {
     return { ok: false, message: `No stocks are buyable right now to build a plan from.` };
+  }
+  const cap = maxBscLegs(totalUsd);
+  if (cap === 0) {
+    return { ok: false, message: minLegFloorMessage(legs.length) };
   }
   // Largest first, so the legs kept under the cap (and dropped from, below) are the ones the
   // AI weighted least.
@@ -106,7 +117,7 @@ export function enforceMinLegs<T extends BscCandidateLeg>(legs: T[], totalUsd: n
   for (;;) {
     const keptTotal = kept.reduce((s, l) => s + l.usd, 0);
     if (keptTotal <= 0) {
-      return { ok: false, message: `Each stock needs at least $${BSC_MIN_LEG_USD}; try a larger amount.` };
+      return { ok: false, message: minLegFloorMessage(kept.length) };
     }
     // Renormalise onto the exact total so the legs still add up to what the user is investing,
     // not to whatever the kept legs happened to sum to before a drop.
@@ -119,12 +130,88 @@ export function enforceMinLegs<T extends BscCandidateLeg>(legs: T[], totalUsd: n
   if (smallest < BSC_MIN_LEG_USD - 1e-9) {
     // Only reachable when kept.length === 1, i.e. the full amount itself can't clear $6 — but
     // that already returns above via the cap === 0 check, so this is a last-resort guard.
-    return {
-      ok: false,
-      message: `Each stock needs at least $${BSC_MIN_LEG_USD}; try a larger amount or fewer picks.`,
-    };
+    return { ok: false, message: minLegFloorMessage(1) };
   }
   return { ok: true, legs: renormalised };
+}
+
+/** How much of a plan's weight is requested in crypto vs stocks (Wave 5 direction B). */
+export interface CryptoMixRequest {
+  /** Target share (0-100) of total weight in the 'crypto' tier; the rest goes to stocks. */
+  cryptoPct: number;
+}
+
+const CRYPTO_MIX_TOLERANCE_PCT = 5;
+const CRYPTO_WORDS = /\b(crypto|bitcoin|btc|ethereum|eth|bnb|binance coin)\b/i;
+
+function clampPct(n: number): number {
+  if (!Number.isFinite(n)) return 20;
+  return Math.max(0, Math.min(100, n));
+}
+
+/**
+ * Reads a stocks/crypto mix straight out of a plain-language goal ("80% stocks, 20% crypto",
+ * "mostly stocks with a bit of bitcoin"), so asking for a mix needs no separate control —
+ * typing it into the goal box is the whole UI (the "so simple even a web2-naive person can use
+ * it" bar). Returns null when crypto isn't mentioned at all: the default stays stocks-only.
+ */
+export function parseCryptoMix(goal: string): CryptoMixRequest | null {
+  if (!CRYPTO_WORDS.test(goal)) return null;
+
+  const cryptoPctMatch = goal.match(/(\d{1,3}(?:\.\d+)?)\s*%\s*(?:in\s+|of\s+)?(?:crypto|bitcoin|btc|ethereum|eth|bnb)\b/i);
+  if (cryptoPctMatch) return { cryptoPct: clampPct(Number(cryptoPctMatch[1])) };
+
+  const stockPctMatch = goal.match(/(\d{1,3}(?:\.\d+)?)\s*%\s*(?:in\s+|of\s+)?(?:stocks?|equities|shares)\b/i);
+  if (stockPctMatch) return { cryptoPct: clampPct(100 - Number(stockPctMatch[1])) };
+
+  if (/half.*half|50\s*\/\s*50|even split/i.test(goal)) return { cryptoPct: 50 };
+  if (/mostly\s+(crypto|bitcoin|btc)/i.test(goal)) return { cryptoPct: 70 };
+  if (/(bit of|little|touch of|dash of|small (amount|slice|part) of)\s+(crypto|bitcoin|btc|ethereum|eth|bnb)/i.test(goal)) {
+    return { cryptoPct: 10 };
+  }
+  if (/some\s+(crypto|bitcoin|btc|ethereum|eth|bnb)/i.test(goal)) return { cryptoPct: 20 };
+
+  // Crypto is mentioned but with no explicit split ("stocks and bitcoin") — a modest default
+  // slice honours the mention rather than silently dropping it.
+  return { cryptoPct: 20 };
+}
+
+/**
+ * Pure post-check for direction B: nudges `legs` onto the requested stocks/crypto split when
+ * they're outside `CRYPTO_MIX_TOLERANCE_PCT` of it, rescaling each side's OWN legs by their
+ * existing relative weights (Vera's picks within "stocks" or within "crypto" don't change
+ * relative to each other, only the two groups' shares of the total). If the model asked-for
+ * crypto but picked none at all, the chain's first routable crypto asset is added at the
+ * target weight rather than silently dropping the request. Runs before `enforceMinLegs`, which
+ * still has the final word on the $6 floor — a ratio this function reaches can still shrink
+ * once legs that are too small to fund are dropped.
+ */
+export function applyCryptoMix<T extends { symbol: string; weightPct: number; reason?: string }>(
+  chain: StaxChain,
+  legs: T[],
+  mix: CryptoMixRequest,
+): T[] {
+  const isCrypto = (symbol: string) => assetBySymbol(chain, symbol)?.tier === "crypto";
+  const target = clampPct(mix.cryptoPct);
+  let cryptoLegs = legs.filter((l) => isCrypto(l.symbol));
+  const stockLegs = legs.filter((l) => !isCrypto(l.symbol));
+
+  if (cryptoLegs.length === 0) {
+    if (target <= CRYPTO_MIX_TOLERANCE_PCT || stockLegs.length === 0) return legs; // nothing worth adding, or nothing to take from
+    const fallback = chain.assets.crypto.find((a) => isRoutable(chain, a.symbol));
+    if (!fallback) return legs; // this chain has no crypto to add; the plan stays stocks-only
+    cryptoLegs = [{ symbol: fallback.symbol, weightPct: 0, reason: "Added to match the crypto share you asked for." } as T];
+  } else {
+    const currentCryptoPct = cryptoLegs.reduce((s, l) => s + l.weightPct, 0);
+    if (Math.abs(currentCryptoPct - target) <= CRYPTO_MIX_TOLERANCE_PCT) return legs; // close enough; leave Vera's own weighting alone
+  }
+
+  const rescale = (group: T[], newTotal: number): T[] => {
+    const groupTotal = group.reduce((s, l) => s + l.weightPct, 0);
+    if (groupTotal <= 0) return group.map((l, i) => ({ ...l, weightPct: i === 0 ? newTotal : 0 }));
+    return group.map((l) => ({ ...l, weightPct: (l.weightPct / groupTotal) * newTotal }));
+  };
+  return [...rescale(stockLegs, 100 - target), ...rescale(cryptoLegs, target)].filter((l) => l.weightPct > 0);
 }
 
 export interface BuildBscInvestCallsArgs {
@@ -160,6 +247,24 @@ export async function buildBscInvestCalls(args: BuildBscInvestCallsArgs): Promis
 
   const legCalls = await Promise.all(
     split.map(async ({ asset, usdcIn }) => {
+      // Crypto isn't an RWA token (no catalog row, no market hours, no issuer to pause it), so
+      // it skips the catalog venue lookup and checkBscBuyable's TRADING gate entirely and trades
+      // straight off its own address — always tradeable, never "not listed" (Wave 5 direction A).
+      if (asset.tier === "crypto") {
+        if (!asset.address) throw new BinanceLegRefusal(`${asset.symbol} isn't listed on ${chain.name}.`);
+        const leg = await buildBinanceLeg({
+          chain,
+          symbol: asset.symbol,
+          tokenIn: chain.usdc.address,
+          tokenOut: asset.address,
+          amountIn: usdcIn,
+          taker,
+          slippageBps,
+          usdValue: rawToUsd(chain, usdcIn),
+          build: true,
+        });
+        return directCallsForLeg(leg);
+      }
       const ticker = byTicker.get(asset.symbol);
       const address = venueAddressFor(ticker);
       if (!address) throw new BinanceLegRefusal(closedMessage(asset.symbol, ticker, nowMs));

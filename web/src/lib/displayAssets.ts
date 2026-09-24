@@ -99,6 +99,11 @@ const DISPLAY: Record<string, AssetDisplay> = {
   // USDC route, so it stays honestly flagged `coming`.
   mETH: { name: "Staked ETH", ticker: "mETH", logo: `${CRYPTO_ICON}/eth.svg`, color: "#5b7fd0", kind: "crypto", cat: "Crypto", desc: "Ethereum that's staked to help secure the network, earning a steady staking reward on top of Ether's own price moves. Crypto, so expect bigger swings.", price: 1830.0, apy: "3.6%", day: 0.9, spark: [5, 6, 6, 7, 6, 7, 8, 8, 9, 9] },
   FBTC: { name: "Bitcoin", ticker: "FBTC", logo: `${CRYPTO_ICON}/btc.svg`, color: "#d08a2a", glyph: "B", kind: "crypto", cat: "Crypto", desc: "A tokenized form of Bitcoin, the original and largest cryptocurrency, giving you Bitcoin's price exposure on Mantle. Known for large ups and downs.", price: 96250.0, day: 1.4, coming: true, spark: [6, 7, 6, 8, 7, 9, 8, 10, 9, 11] },
+  // BNB Chain: BTCB (a version of Bitcoin moved onto BNB Chain) and BNB itself (held on-chain as
+  // WBNB), both traded through the same Binance aggregator as the tokenized stocks. No logo for
+  // "btcb" in the shared crypto-icon set, so it reuses the plain Bitcoin glyph.
+  BTCB: { name: "Bitcoin", ticker: "BTCB", logo: `${CRYPTO_ICON}/btc.svg`, color: "#d08a2a", glyph: "B", kind: "crypto", cat: "Crypto", desc: "A version of the original cryptocurrency, moved onto BNB Chain and backed one-to-one by real Bitcoin. Known for large ups and downs.", price: 84000.0, day: 0, spark: [6, 7, 6, 8, 7, 9, 8, 10, 9, 11] },
+  BNB: { name: "BNB", ticker: "BNB", logo: `${CRYPTO_ICON}/bnb.svg`, color: "#F0B90B", glyph: "B", kind: "crypto", cat: "Crypto", desc: "BNB Chain's own coin, held here as WBNB. Used across the network to pay fees. Crypto, so expect bigger swings than a stock.", price: 780.0, day: 0, spark: [5, 6, 6, 7, 6, 7, 8, 8, 9, 9] },
 };
 
 const FALLBACK_COLORS = ["#3b3f44", "#1f6f54", "#356ac3", "#b03a2e", "#4a7d2c"];
