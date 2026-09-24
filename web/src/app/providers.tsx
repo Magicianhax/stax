@@ -15,7 +15,7 @@ import { WagmiProvider } from "wagmi";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { wagmiConfig } from "@/lib/wagmi";
-import { BASE, MANTLE } from "@/lib/chains";
+import { BASE, BSC, MANTLE } from "@/lib/chains";
 import { ServiceWorkerRegistrar } from "@/components/pwa/ServiceWorkerRegistrar";
 
 const PRIVY_APP_ID = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
@@ -47,8 +47,8 @@ export function Providers({ children }: { children: ReactNode }) {
         // Email, Google, X (Twitter) — or bring your own EOA wallet.
         // (Passkey is omitted: it's currently disabled in the Privy dashboard. Re-add "passkey" once enabled there.)
         loginMethods: ["email", "google", "twitter", "wallet"],
-        defaultChain: BASE.chain,
-        supportedChains: [BASE.chain, MANTLE.chain],
+        defaultChain: BSC.chain,
+        supportedChains: [BSC.chain, BASE.chain, MANTLE.chain],
         // Social/email users get a no-seed-phrase embedded wallet; users who connect
         // their own wallet keep using that EOA (it owns their gasless smart account).
         embeddedWallets: {

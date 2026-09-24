@@ -2,11 +2,13 @@
 
 // The user's selected network on the client — a tiny external store so both React
 // components (`useChain`) and plain modules (aa.ts, authedFetch.ts) read the same value.
-// Persisted in localStorage under `stax.chain`; default is Base.
+// Persisted in localStorage; default is BNB Chain. The key is versioned: `stax.chain` held the
+// choice from when Base was the default, and ignoring it lands everyone on BNB Chain once. A choice
+// made after that sticks.
 import { useSyncExternalStore } from "react";
 import { CHAINS, DEFAULT_CHAIN_KEY, isChainKey, type ChainKey, type StaxChain } from "./index";
 
-const STORAGE_KEY = "stax.chain";
+const STORAGE_KEY = "stax.chain.v2";
 const listeners = new Set<() => void>();
 let current: ChainKey = DEFAULT_CHAIN_KEY;
 let hydrated = false;
@@ -50,7 +52,7 @@ function subscribe(l: () => void) {
   };
 }
 
-/** The active StaxChain (re-renders on switch). Server snapshot is always the default (Base). */
+/** The active StaxChain (re-renders on switch). Server snapshot is always the default (BNB Chain). */
 export function useChain(): StaxChain {
   const key = useSyncExternalStore(subscribe, getActiveChainKey, () => DEFAULT_CHAIN_KEY);
   return CHAINS[key];

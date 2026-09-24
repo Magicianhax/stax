@@ -1,4 +1,5 @@
-// Stax multi-chain registry. Base is the default; Mantle is the legacy mode; BSC is the BNB Hack chain.
+// Stax multi-chain registry. BSC (BNB Chain) is the default; Base is the original chain; Mantle is
+// the legacy mode.
 //
 //   import { getChain, DEFAULT_CHAIN_KEY, isRoutable } from "@/lib/chains";
 //   client components:  const chain = useChain();            (@/lib/chains/active)
@@ -11,8 +12,8 @@ import { MANTLE } from "./mantle";
 import type { Asset, ChainKey, RouteHop, StaxChain } from "./types";
 
 export const CHAINS: Record<ChainKey, StaxChain> = { base: BASE, mantle: MANTLE, bsc: BSC };
-export const CHAIN_KEYS: ChainKey[] = ["base", "mantle", "bsc"];
-export const DEFAULT_CHAIN_KEY: ChainKey = "base";
+export const CHAIN_KEYS: ChainKey[] = ["bsc", "base", "mantle"];
+export const DEFAULT_CHAIN_KEY: ChainKey = "bsc";
 
 /** Request header clients send so API routes know which chain to act on. */
 export const CHAIN_HEADER = "x-stax-chain";

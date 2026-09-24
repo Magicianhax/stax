@@ -35,3 +35,12 @@ describe("bsc chain", () => {
     expect(getChain("mantle").id).toBe(5000);
   });
 });
+
+describe("default chain", () => {
+  it("is BNB Chain, listed first in the network switch", async () => {
+    const { DEFAULT_CHAIN_KEY, CHAIN_KEYS, getChain } = await import("./index");
+    expect(DEFAULT_CHAIN_KEY).toBe("bsc");
+    expect(CHAIN_KEYS[0]).toBe("bsc");
+    expect(getChain(undefined).key).toBe("bsc");
+  });
+});

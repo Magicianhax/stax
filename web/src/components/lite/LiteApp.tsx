@@ -25,6 +25,8 @@ import { useInvest } from "@/hooks/useInvest";
 import { useSwap } from "@/hooks/useSwap";
 import { usePortfolio } from "@/hooks/useBalances";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
+import { useChainKey } from "@/lib/chains/active";
+import { giftContractFor } from "@/lib/gifts";
 import { haptic } from "@/lib/haptics";
 import { TabBar, type TabId, useToast } from "@/components/design";
 import { InstallPrompt } from "@/components/app/InstallPrompt";
@@ -180,6 +182,15 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
 
   const [stack, setStack] = useState<Route[]>([{ screen: "home", params: {} }]);
   const current = stack[stack.length - 1];
+
+  // Gifts live on Base only (ADR-0010), while BNB Chain is the default. Opening a gift screen, or
+  // a `?gift=` link, on a chain without the gift contract switches to the one that has it.
+  const [activeChainKey, setActiveChain] = useChainKey();
+  useEffect(() => {
+    if (current.screen !== "gift" && current.screen !== "gifts") return;
+    if (giftContractFor(activeChainKey) || !giftContractFor("base")) return;
+    setActiveChain("base");
+  }, [current.screen, activeChainKey, setActiveChain]);
   const { screen, params } = current;
 
   const [goal, setGoal] = useState("");

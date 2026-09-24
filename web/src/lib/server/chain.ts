@@ -1,10 +1,10 @@
 // SERVER-ONLY. Resolve which StaxChain a request targets.
 // Clients send `x-stax-chain: base|mantle` (authedFetch does this automatically) or `?chain=`.
-// Unknown/missing → Base (the default).
+// Unknown/missing → the default chain (BNB Chain).
 import "server-only";
 import type { NextRequest } from "next/server";
 import { createPublicClient, type PublicClient } from "viem";
-import { CHAIN_HEADER, chainTransport, getChain, isChainKey, type ChainKey, type StaxChain } from "@/lib/chains";
+import { CHAIN_HEADER, DEFAULT_CHAIN_KEY, chainTransport, getChain, isChainKey, type ChainKey, type StaxChain } from "@/lib/chains";
 
 export { CHAIN_HEADER };
 
@@ -14,7 +14,7 @@ export function chainKeyFromRequest(req: NextRequest | Request): ChainKey {
   if (isChainKey(q)) return q;
   const h = req.headers.get(CHAIN_HEADER);
   if (isChainKey(h)) return h;
-  return "base";
+  return DEFAULT_CHAIN_KEY;
 }
 
 export function chainFromRequest(req: NextRequest | Request): StaxChain {
