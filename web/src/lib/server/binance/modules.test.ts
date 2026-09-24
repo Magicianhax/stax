@@ -1,7 +1,9 @@
 // Each wrapper is a thin, typed call to web3Request. These pin the wire shape from
-// docs/BINANCE-WEB3.md against fixtures recorded from live Binance Web3 calls (candles_response
-// is the one exception: no live capture was saved for that endpoint during research, so it is
-// built to the tuple shape §3 documents, and that gap is called out in this task's report).
+// docs/BINANCE-WEB3.md against fixtures recorded from live Binance Web3 calls. candles_response
+// is a LIVE capture (NVDAB, bar=1h, recorded for this task) — and it disagrees with §3, which
+// says every value is a string: the live rows are plain JSON numbers instead. The fixture keeps
+// the real shape and the parser (`market.ts`) was widened with `z.coerce.number()` to accept
+// either, rather than the fixture being bent back to match a doc that turned out to be wrong.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
@@ -94,8 +96,24 @@ describe("candles", () => {
   it("parses the [o,h,l,c,v,tMs,n] tuple into Candle", async () => {
     mockWeb3Request.mockResolvedValueOnce(candlesFixture);
     const { candles } = await import("./market");
-    const rows = await candles("0xa9ee28c80f960b889dfbd1902055218cba016f75", "1h", 3);
+    // NVDAB — the same address as candles_response.json's live capture.
+    const rows = await candles("0x02fca66c1d1afb4e2a7884261eb00f63598a7436", "1h", 3);
     expect(rows).toHaveLength(3);
+    expect(rows[0]).toEqual({
+      open: 226.88455819718558,
+      high: 226.88455819718558,
+      low: 222.35495342536265,
+      close: 223.23821526570742,
+      volume: 146451.518735385,
+      t: 1790251200000,
+      trades: 631,
+    });
+  });
+
+  it("also accepts the documented all-strings shape, since docs/BINANCE-WEB3.md §3 says that's the wire format", async () => {
+    mockWeb3Request.mockResolvedValueOnce([["223.10", "223.90", "222.80", "223.54", "184032.5", "1790247600000", "412"]]);
+    const { candles } = await import("./market");
+    const rows = await candles("0x02fca66c1d1afb4e2a7884261eb00f63598a7436", "1h", 1);
     expect(rows[0]).toEqual({ open: 223.1, high: 223.9, low: 222.8, close: 223.54, volume: 184032.5, t: 1790247600000, trades: 412 });
   });
 });
