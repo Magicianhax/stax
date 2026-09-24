@@ -31,6 +31,7 @@ import {
 import { Money, Reveal, formatMoney } from "@/components/motion";
 import { toTile } from "@/lib/displayAssets";
 import { usd, tokenQty } from "@/lib/format";
+import { PLATFORM_LABEL } from "@/components/lite/rwa/VenuePicker";
 import { rampColor } from "./basketPrimitives";
 import { changeOf, readoutDate, useSymbolSeries, type MarketRange } from "./useRangeSeries";
 import type { LoopParams } from "../LiteApp";
@@ -60,6 +61,13 @@ export function PortfolioScreen({
 
   const cash = port?.cashUsd ?? 0;
   const holdings: Holding[] = port?.holdings ?? [];
+  // Design critique P1 #10: a twin holding (bStock's and Ondo's mint of the same stock) used to
+  // render as two rows with the same name, tile and ticker — nothing said why there were two.
+  const twinSymbols = new Set(
+    [...holdings.reduce((m, h) => m.set(h.asset.symbol, (m.get(h.asset.symbol) ?? 0) + 1), new Map<string, number>())]
+      .filter(([, count]) => count > 1)
+      .map(([symbol]) => symbol),
+  );
   const invested = port?.investedUsd ?? 0;
   // Only holdings we could price contribute to the chart/donut.
   const priced = holdings.filter((h) => h.valueUsd !== undefined && h.valueUsd > 0);
@@ -310,6 +318,7 @@ export function PortfolioScreen({
                     asset={tile}
                     qty={qty}
                     symbol={h.asset.symbol}
+                    sub={twinSymbols.has(h.asset.symbol) && h.venue ? `${qty} ${h.asset.symbol} · from ${PLATFORM_LABEL[h.venue]}` : undefined}
                     showSpark={false}
                     onClick={() => go("asset", { symbol: h.asset.symbol, venue: h.venue })}
                     value={h.valueUsd !== undefined ? usd(h.valueUsd) : qty}

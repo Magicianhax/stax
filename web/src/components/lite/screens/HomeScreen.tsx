@@ -19,6 +19,7 @@ import { useDemo } from "@/components/demo/DemoProvider";
 import { Icon, HoldingRow, LogoCluster, SectionTitle, Sparkline, VerifiedBadge, NetworkChip } from "@/components/design";
 import { Money, Reveal } from "@/components/motion";
 import { toTile, catFor } from "@/lib/displayAssets";
+import { PLATFORM_LABEL } from "@/components/lite/rwa/VenuePicker";
 import { usd, tokenQty } from "@/lib/format";
 import { portfolioSeries } from "@/lib/demoSeries";
 import { iconBtn } from "./primitives";
@@ -107,6 +108,15 @@ export function HomeScreen({
   // person who just bought Safe Dollars should see them without "See all".
   const top = holdings.slice(0, TOP_HOLDINGS);
   const shown = [...top, ...holdings.slice(TOP_HOLDINGS).filter((h) => h.asset.tier === "safe")];
+  // Design critique P1 #10: a twin holding (bStock's and Ondo's mint of the same stock) used to
+  // render as two rows with the same name, tile and ticker — nothing said why there were two.
+  // Counted across the FULL list, not just `shown`, so a twin split by TOP_HOLDINGS still
+  // recognises itself.
+  const twinSymbols = new Set(
+    [...holdings.reduce((m, h) => m.set(h.asset.symbol, (m.get(h.asset.symbol) ?? 0) + 1), new Map<string, number>())]
+      .filter(([, count]) => count > 1)
+      .map(([symbol]) => symbol),
+  );
   const recent = (activity ?? []).slice(0, RECENT);
 
   return (
@@ -346,7 +356,13 @@ export function HomeScreen({
                       asset={tile}
                       qty={qty}
                       symbol={h.asset.symbol}
-                      sub={hideBalance ? catFor(h.asset.symbol, h.asset.name) : undefined}
+                      sub={
+                        hideBalance
+                          ? catFor(h.asset.symbol, h.asset.name)
+                          : twinSymbols.has(h.asset.symbol) && h.venue
+                            ? `${qty} ${h.asset.symbol} · from ${PLATFORM_LABEL[h.venue]}`
+                            : undefined
+                      }
                       showSpark
                       onClick={() => go("asset", { symbol: h.asset.symbol, venue: h.venue })}
                       value={hideBalance ? DOTS : h.valueUsd !== undefined ? usd(h.valueUsd) : qty}
