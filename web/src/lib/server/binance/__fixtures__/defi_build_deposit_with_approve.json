@@ -1,0 +1,27 @@
+{
+  "_note": "Synthetic, not LIVE: docs/BINANCE-WEB3.md's DeFi section says dataList is 'typically [APPROVE, DEPOSIT]'; the one LIVE capture (defi_build_deposit.json) came back with just [DEPOSIT] because that wallet already had an allowance on the vUSDT market. This fixture pins the two-call shape so buildDeposit is tested against both orderings Binance can actually return.",
+  "dataList": [
+    {
+      "callDataType": "APPROVE",
+      "from": "0xF977814e90dA44bFA03b6295A0616a897441aceC",
+      "to": "0x55d398326f99059fF775485246999027B3197955",
+      "value": "0x0",
+      "data": "0x095ea7b3000000000000000000000000fd5840cd36d94d7229439859c0112a4185bc0255000000000000000000000000000000000000000000000053444835ec580000",
+      "gasLimit": "46000",
+      "gasPrice": "53613186",
+      "maxPriorityFeePerGas": "53613186",
+      "maxFeePerGas": "53613186"
+    },
+    {
+      "callDataType": "DEPOSIT",
+      "from": "0xF977814e90dA44bFA03b6295A0616a897441aceC",
+      "to": "0xfD5840Cd36d94D7229439859C0112a4185BC0255",
+      "value": "0x0",
+      "data": "0xa0712d6800000000000000000000000000000000000000000000000053444835ec580000",
+      "gasLimit": "279612",
+      "gasPrice": "53613186",
+      "maxPriorityFeePerGas": "53613186",
+      "maxFeePerGas": "53613186"
+    }
+  ]
+}

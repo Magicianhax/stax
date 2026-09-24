@@ -31,3 +31,29 @@ export function assertExecCallsAreSafe(chain: StaxChain, calls: ExecCall[]): Exe
   }
   return calls;
 }
+
+/**
+ * Venus's vUSDT market on BSC — the only DeFi contract Savings (wave 5b "money" stream) may call.
+ * Pinned from a LIVE Binance DeFi API discovery (docs/BINANCE-WEB3.md's DeFi section,
+ * 2026-09-25): `investmentDetail`'s `assetTokenList` and a build-deposit call's own `to` /
+ * `interactWith.address` all agree on this address for the USDT investment Savings uses.
+ */
+const VENUS_VUSDT_ADDRESS = "0xfD5840Cd36d94D7229439859C0112a4185BC0255" as const;
+
+/**
+ * `assertExecCallsAreSafe`'s counterpart for the DeFi deposit/redeem path: the same "nothing
+ * stands between an untrusted server response and a blind wallet signature" problem, checked
+ * against its OWN narrower list rather than folded into the trading allowlist above — a
+ * compromised swap-quote response must never be able to call Venus, and a compromised savings
+ * response must never be able to call the trading router, so the two lists stay separate even
+ * though the pattern is identical.
+ */
+export function assertSavingsCallsAreSafe(chain: StaxChain, calls: ExecCall[]): ExecCall[] {
+  const allowed = new Set<string>([chain.usdc.address.toLowerCase(), VENUS_VUSDT_ADDRESS.toLowerCase()]);
+  for (const call of calls) {
+    if (!allowed.has(call.to.toLowerCase())) {
+      throw new Error(`A savings call targeted ${call.to}, which isn't cash or the pinned Venus contract.`);
+    }
+  }
+  return calls;
+}

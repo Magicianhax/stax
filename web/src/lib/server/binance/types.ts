@@ -147,6 +147,26 @@ export interface TokenAsset {
   isRiskToken: boolean;
 }
 
+/**
+ * A DeFi API investment's detail (the fields Savings needs — see `investmentDetail` in `./defi`).
+ * `apyBps` is the machine number for math, `apyDisplay` is Binance's own formatted string
+ * ("3.38%"); both are shown, never re-derived from the other. LIVE-verified against Venus's BSC
+ * USDT market (docs/BINANCE-WEB3.md's DeFi section).
+ */
+export interface DefiInvestmentDetail {
+  investmentId: string;
+  defiProtocolId: string;
+  protocolName: string;
+  investmentName: string;
+  investType: string;
+  investable: boolean;
+  apyBps: number;
+  apyDisplay: string;
+  tvl: number;
+  /** The token Savings deposits/redeems; null on the rare row with no listed asset token. */
+  assetToken: { address: `0x${string}`; symbol: string } | null;
+}
+
 export interface BinanceWeb3 {
   rwaTokens(o?: { platformId?: RwaPlatform }): Promise<RwaToken[]>;
   /** At most 100 addresses per call. */

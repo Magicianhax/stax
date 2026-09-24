@@ -1,0 +1,51 @@
+{
+  "dataList": [
+    {
+      "callDataType": "DEPOSIT",
+      "from": "0xF977814e90dA44bFA03b6295A0616a897441aceC",
+      "to": "0xfD5840Cd36d94D7229439859C0112a4185BC0255",
+      "value": "0x0",
+      "data": "0xa0712d6800000000000000000000000000000000000000000000000053444835ec580000",
+      "gasLimit": "279612",
+      "gasPrice": "53613186",
+      "maxPriorityFeePerGas": "53613186",
+      "maxFeePerGas": "53613186"
+    }
+  ],
+  "preview": {
+    "success": true,
+    "balanceChange": [
+      {
+        "tokenType": "TOKEN",
+        "tokenSymbol": "USDT",
+        "tokenAddress": "0x55d398326f99059ff775485246999027b3197955",
+        "tokenDecimals": "18",
+        "amount": "-6",
+        "valueUsd": "5.997745243055148",
+        "tokenId": null
+      },
+      {
+        "tokenType": "TOKEN",
+        "tokenSymbol": "vUSDT",
+        "tokenAddress": "0xfd5840cd36d94d7229439859c0112a4185bc0255",
+        "tokenDecimals": "8",
+        "amount": "226.3005974",
+        "valueUsd": "5.99763870726881361412569691980554688",
+        "tokenId": null
+      }
+    ],
+    "feeAndContract": {
+      "estimatedNetworkFee": {
+        "amount": "0.000011890929925182",
+        "tokenSymbol": "BNB",
+        "valueUsd": "0.009285",
+        "rentFeeAmount": null,
+        "rentFeeValueUsd": null,
+        "priorityFeeAmount": null
+      },
+      "interactWith": { "address": "0xfd5840cd36d94d7229439859c0112a4185bc0255" }
+    },
+    "healthFactor": { "before": "0", "after": "0" },
+    "warnings": []
+  }
+}
