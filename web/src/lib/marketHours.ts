@@ -35,6 +35,8 @@
 //     Thu 2026-12-24 12:00 → Open, closes 1:00pm ET
 //     Fri 2027-12-24 12:00 → Closed (holiday, Christmas observed), opens Mon 9:30am ET
 
+import type { MarketState } from "./rwa";
+
 export type MarketLabel = "Open" | "Closed" | "Pre-market" | "After hours";
 export type ClosedReason = "weekend" | "holiday" | "after-hours";
 
@@ -263,6 +265,40 @@ export function formatNextClose(nextChange: Date): string {
 /** The right phrase for a status: "closes 4:00pm ET" while open, "opens Mon 9:30am ET" otherwise. */
 export function describeNextChange(s: MarketStatus, now: Date = new Date()): string {
   return s.open ? formatNextClose(s.nextChange) : formatNextOpen(s.nextChange, now);
+}
+
+// ── BSC RWA catalog support (docs/BINANCE-WEB3.md §2) ──
+//
+// bStock rows report no session at all (`marketStatus`/`nextOpenTime`/`nextCloseTime` are
+// always null), so the catalog falls back to Stax's own calendar instead of guessing from
+// `openState`. These two exports are that fallback: `usMarketState` reads finer than the
+// open/closed binary above (pre-market and after-hours split into their own states, which
+// `rwa.ts`'s `MarketState` already has room for), and `nextUsOpenMs` is the plain "opens at"
+// instant a disabled buy button needs. Both reuse the trading-day calendar above rather than
+// re-deriving weekends/holidays, so a BSC row and a Base row never disagree about which days
+// the NYSE is open.
+const PREMARKET_START_MIN = 4 * 60; // 04:00 ET
+const POSTMARKET_END_MIN = 20 * 60; // 20:00 ET
+
+/** Stax's finer-grained session label for `nowMs`, on the NYSE calendar above. */
+export function usMarketState(nowMs: number): MarketState {
+  const p = etParts(new Date(nowMs));
+  if (!isTradingDay(p.y, p.m, p.d)) return "closed";
+  const close = closeMinutes(p.y, p.m, p.d);
+  if (p.minutes < PREMARKET_START_MIN) return "overnight";
+  if (p.minutes < OPEN_MIN) return "premarket";
+  if (p.minutes < close) return "open";
+  if (p.minutes < POSTMARKET_END_MIN) return "postmarket";
+  return "overnight";
+}
+
+/** The next regular-session open (09:30 ET) at or after `nowMs`, as epoch ms. */
+export function nextUsOpenMs(nowMs: number): number {
+  const p = etParts(new Date(nowMs));
+  if (isTradingDay(p.y, p.m, p.d) && p.minutes < OPEN_MIN) {
+    return etInstant(p.y, p.m, p.d, OPEN_MIN).getTime();
+  }
+  return nextOpenAfter(p.y, p.m, p.d).getTime();
 }
 
 /** Plain-words reason for a closed market, for the explainer sheet. */
