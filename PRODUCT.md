@@ -67,8 +67,8 @@ crypto wallets have custody but no guidance. Stax pairs the two for someone who 
 
 ## Open product questions
 
-- Deploy `StaxExecutor` + `InferenceVerifier` on BSC mainnet to keep the on-chain check there
-  too? (On-chain mainnet deploy: human gate.)
-- Which BSC stablecoin is "cash": USDT or USDC?
-- Which tokenized-stock platforms to feature on BSC: bStocks, Ondo, xStocks, or all three?
-- Pursue the BNB Agent Studio special prize, or concentrate on Agentic Wallet?
+- Deploy `StaxExecutor` + `InferenceVerifier` on BSC mainnet: decided to build both paths and deploy
+  later (ADR-0005). The deploy itself is an on-chain write the human runs.
+- BSC cash is USDT (ADR-0006). No Stax fee on BSC during judging (ADR-0007).
+- BSC features bStock and Ondo; xStocks is not in the Binance API (ADR-0009).
+- No Agent Studio and no Agentic Wallet work (ADR-0010).

@@ -78,7 +78,7 @@ routes to four hops, and the fee wallet may need activating first (`40469 REFERR
 **Consequences:** Simpler demo routes. Revisit after 11 Oct 2026.
 
 ## ADR-0008 BNB Agent Studio is a core stream (2026-09-24)
-**Status:** accepted
+**Status:** superseded by ADR-0010
 **Context:** Agentic Wallet is interactive-only (Binance-app confirmation per session), so it cannot
 run unattended. BNB Agent Studio is the only Binance path that might sign unattended, and it carries
 its own $2,000 special prize. The human chose to pursue it hard rather than as an afterthought.
@@ -98,3 +98,15 @@ baskets to fit. xStocks is dropped, because it is not in the Binance Web3 API. B
 and Ondo, curated to the 40 dual-listed tickers plus a few Ondo-only megacaps. Gifts stay Base-only.
 **Consequences:** Small plans fail at planning rather than at execution. The cross-issuer price gap
 becomes a headline feature.
+
+## ADR-0010 Drop Agent Studio and Agentic Wallet; build on Stax's strengths (2026-09-24)
+**Status:** accepted
+**Context:** Reading the Studio skill showed that a Studio agent is a paid seller agent, that its free
+BNB trial lasts 48 hours (judging runs 12 to 23 Oct), that staying live needs the human's own AWS or
+Azure account, and that a paid x402 rail needs a separate Binance merchant application. Each is time
+taken from the core product before 11 Oct.
+**Decision:** No Agent Studio stream and no Agentic Wallet export. The entry is Stax on BSC: Vera's
+natural-language plans, baskets, Autopilot, no-seed-phrase onboarding and the on-chain plan check,
+plus the market-hours and price-gap layer that only the RWA Data API enables.
+**Consequences:** Both $2,000 special prizes are out of reach; the main placements are the target.
+All build effort goes to the product and to the developer-experience report.
