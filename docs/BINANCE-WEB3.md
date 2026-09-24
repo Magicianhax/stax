@@ -469,24 +469,68 @@ body error.
 Stax sends through ERC-4337 (Pimlico). It does not use `broadcast-transaction`, which takes an
 EOA-signed raw tx.
 
-### Wave 5 dry-run design (LIVE evidence reused, no new calls spent)
+### Wave 5 dry-run design (LIVE, 2026-09-24 18:32–18:33 UTC, 5 calls, key `WEB3_API_KEY`)
 
-`simulate`'s own request shape above is a single `evmTx` object, never a list — there is no
-bundle or batch parameter, and no state-override field. Combined with the §10 point 1 finding
-(a swap from an account that hasn't approved the router yet reverts on the first `transferFrom`
-before the output leg runs, discovered live against a real $6 USDT→NVDAB quote), simulating a
-first-time swap in isolation can only ever prove the allowance failure — never anything about
-the trade itself. `lib/server/dryRun.ts` resolves this by reading the account's on-chain
-allowance to the router first (a free RPC read, no Binance budget spent): only once it already
-covers the trade does it spend the one `simulate` call, otherwise it tells the user plainly that
-the first trade of a token can't be checked yet and skips — never reporting "passed" for a
-check that didn't run. No new live Binance calls were made to reach this design; it follows
-directly from the request schema above and the already-recorded §10 finding. The remaining
-open question — the exact shape of a `SUCCESS` simulate response for a real *swap* (as opposed
-to the `approve`-only fixture in `__fixtures__/simulate_response.json`, whose `balanceChanges`
-is empty) — is still open; `dryRunBscSwap` reads `balanceChanges` defensively (matches on the
-taker's own row, takes the magnitude of `change` regardless of sign) rather than assuming a
-particular sign convention.
+A review of the first version of this design demanded live evidence rather than a design
+reasoned from the request schema alone, so three questions were checked live with
+`scratchpad/bnb/dryrun-simulate-probe.mjs` + `dryrun-probe4-nocode-simple.mjs` (session
+scratchpad, not committed; every call read-only, no key value printed, no tx signed). Verbatim
+responses (addresses/timestamps trimmed):
+
+1. **Does `simulate` accept a list/bundle of `evmTx`?** POST with `evmTx` as a 2-element array:
+   `{"code":40001,"msg":"Invalid request body: malformed JSON or field type mismatch"}` (200,
+   1214ms). **No** — confirmed live, not just inferred from the documented single-object shape.
+2. **Does it accept a state-override field?** POST with a normal single `evmTx` plus a sibling
+   `stateOverride` key: `{"code":40001,"msg":"Parameter error"}` (200, 631ms). **No** — an extra
+   top-level field is rejected outright, not silently ignored, so there is no way to pre-fund or
+   pre-approve an account inside the simulation.
+3. **What happens when `to` has no deployed bytecode?** This is the load-bearing question for
+   the design below (an `executeBatch` call targets the user's *smart account*, which may not
+   be deployed yet). Two calls isolate it: the exact same well-formed `approve(...)` calldata,
+   byte-for-byte, sent once with `to` = a plain address with no code
+   (`0x1111111111111111111111111111111111111111`) and once with `to` = the real, deployed USDT
+   contract. No-code `to`: `{"code":40001,"msg":"Parameter error"}` (both the naive single-call
+   version and an `executeBatch`-wrapped version of it — same code, so this isn't specific to
+   the batch encoding). Real contract `to`: `{"code":0,"data":{"status":"SUCCESS","failReason":
+   "","balanceChanges":[],"allowanceChanges":[{"tokenAddress":"0x55d398…97955","owner":"0x1111…
+   1111","spender":"0xb44446…5fdda5","preAmount":"0","postAmount":"1000000000000000000"}]}}`
+   (200, ~1.2s). **Binance's simulator refuses a no-code `to` outright** — a clean, distinguishable
+   `40001` "Parameter error", never a misleading `SUCCESS` with empty effects. This is *better*
+   than the failure mode the design below originally guarded against (a false-positive
+   "checked" for an address that can't really be called yet); it still needs the same guard,
+   because checking `getCode` locally first is free and specific, while letting Binance reject
+   it spends a shared budget call to relearn something already knowable on-chain.
+
+**The design** (`lib/server/dryRun.ts`, `encodeSimpleAccountExecuteBatch`): the deeper problem
+this wave's review found is that simulating the swap *alone* almost never proves anything —
+every BSC approval Stax sends is exact-amount and single-use (`directCallsForLeg`, `useSwap`'s
+`aggregatorCalls`), so the account's on-chain allowance to the router is back to zero right
+after every trade, not just the first. The fix is to simulate the *whole* thing the user signs
+— `executeBatch([approve, swap])` — as one call `{ from: entryPoint07Address, to: <smart
+account>, data: <executeBatch calldata> }`. This mirrors ERC-4337 exactly:
+`EntryPoint.innerHandleOp` calls the account directly with the batch calldata, so from the
+account's point of view `msg.sender == the EntryPoint`, identical to a real send. The approve
+and the swap then run atomically inside that one simulated call, so this works regardless of
+the account's *current* allowance — first trade of a token or the hundredth — fixing the actual
+bug the review found (the old design skipped almost every real trade, and its skip reason ("first
+trade of this token") was false on repeat trades of the same token).
+
+The one genuine limit, confirmed by probe 3 above: an account that hasn't sent its first
+on-chain trade yet has no deployed bytecode, and Binance cannot (and — probe 2 confirms — has no
+override mechanism to) simulate a call to it. `dryRunBscSwap` calls `serverClient(chain).getCode`
+first (a free RPC read) and skips with an honest reason ("this check turns on after your
+wallet's very first trade sets it up on-chain") rather than spending a Binance call on a
+guaranteed rejection. **Not independently verified live**, because no BSC smart account has
+been deployed by Stax yet (see "Current state" in `AGENTS.md`): the exact `SUCCESS` response
+shape for a real deployed account's `executeBatch(approve, swap)` — in particular whether
+`balanceChanges` is populated the same way probe 3's non-batch `allowanceChanges` was. The
+existing `__fixtures__/simulate_response.json` (a real router's plain `approve`, empty
+`balanceChanges`) and `dryRunBscSwap`'s defensive read of `balanceChanges` (matches the taker's
+own row, takes the magnitude of `change` regardless of sign) are the same posture as before this
+wave: correct by construction against the documented shape, unverified against a real swap's
+`balanceChanges` sign/casing until the first funded, deployed-account trade (§10 point 1) confirms
+it. That first trade is also the one that will show whether an `executeBatch`-wrapped swap's
+`balanceChanges` differ at all from a bare swap's.
 
 ---
 

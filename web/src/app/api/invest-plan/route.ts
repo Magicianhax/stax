@@ -129,9 +129,14 @@ export async function POST(req: NextRequest) {
         // A Binance dry run per leg, right before these calls go back for signing. Each leg
         // is exactly [approve, swap] (directCallsForLeg), in the same order as
         // allocation.allocations, so pairLegCalls lines them back up with the ticker each one
-        // targets — never a Binance call for a leg whose account hasn't approved yet (the
-        // common case for a brand-new basket buy), so a typical first investment spends zero
-        // extra Binance calls here.
+        // targets. dryRunBscSwap simulates the whole [approve, swap] pair atomically (see its
+        // own comment), so it spends a Binance call for every leg once this account has sent
+        // its first on-chain trade — never zero calls just because a leg's own token hasn't
+        // been approved before. A brand-new account's very first-ever basket buy still spends
+        // zero (no deployed bytecode yet to simulate against); a multi-leg TOP-UP basket can
+        // spend up to one call per leg, sharing the same 5-per-window budget as everything
+        // else on this key — worth revisiting as one whole-basket simulate call if that budget
+        // ever gets tight (see openIssues in the dry-run stream's wave 5 report).
         const byTicker = new Map(catalog.tickers.map((t) => [t.ticker, t]));
         const pairs = pairLegCalls(calls);
         dryRuns = await Promise.all(

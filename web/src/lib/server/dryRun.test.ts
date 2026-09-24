@@ -1,29 +1,56 @@
 // dryRunBscSwap is the one place that decides whether a BSC trade gets an honest "Checked
 // with Binance" before the user signs it. The known obstacle (docs/BINANCE-WEB3.md §5, §10):
-// `/pre-transaction/simulate` takes ONE unsigned tx, no bundle/list and no state override, so
-// a swap from an account that hasn't approved the router yet reverts on the very first
-// `transferFrom` — before the output leg ever runs (§10, point 1, resolved live against a real
-// $6 USDT->NVDAB quote). Simulating that swap alone would only ever prove the allowance
-// failure, never the trade itself, so this file never sends it to Binance until the on-chain
-// allowance already covers the trade — otherwise it says so plainly and skips, and NEVER
-// reports "passed" for a check that didn't run. Binance itself is stubbed throughout; no key
-// is loaded and no network call is made in tests.
+// `/pre-transaction/simulate` takes ONE unsigned tx, no bundle/list and no state override
+// (both re-confirmed LIVE for wave 5 — see §5), and a swap from an account that hasn't
+// approved the router yet reverts on the very first `transferFrom` before the output leg ever
+// runs. Simulating the swap alone would therefore only ever prove the allowance failure for
+// almost every real trade, since every BSC approval here is exact-amount and single-use
+// (directCallsForLeg / useSwap's aggregatorCalls) — the allowance is back to zero right after
+// each trade. The fix: simulate what the user's smart account actually signs — the WHOLE
+// batch, `executeBatch([approve, swap])` — called from the EntryPoint, exactly as ERC-4337
+// delivers it on-chain (EntryPoint.innerHandleOp calls the account directly, so the account
+// sees msg.sender == the EntryPoint). The approve and the swap then run atomically in the same
+// call, so this works regardless of the account's CURRENT on-chain allowance — first trade of
+// a token or the hundredth. The one real limit (confirmed LIVE, §5): Binance's simulator
+// rejects a `to` address with no deployed bytecode outright (a clean 40001 "Parameter error",
+// not a misleading SUCCESS) — so a smart account that hasn't sent its first on-chain trade yet
+// (no code deployed) genuinely cannot be dry-run this way. `isAccountDeployed` catches that
+// for free (an RPC read, no Binance budget spent) before ever calling Binance, and the skip
+// reason says so honestly instead of blaming approval. Binance itself is stubbed throughout;
+// no key is loaded and no network call is made in tests.
 import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
-import { encodeFunctionData } from "viem";
+import { decodeFunctionData, encodeFunctionData } from "viem";
+import { entryPoint07Address } from "viem/account-abstraction";
 import { ERC20_ABI } from "@/lib/abis";
 import { getChain } from "@/lib/chains";
 import { usdToRaw } from "@/lib/units";
 import {
   decodeApproveAmount,
   dryRunBscSwap,
-  needsApprovalFirst,
+  encodeSimpleAccountExecuteBatch,
   pairLegCalls,
   parseReceivedAmount,
   plainFailReason,
 } from "./dryRun";
 import type { SimulateResult } from "./binance/types";
+
+/** Mirrors permissionless.js's SimpleSmartAccount v0.7 executeBatch ABI, for decoding in tests
+ *  only — production code never needs to decode it back. */
+const EXECUTE_BATCH_07_ABI = [
+  {
+    inputs: [
+      { internalType: "address[]", name: "dest", type: "address[]" },
+      { internalType: "uint256[]", name: "value", type: "uint256[]" },
+      { internalType: "bytes[]", name: "func", type: "bytes[]" },
+    ],
+    name: "executeBatch",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+] as const;
 
 const bsc = getChain("bsc");
 const ROUTER = bsc.routers.binance!;
@@ -53,15 +80,20 @@ const success: SimulateResult = {
   allowanceChanges: [],
 };
 
-describe("needsApprovalFirst", () => {
-  it("is true when the current allowance doesn't cover the trade", () => {
-    expect(needsApprovalFirst(BigInt(0), BigInt(100))).toBe(true);
-    expect(needsApprovalFirst(BigInt(50), BigInt(100))).toBe(true);
-  });
-
-  it("is false once the allowance already covers it", () => {
-    expect(needsApprovalFirst(BigInt(100), BigInt(100))).toBe(false);
-    expect(needsApprovalFirst(BigInt(200), BigInt(100))).toBe(false);
+describe("encodeSimpleAccountExecuteBatch", () => {
+  it("encodes calls a SimpleAccount (EntryPoint v0.7) executeBatch decodes back byte for byte", () => {
+    const calls = [
+      { to: TOKEN_OUT, data: "0xaaaa" as const },
+      { to: ROUTER, data: "0xbbbbbbbb" as const },
+    ];
+    const data = encodeSimpleAccountExecuteBatch(calls);
+    const decoded = decodeFunctionData({ abi: EXECUTE_BATCH_07_ABI, data });
+    expect(decoded.functionName).toBe("executeBatch");
+    const [dest, value, func] = decoded.args;
+    // viem returns EIP-55 checksummed addresses on decode; compare case-insensitively.
+    expect(dest.map((a) => a.toLowerCase())).toEqual([TOKEN_OUT.toLowerCase(), ROUTER.toLowerCase()]);
+    expect(value).toEqual([BigInt(0), BigInt(0)]);
+    expect(func).toEqual(["0xaaaa", "0xbbbbbbbb"]);
   });
 });
 
@@ -105,27 +137,37 @@ describe("plainFailReason", () => {
   });
 });
 
+const approveData = encodeFunctionData({ abi: ERC20_ABI, functionName: "approve", args: [ROUTER, AMOUNT_IN] });
+const expectedBatchData = encodeSimpleAccountExecuteBatch([
+  { to: bsc.usdc.address, data: approveData },
+  { to: ROUTER, data: "0xdeadbeef" },
+]);
+
 describe("dryRunBscSwap", () => {
-  it("skips — never 'passed' — when the account hasn't approved the router, and never calls Binance", async () => {
+  it("skips — never 'passed' — when the account has no deployed code yet, and never calls Binance", async () => {
     const simulate = vi.fn();
-    const result = await dryRunBscSwap(args(), { readAllowance: async () => BigInt(0), simulate });
+    const result = await dryRunBscSwap(args(), { isAccountDeployed: async () => false, simulate });
     expect(result.status).toBe("skipped");
-    expect(result.reason).toMatch(/approve/i);
+    expect(result.reason).toBeTruthy();
+    expect(result.reason).not.toMatch(/approve/i); // the account isn't deployed, not un-approved — say the true reason
     expect(simulate).not.toHaveBeenCalled();
   });
 
-  it("simulates and passes once the allowance already covers the trade", async () => {
+  it("simulates the whole [approve, swap] batch from the EntryPoint once the account is deployed, and passes", async () => {
     const simulate = vi.fn().mockResolvedValue(success);
-    const result = await dryRunBscSwap(args(), { readAllowance: async () => AMOUNT_IN, simulate });
+    const result = await dryRunBscSwap(args(), { isAccountDeployed: async () => true, simulate });
     expect(result.status).toBe("passed");
     expect(result.receiveRaw).toBe("340000000000000000");
     expect(result.token).toBe(TOKEN_OUT);
-    expect(simulate).toHaveBeenCalledWith({ from: TAKER, to: ROUTER, value: "0", data: "0xdeadbeef" });
+    // Simulated exactly as the EntryPoint delivers it on-chain: msg.sender == the EntryPoint,
+    // to == the smart account, calldata == the same executeBatch the user will sign — so this
+    // works whatever the account's CURRENT allowance is, unlike simulating the swap alone.
+    expect(simulate).toHaveBeenCalledWith({ from: entryPoint07Address, to: TAKER, value: "0", data: expectedBatchData });
   });
 
-  it("fails — and the caller must not send it — when Binance says the trade would revert", async () => {
+  it("fails — and the caller must not send it — when Binance says the batch would revert", async () => {
     const simulate = vi.fn().mockResolvedValue({ ...success, status: "FAILED", failReason: "execution reverted: TRANSFER_FAILED", balanceChanges: [] });
-    const result = await dryRunBscSwap(args(), { readAllowance: async () => AMOUNT_IN, simulate });
+    const result = await dryRunBscSwap(args(), { isAccountDeployed: async () => true, simulate });
     expect(result.status).toBe("failed");
     expect(result.reason).toBeTruthy();
     expect(result.reason).not.toMatch(/revert/i);
@@ -133,14 +175,14 @@ describe("dryRunBscSwap", () => {
 
   it("skips without blocking the trade when Binance can't be reached", async () => {
     const simulate = vi.fn().mockRejectedValue(new Error("timed out"));
-    const result = await dryRunBscSwap(args(), { readAllowance: async () => AMOUNT_IN, simulate });
+    const result = await dryRunBscSwap(args(), { isAccountDeployed: async () => true, simulate });
     expect(result.status).toBe("skipped");
   });
 
-  it("skips without blocking the trade when the on-chain allowance read itself fails", async () => {
+  it("skips without blocking the trade when the deployed-account check itself fails", async () => {
     const simulate = vi.fn();
     const result = await dryRunBscSwap(args(), {
-      readAllowance: async () => {
+      isAccountDeployed: async () => {
         throw new Error("rpc down");
       },
       simulate,
@@ -149,10 +191,20 @@ describe("dryRunBscSwap", () => {
     expect(simulate).not.toHaveBeenCalled();
   });
 
+  it("still says 'skipped', never 'passed', on the account's tenth trade if it somehow still isn't deployed", async () => {
+    // Regression guard for the bug this replaces: the OLD allowance-based skip reason said
+    // "First trade of this token" even on a user's tenth trade (every approval is exact-amount
+    // and single-use, so allowance is always 0 right after a trade). The new reason must never
+    // claim it's about approval or about this specific token.
+    const simulate = vi.fn();
+    const result = await dryRunBscSwap(args(), { isAccountDeployed: async () => false, simulate });
+    expect(result.reason).not.toMatch(/first trade of this token/i);
+  });
+
   it("stamps checkedAt with the time of the Binance call", async () => {
     const before = Date.now();
     const simulate = vi.fn().mockResolvedValue(success);
-    const result = await dryRunBscSwap(args(), { readAllowance: async () => AMOUNT_IN, simulate });
+    const result = await dryRunBscSwap(args(), { isAccountDeployed: async () => true, simulate });
     expect(result.checkedAt).toBeGreaterThanOrEqual(before);
   });
 });

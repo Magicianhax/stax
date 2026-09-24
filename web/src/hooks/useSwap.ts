@@ -143,8 +143,9 @@ async function aggregatorCalls(
   }
   if (q.amountIn !== p.amountIn) throw new Error("The swap amount changed. Please try again.");
   // Binance's own check on this exact trade (BSC only) is the final word when it ran and
-  // says the trade would revert — never sent in that case. A "skipped" check (no approval
-  // yet) or no check at all (every other chain) both fall through normally.
+  // says the trade would revert — never sent in that case. A "skipped" check (this wallet
+  // hasn't sent its first on-chain trade yet, so there's nothing deployed to simulate
+  // against) or no check at all (every other chain) both fall through normally.
   assertDryRunAllowsSend(q.dryRun);
   // Belt-and-suspenders for the twin-venue bug this guards against elsewhere (TradeScreen's
   // holding lookup, resolveVenueAddress): the approve below is built from OUR resolved

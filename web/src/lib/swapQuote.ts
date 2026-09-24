@@ -83,9 +83,10 @@ export function quoteErrorMessage(error: unknown): string | undefined {
 
 /**
  * Binance's own dry run is the final word only when it actually ran and said this exact trade
- * would revert. Called right before a swap is sent (useSwap's aggregatorCalls); "skipped" (no
- * approval yet — the common case for a first trade of a token) and "passed" both let it
- * through, and no dry run at all (any non-BSC chain) is a no-op.
+ * would revert. Called right before a swap is sent (useSwap's aggregatorCalls); "skipped" (this
+ * wallet hasn't sent its first on-chain trade yet, so Binance has no deployed contract to
+ * simulate against — see lib/server/dryRun.ts) and "passed" both let it through, and no dry run
+ * at all (any non-BSC chain) is a no-op.
  */
 export function assertDryRunAllowsSend(dryRun: DryRun | undefined): void {
   if (dryRun?.status !== "failed") return;
