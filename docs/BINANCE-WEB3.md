@@ -636,8 +636,30 @@ commands that the user's own agent runs. Do not claim Autopilot executes through
 
 ## 10. Open questions (resolve before relying on them)
 
-1. Does `/swap` calldata deliver output to `msg.sender` (the executor) or to
-   `userWalletAddress` / `tx.from`? Check once with `simulate` before building executor legs.
+1. ~~Does `/swap` calldata deliver output to `msg.sender` (the executor) or to
+   `userWalletAddress` / `tx.from`?~~ **RESOLVED (LIVE-calldata, 2026-09-24, Task 8).** Built a
+   real $6 USDT→NVDAB quote + swap for a public, USDT-holding BSC address (Binance hot wallet
+   `0xF977814e90dA44bFA03b6295A0616a897441aceC`), then `simulate`d it as that address: it
+   reverted with `"execution reverted: BEP20: transfer amount exceeds allowance"` — a revert on
+   the very first `transferFrom` that pulls USDT *in*, before the swap's output side ever runs,
+   so `simulate` alone can't observe the output leg. Fell back to inspecting `tx.data`: the
+   `userWalletAddress` used for the quote/swap **never appears anywhere in the calldata**, in
+   two independent builds for two different `userWalletAddress` values (the hot wallet above,
+   and PancakeSwap's router `0x10ED43C718714eb63d5aA57B78B54704E256024E`) — same pair, same
+   amount, different taker each time, zero byte-level dependence on the taker beyond the
+   cosmetic `tx.from` field the API echoes back. Binance's aggregator is a plain
+   call-and-forward router with no recipient parameter: **output goes to whoever calls it
+   (`msg.sender`), full stop — `userWalletAddress` only affects quoting/RFQ eligibility, never
+   delivery.** This is not a blocker for either path: on the direct path `msg.sender` is the
+   user's own smart account, so output lands correctly by construction. On the executor path,
+   `StaxExecutor.investWithAI` already calls `leg.router.call(leg.swapData)` itself (making the
+   executor `msg.sender`) and measures `IERC20(tokenOut).balanceOf(address(this))` before/after
+   to forward the *received* delta to the user (`StaxExecutor.sol` lines 110–117) — exactly the
+   pattern Binance's msg.sender-only delivery needs, with no code change required. `taker` in
+   `QuoteParams` is kept as the executor address (once deployed) or the smart account (direct
+   path) purely so `userWalletAddress` is always sent, per the RFQ-eligibility rule above.
+   Script: `resolve-recipient.mjs` / `compare-taker.mjs` (session scratchpad, not committed;
+   no key material in either file, no transaction signed or broadcast).
 2. Is `enableRfq=false` honoured on `/quote` and `/swap`? What routes USDT to AAPLon through
    Ondo RFQ rather than `SWAP`? Only `SWAP` was ever returned; RFQ was inferred from an error message.
 3. Rate-limit window length, whether limits are per endpoint, and the over-limit response
