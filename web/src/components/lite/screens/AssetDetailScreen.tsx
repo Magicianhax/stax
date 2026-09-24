@@ -241,11 +241,19 @@ export function AssetDetailScreen({
       : bsc && bscGate.status === "unavailable"
         ? "Couldn't check if the market is open."
         : bscBuyable === false
-          ? chosenVenueView?.state === "paused" && chosenVenueView.nextOpenMs === null
+          ? // Reviewer follow-up on design critique P1 #8/#14: `nextOpenMs` is never null on a
+            // real paused OR unsupported row (`rwaCatalog.ts`'s `buildVenue` always fills it in
+            // for any non-buyable venue), so this must branch on `state` alone — checking
+            // `nextOpenMs === null` too meant a mid-session pause never took this branch and
+            // instead read a reopen time nobody promised, and a ticker Binance flatly doesn't
+            // support would have read the same false "Closed · opens ..." line.
+            chosenVenueView?.state === "paused"
             ? `${chosenPlatformLabel ?? "The issuer"} has paused ${d.name} for now. Check back shortly.`
-            : chosenVenueView?.nextOpenMs != null
-              ? `Closed · ${formatOpensLocal(chosenVenueView.nextOpenMs, now)}`
-              : "Market closed right now — check back shortly."
+            : chosenVenueView?.state === "unsupported"
+              ? `${d.name} isn’t one Binance can trade on BNB Chain.`
+              : chosenVenueView?.nextOpenMs != null
+                ? `Closed · ${formatOpensLocal(chosenVenueView.nextOpenMs, now)}`
+                : "Market closed right now — check back shortly."
           : undefined;
   // Design critique P0 #2: Sell must be gated the same way Buy is — a twin holding sells through
   // its OWN issuer, so it's that venue's buyability that decides, not the ticker's default. Fails
@@ -308,10 +316,14 @@ export function AssetDetailScreen({
         {/* stock-market clock — only stocks have a market that closes. BSC leads with the
             CHOSEN venue's own state (a bStock pause isn't the same event as the NYSE closing)
             plus its on-chain-vs-reference gap, so the badge, the gap sentence and the price
-            above all describe the same issuer (design critique P0 #3 / P1 #5); the generic
-            NYSE calendar is the honest fallback while the catalog hasn't loaded (its "reference
-            price only moves in market hours" fact is exactly what a bStock row falls back to —
-            docs/BINANCE-WEB3.md §2). */}
+            above all describe the same issuer (design critique P0 #3 / P1 #5). Off BSC, the
+            generic NYSE calendar is the honest fallback while the catalog hasn't loaded (its
+            "reference price only moves in market hours" fact is exactly what a bStock row falls
+            back to — docs/BINANCE-WEB3.md §2). Reviewer follow-up on P0 #1: BSC must never fall
+            back to THAT pill instead — its ET-labelled "trades still go through, prices can
+            drift" line is also flatly wrong on BSC, where a closed quote is refused outright, not
+            filled at a drifted price. While `/api/rwa` is loading, erroring or simply missing
+            this ticker, BSC shows a neutral placeholder, not a false clock. */}
         {stock && (
           <div style={{ marginTop: 14 }}>
             {bsc && rwaTicker ? (
@@ -326,6 +338,10 @@ export function AssetDetailScreen({
                 )}
                 <PriceGap venue={chosenVenueView} />
               </div>
+            ) : bsc ? (
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink-3)" }}>
+                {bscGate.status === "unavailable" ? "Couldn't check the market." : "Checking market…"}
+              </span>
             ) : (
               <MarketStatus detail />
             )}

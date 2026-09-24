@@ -17,7 +17,7 @@ import { useState, type CSSProperties } from "react";
 import type { RwaPlatform } from "@/lib/chains";
 import type { VenueView } from "@/lib/rwa";
 import { usd } from "@/lib/format";
-import { gapWords, stateLabel } from "@/lib/plainCopy";
+import { gapWords, stateLabel, venuePickerExplainer } from "@/lib/plainCopy";
 import { MarketStatusBadge } from "./MarketStatusBadge";
 
 /** Display name for an issuer — shared with TradeScreen's "via bStock" / "via Ondo" line. */
@@ -43,6 +43,10 @@ export function VenuePicker({ venues, bestVenue, onSelect, style }: VenuePickerP
   const pickedLive = picked !== null && venues.some((v) => v.platform === picked && v.buyable);
   const shown = interactive && pickedLive ? picked : bestVenue;
   if (venues.length === 0) return null;
+  // Design critique P0 #4 reviewer follow-up: only earns its place when there's a second row to
+  // explain — AMZN has no twin, and a ticker whose twin `/tokens` doesn't list (AAPL/AAPLB)
+  // renders one row too, and both used to show "Two companies make a token..." under a single row.
+  const explainer = venuePickerExplainer(venues.length, bestVenue);
 
   return (
     <div style={style}>
@@ -134,10 +138,11 @@ export function VenuePicker({ venues, bestVenue, onSelect, style }: VenuePickerP
           );
         })}
       </div>
-      <p style={{ margin: "10px 2px 0", fontSize: 13, lineHeight: 1.5, color: "var(--ink-2)" }}>
-        Two companies make a token for this share. Stax picks the one that&apos;s open, with the
-        price closest to the real share. Tap to choose the other.
-      </p>
+      {explainer && (
+        <p style={{ margin: "10px 2px 0", fontSize: 13, lineHeight: 1.5, color: "var(--ink-2)" }}>
+          {explainer}
+        </p>
+      )}
     </div>
   );
 }

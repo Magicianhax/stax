@@ -100,6 +100,13 @@ export function TradeScreen({
   const rwaTicker = useRwaTicker(asset.symbol);
   const tradeVenueView = bsc ? rwaTicker?.venues.find((v) => v.platform === wantVenue) : undefined;
   if (bsc && tradeVenueView) shownPrice = tradeVenueView.tokenPrice;
+  // Design critique P0 #1 reviewer follow-up: swap-quote's 409 text ("NVDA is closed right now;
+  // it opens Mon 9:30am ET") is deliberately server-side and ET-labelled — it stays readable on
+  // its own (server logs, a caller with no client formatter). Once the RWA catalog has ALREADY
+  // told this screen the venue isn't buyable, the local-time closed line below is telling the
+  // same story in the viewer's own clock; showing the raw quote error underneath it too just
+  // repeated the fact in a second, worse-labelled clock right below the first.
+  const venueKnownClosed = bsc && Boolean(tradeVenueView) && !tradeVenueView!.buyable;
 
   const [side, setSide] = useState<"buy" | "sell">(initialSide);
   // The amount is the shared keypad state: one rule set, and the cash on hand is
@@ -120,8 +127,10 @@ export function TradeScreen({
     error: quoteError,
   } = useQuote(side === "buy" ? asset : null, n, bsc ? venue : undefined);
   // Review Focus #1 / #3: a refused quote (market closed, below the $6 minimum) must read as a
-  // real message, not a blank amount — swap-quote's own text, surfaced verbatim.
-  const quoteErrorText = quoteErrorMessage(quoteError);
+  // real message, not a blank amount — swap-quote's own text, surfaced verbatim. Except when the
+  // catalog already named this venue closed above (`venueKnownClosed`): that quote error is the
+  // same closed-market refusal, in a second, ET-labelled sentence right under the first.
+  const quoteErrorText = venueKnownClosed ? undefined : quoteErrorMessage(quoteError);
 
   // Sell side: share of the held position to sell. No default — "All" is a chip.
   const [sellPct, setSellPct] = useState(draft?.sellPct ?? 0);
@@ -133,7 +142,7 @@ export function TradeScreen({
     isFetching: sellFetching,
     error: sellQuoteError,
   } = useSellQuote(side === "sell" && sellable ? asset : null, side === "sell" ? sellRaw : BigInt(0), bsc ? venue : undefined);
-  const sellQuoteErrorText = quoteErrorMessage(sellQuoteError);
+  const sellQuoteErrorText = venueKnownClosed ? undefined : quoteErrorMessage(sellQuoteError);
 
   const over = side === "buy" && n > balance + 1e-6;
   // What the line under the amount says. `over` is a value that no longer fits
@@ -413,7 +422,16 @@ export function TradeScreen({
             nextOpenMs: tradeVenueView.nextOpenMs,
             platformLabel: venueLabel,
           })}
-          {tradeVenueView.nextOpenMs !== null ? ". You can buy or sell then." : ""}
+          {/* Reviewer follow-up on design critique P1 #8: `nextOpenMs` is never null for ANY
+              non-buyable row (rwaCatalog.ts's `buildVenue` always fills it in, even for a pause
+              or a ticker Binance doesn't support), so this used to promise "you can buy or sell
+              then" at a mid-session pause's next REGULAR open — a reopen time nobody promised,
+              and one Binance not supporting a ticker at all has no relationship to whatsoever.
+              Only a session-clock state (closed / premarket / postmarket / overnight) actually
+              resolves when that instant passes. */}
+          {tradeVenueView.state !== "paused" && tradeVenueView.state !== "unsupported" && tradeVenueView.nextOpenMs !== null
+            ? ". You can buy or sell then."
+            : ""}
         </div>
       ) : (
         closed &&

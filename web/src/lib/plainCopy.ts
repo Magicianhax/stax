@@ -3,6 +3,7 @@
 // every screen that needs it. Design critique P0 #3/#4, P1 #8, and the dry-run render decision.
 import { formatOpensLocal } from "./marketHours";
 import type { MarketState } from "./rwa";
+import type { RwaPlatform } from "./chains";
 import type { DryRun } from "./dryRun";
 
 /** Below this, the two prices round to the same cent often enough that a signed number just
@@ -47,11 +48,31 @@ export function stateLabel(params: {
   const { state, buyable, nextOpenMs, platformLabel, nowMs = Date.now() } = params;
   if (buyable) return "Open now";
   if (state === "unsupported") return "Can't be bought here";
-  if (state === "paused" && nextOpenMs === null) {
+  // A pause is a pause whatever `nextOpenMs` says: `rwaCatalog.ts`'s `buildVenue` always fills it
+  // in for a non-buyable venue (bStock's own calendar fallback, or Ondo's `nextOpenTime`), so a
+  // real paused row never carries `null` here — checking for it meant a mid-session pause read
+  // as "Closed · opens <tomorrow's regular open>", a reopen time nobody promised (reviewer
+  // follow-up on design critique P1 #8 / P2 #14).
+  if (state === "paused") {
     return platformLabel ? `Paused by ${platformLabel} for now` : "Paused for now";
   }
   if (nextOpenMs !== null) return `Closed · ${formatOpensLocal(nextOpenMs, nowMs)}`;
   return "Closed";
+}
+
+/**
+ * The "why two rows" line under VenuePicker's card (design critique P0 #4). Only earns its place
+ * when there actually are two venues to choose between — AMZN has no twin, and a ticker whose
+ * twin `/tokens` doesn't list (AAPL/AAPLB) renders one row too, and both used to show this
+ * explainer promising a second row that never renders. Also never claims Stax "picks the one
+ * that's open" when neither venue actually is.
+ */
+export function venuePickerExplainer(venueCount: number, bestVenue: RwaPlatform | null): string {
+  if (venueCount <= 1) return "";
+  if (bestVenue === null) {
+    return "Two companies make a token for this share, but neither is open right now. Tap to see the other one's price.";
+  }
+  return "Two companies make a token for this share. Stax picks the one that's open, with the price closest to the real share. Tap to choose the other.";
 }
 
 export type DryRunLine = { kind: "none" } | { kind: "quiet"; text: string } | { kind: "blocking"; text: string };

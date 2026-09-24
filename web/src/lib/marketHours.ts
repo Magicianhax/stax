@@ -324,6 +324,28 @@ export function nextUsOpenMs(nowMs: number): number {
   return nextOpenAfter(p.y, p.m, p.d).getTime();
 }
 
+/** What `usMarketClock` reports — a `stateLabel`-ready view of the NYSE calendar clock. */
+export interface UsMarketClock {
+  state: MarketState;
+  buyable: boolean;
+  nextOpenMs: number | null;
+}
+
+/**
+ * The one view of "is the US market open" for surfaces that describe the whole market rather
+ * than one venue — MarketScreen's header and AssetDetailScreen's fallback while a venue hasn't
+ * loaded yet. Before this, the header rendered `<MarketStatus />`, which speaks ET through its
+ * own `describeNextChange`, right above row badges already speaking local time through
+ * `stateLabel`/`formatOpensLocal` (design critique P0 #1) — two clocks answering the same
+ * question differently on one screen. Feeding this shape into `stateLabel` instead can only ever
+ * agree with a row's own badge, because both end in the same formatter.
+ */
+export function usMarketClock(nowMs: number): UsMarketClock {
+  const state = usMarketState(nowMs);
+  const buyable = state === "open";
+  return { state, buyable, nextOpenMs: buyable ? null : nextUsOpenMs(nowMs) };
+}
+
 /** Plain-words reason for a closed market, for the explainer sheet. */
 export function closedReasonText(s: MarketStatus): string {
   switch (s.reason) {

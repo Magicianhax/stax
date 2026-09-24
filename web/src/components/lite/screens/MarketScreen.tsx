@@ -8,7 +8,7 @@
 // with no liquid market yet are listed with a quiet "Coming soon" tag (the buy is
 // disabled on the asset page, with the reason). Searching or picking a category
 // flattens the groups into one list.
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Asset } from "@/lib/chains";
 import { useChain } from "@/lib/chains/active";
 import { displayFor, type AssetDisplay } from "@/lib/displayAssets";
@@ -17,12 +17,32 @@ import { useMarketSummary } from "@/hooks/useMarket";
 import { usePortfolio } from "@/hooks/useBalances";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { useRwa, primaryVenue } from "@/hooks/useRwa";
-import { useMarketStatus, Icon, AssetTile, Sparkline, SectionTitle, MarketStatus } from "@/components/design";
+import { Icon, AssetTile, Sparkline, SectionTitle, MarketStatus } from "@/components/design";
 import { MarketStatusBadge } from "@/components/lite/rwa/MarketStatusBadge";
 import { PriceGap } from "@/components/lite/rwa/PriceGap";
 import { Reveal } from "@/components/motion";
 import { usd, tokenQty } from "@/lib/format";
+import { usMarketClock, type UsMarketClock } from "@/lib/marketHours";
 import type { Holding } from "@/hooks/useBalances";
+
+const CLOCK_TICK_MS = 30_000;
+
+/**
+ * BSC's header clock — `usMarketClock` fed to the same `stateLabel` wording every row badge on
+ * this screen already uses, so the header and the rows can never disagree (design critique P0
+ * #1). Before this the header rendered `<MarketStatus />`, which speaks ET through its own
+ * `describeNextChange`. Hydration-safe the same way `useMarketStatus` is: null until mounted.
+ */
+function useBscMarketClock(): UsMarketClock | null {
+  const [clock, setClock] = useState<UsMarketClock | null>(null);
+  useEffect(() => {
+    const tick = () => setClock(usMarketClock(Date.now()));
+    tick();
+    const id = setInterval(tick, CLOCK_TICK_MS);
+    return () => clearInterval(id);
+  }, []);
+  return clock;
+}
 
 const CATS = ["All", "Big tech", "Funds", "Safer", "Crypto", "More"] as const;
 type Cat = (typeof CATS)[number];
@@ -79,10 +99,13 @@ export function MarketScreen({
   // live intraday history source yet, and a demo sparkline would be a lie about a real venue).
   const { data: rwa } = useRwa();
   const rwaByTicker = useMemo(() => new Map((rwa?.tickers ?? []).map((t) => [t.ticker, t])), [rwa]);
-  // Design critique P1 #9: the header's own clock (`MarketStatus` below) already says whether
-  // the US market is open — a row only needs its own badge when this venue's answer actually
-  // differs from that, so most rows during a normal trading day carry no badge at all.
-  const usMarketOpen = useMarketStatus()?.open;
+  // Design critique P1 #9: the header's own clock (the BSC header chip below, off BSC
+  // `<MarketStatus />`) already says whether the US market is open — a row only needs its own
+  // badge when this venue's answer actually differs from that, so most rows during a normal
+  // trading day carry no badge at all. `bscClock` is the SAME computation the header chip reads,
+  // so a row is never marked "different from the header" by two clocks quietly disagreeing.
+  const bscClock = useBscMarketClock();
+  const usMarketOpen = bscClock?.buyable;
 
   // Every asset on this chain with its display record; "coming" ones sink to the
   // bottom of their group (stable sort keeps the registry order otherwise).
@@ -226,7 +249,19 @@ export function MarketScreen({
       <div style={{ padding: "12px 22px 0", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
         <h1 className="serif" style={{ margin: 0, fontSize: 32, letterSpacing: "-.015em", flex: "none" }}>Market</h1>
         <div style={{ minWidth: 0, display: "flex", justifyContent: "flex-end" }}>
-          <MarketStatus />
+          {/* Design critique P0 #1: BSC reads the same local-time formatter every row badge
+              below uses (`stateLabel`/`formatOpensLocal`), never the NYSE `<MarketStatus />`
+              pill's ET-labelled clock — this screen used to show both at once. `nested` keeps it
+              a plain chip (no second sheet duplicating each row's own "what this means" sheet). */}
+          {chain.key === "bsc" ? (
+            bscClock ? (
+              <MarketStatusBadge state={bscClock.state} nextOpenMs={bscClock.nextOpenMs} buyable={bscClock.buyable} nested />
+            ) : (
+              <span aria-hidden style={{ display: "inline-block", height: 22 }} />
+            )
+          ) : (
+            <MarketStatus />
+          )}
         </div>
       </div>
       <div style={{ padding: "2px 22px 0", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>

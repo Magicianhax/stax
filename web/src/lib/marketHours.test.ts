@@ -2,7 +2,7 @@
 // no session at all (docs/BINANCE-WEB3.md §2). Times are built in America/New_York so the
 // tests don't depend on the machine's zone.
 import { describe, expect, it } from "vitest";
-import { usMarketState, nextUsOpenMs, formatOpensLocal } from "./marketHours";
+import { usMarketState, nextUsOpenMs, usMarketClock, formatOpensLocal } from "./marketHours";
 
 const ny = (iso: string) => new Date(new Date(iso + "-04:00").getTime()).getTime(); // EDT
 
@@ -28,6 +28,33 @@ describe("nextUsOpenMs", () => {
 
   it("rolls to the next trading day once today's open has passed", () => {
     expect(nextUsOpenMs(ny("2026-09-24T17:00:00"))).toBe(ny("2026-09-25T09:30:00"));
+  });
+});
+
+// usMarketClock — the ONE view of "is the US market open" that MarketScreen's header and
+// AssetDetailScreen's loading/error fallback both read (design critique P0 #1 follow-up): before
+// this, the header rendered `<MarketStatus />`, which speaks ET through `describeNextChange`,
+// on the very same screen as row badges that already speak local time via `stateLabel` — two
+// clocks, two answers. A component reading this pure view instead can only ever agree with the
+// row badges, because both end up in `stateLabel`/`formatOpensLocal`.
+describe("usMarketClock", () => {
+  it("is buyable with no next-open instant while the regular session is live", () => {
+    expect(usMarketClock(ny("2026-09-24T10:00:00"))).toEqual({ state: "open", buyable: true, nextOpenMs: null });
+  });
+
+  it("carries the next-open instant, not buyable, once the session has closed", () => {
+    const now = ny("2026-09-24T17:00:00");
+    expect(usMarketClock(now)).toEqual({ state: "postmarket", buyable: false, nextOpenMs: nextUsOpenMs(now) });
+  });
+
+  it("agrees with a row's own stateLabel wording, not a separate ET clock", () => {
+    // Same instant usMarketState/nextUsOpenMs already prove is "postmarket, opens tomorrow" above
+    // — asserting the shape here is what actually catches a future header regressing back to
+    // `<MarketStatus />`'s ET-labelled `describeNextChange`.
+    const now = ny("2026-09-24T17:00:00");
+    const clock = usMarketClock(now);
+    expect(clock.state).toBe("postmarket");
+    expect(clock.nextOpenMs).not.toBeNull();
   });
 });
 

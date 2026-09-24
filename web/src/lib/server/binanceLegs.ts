@@ -94,12 +94,19 @@ function wrap(symbol: string, err: unknown): never {
  * what Binance actually guarantees.
  */
 export async function buildBinanceLeg(a: BinanceLegArgs): Promise<BinanceLeg> {
-  // NaN (an unpriceable sell) compares false against everything, so it is refused explicitly.
-  if (!Number.isFinite(a.usdValue) || a.usdValue < BSC_MIN_LEG_USD) {
-    // Design critique P1 #11: name the next step, not just the rule that was broken.
-    throw new BinanceLegRefusal(
-      `${a.symbol}: the smallest buy is $${BSC_MIN_LEG_USD}. Enter $${BSC_MIN_LEG_USD} or more.`,
-    );
+  // NaN happens only when a sell's stock side couldn't be priced against the cached catalog —
+  // a different problem from the $6 floor below, so it gets its own words instead of also
+  // claiming the trade was "too small" when its size was never known.
+  if (!Number.isFinite(a.usdValue)) {
+    throw new BinanceLegRefusal("Couldn't price this trade right now. Try again in a moment.");
+  }
+  if (a.usdValue < BSC_MIN_LEG_USD) {
+    // Design critique P1 #11: name the next step, not just the rule that was broken. Reviewer
+    // follow-up: side-neutral wording, and no leading "NVDA:" — buildBinanceLeg prices both buy
+    // and sell legs, and "the smallest buy is $6" told someone selling a $5.70 position (bought
+    // at the $6 floor, dipped since, no amount field on the Sell tab to "enter more" into) that
+    // they needed to make a bigger BUY.
+    throw new BinanceLegRefusal(`The smallest trade is $${BSC_MIN_LEG_USD}. Enter $${BSC_MIN_LEG_USD} or more.`);
   }
   const router = a.chain.routers.binance;
   if (!router) throw new Error(`Binance aggregator isn't configured on ${a.chain.name}.`);

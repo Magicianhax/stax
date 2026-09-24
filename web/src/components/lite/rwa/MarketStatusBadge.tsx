@@ -133,7 +133,22 @@ export function MarketStatusBadge({ state, nextOpenMs, buyable, platform, nested
               style={{ width: 9, height: 9, borderRadius: "50%", flex: "none", background: live ? "var(--pos)" : "var(--ink-3)" }}
             />
             <div style={{ fontSize: 14.5, lineHeight: 1.45, color: "var(--ink-2)" }}>
-              <b style={{ color: "var(--ink)" }}>{platformLabel ?? "This issuer"}</b> is {text.toLowerCase()}.
+              {/* Reviewer follow-up on design critique P1 #8: `stateLabel`'s paused/unsupported
+                  words are already full clauses ("Paused by Ondo for now", "Can't be bought
+                  here"), not adjectives — wrapping them in "<Platform> is <text>" read as "Ondo is
+                  paused by ondo for now" (redundant AND lowercased) or "Ondo is can't be bought
+                  here" (not a sentence). Only the session-clock states (open/closed/etc.) still
+                  fit that "is <state>" shape. */}
+              {state === "paused" || state === "unsupported" ? (
+                <>
+                  <b style={{ color: "var(--ink)" }}>{platformLabel ?? "This issuer"}</b>{" "}
+                  {state === "paused" ? "has paused this stock for now." : "can't trade this share."}
+                </>
+              ) : (
+                <>
+                  <b style={{ color: "var(--ink)" }}>{platformLabel ?? "This issuer"}</b> is {text.toLowerCase()}.
+                </>
+              )}
             </div>
           </div>
           <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.55, color: "var(--ink-2)" }}>
