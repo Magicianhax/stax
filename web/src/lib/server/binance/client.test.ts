@@ -70,4 +70,44 @@ describe("web3Request", () => {
     const err = (await web3Request("GET", "/x").catch((e: unknown) => e)) as Error;
     expect(String(err.message)).not.toMatch(/KEY_SENTINEL|SECRET_SENTINEL/);
   });
+
+  it("re-signs with a fresh timestamp on a retried attempt, not the one built before the queue wait", async () => {
+    vi.stubEnv("WEB3_API_KEY", "k");
+    vi.stubEnv("WEB3_SECRET_KEY", "s");
+    const fetchMock = stubFetch([
+      { status: 429, json: { code: 429, msg: "Too many requests", data: null } },
+      { status: 200, json: { code: 0, msg: "success", data: { ok: true } } },
+    ]);
+    const { web3Request } = await import("./client");
+    await web3Request("GET", "/x");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const firstTimestamp = fetchMock.mock.calls[0][1].headers["X-OC-TIMESTAMP"];
+    const retryTimestamp = fetchMock.mock.calls[1][1].headers["X-OC-TIMESTAMP"];
+    // The retry runs after the rate limiter's backoff sleep, so a timestamp built once before
+    // the queue and reused on every attempt would go stale past X-OC-RECV-WINDOW; each attempt
+    // must carry its own signature and its own timestamp taken when it is actually sent.
+    expect(retryTimestamp).not.toBe(firstTimestamp);
+    const retrySign = fetchMock.mock.calls[1][1].headers["X-OC-SIGN"];
+    const firstSign = fetchMock.mock.calls[0][1].headers["X-OC-SIGN"];
+    expect(retrySign).not.toBe(firstSign);
+  });
+
+  it("sends every call with an abort signal, so a hung upstream response cannot wedge the queue", async () => {
+    vi.stubEnv("WEB3_API_KEY", "k");
+    vi.stubEnv("WEB3_SECRET_KEY", "s");
+    const fetchMock = stubFetch([{ status: 200, json: { code: 0, msg: "success", data: {} } }]);
+    const { web3Request } = await import("./client");
+    await web3Request("GET", "/x");
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("turns an aborted (timed-out) request into a BinanceWeb3Error instead of an unhandled rejection", async () => {
+    vi.stubEnv("WEB3_API_KEY", "k");
+    vi.stubEnv("WEB3_SECRET_KEY", "s");
+    const fetchMock = vi.fn().mockRejectedValueOnce(new DOMException("This operation was aborted", "TimeoutError"));
+    vi.stubGlobal("fetch", fetchMock);
+    const { web3Request } = await import("./client");
+    await expect(web3Request("GET", "/x")).rejects.toMatchObject({ name: "BinanceWeb3Error" });
+  });
 });

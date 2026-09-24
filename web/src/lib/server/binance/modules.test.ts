@@ -28,7 +28,7 @@ describe("rwaTokens", () => {
     mockWeb3Request.mockResolvedValueOnce(rwaTokensFixture);
     const { rwaTokens } = await import("./rwa");
     const rows = await rwaTokens();
-    expect(rows).toHaveLength(12);
+    expect(rows).toHaveLength(14);
     const nvdaOndo = rows.find((r) => r.underlyingTicker === "NVDA" && r.platformId === "ondo");
     expect(nvdaOndo?.statusInfo).toEqual({
       openState: true,
@@ -44,6 +44,24 @@ describe("rwaTokens", () => {
     expect(paused?.statusInfo.openState).toBe(false);
     const unsupported = rows.find((r) => r.statusInfo.reasonCode === "UNSUPPORTED");
     expect(unsupported).toBeDefined();
+  });
+
+  it("still returns a row whose marketCap is null on the wire, as 0 rather than dropping it", async () => {
+    mockWeb3Request.mockResolvedValueOnce(rwaTokensFixture);
+    const { rwaTokens } = await import("./rwa");
+    const rows = await rwaTokens();
+    const nullMarketCap = rows.find((r) => r.tokenSymbol === "INTWB");
+    expect(nullMarketCap).toBeDefined();
+    expect(nullMarketCap?.marketCap).toBe(0);
+  });
+
+  it("still returns a row whose underlyingName is null on the wire, falling back to the ticker", async () => {
+    mockWeb3Request.mockResolvedValueOnce(rwaTokensFixture);
+    const { rwaTokens } = await import("./rwa");
+    const rows = await rwaTokens();
+    const nullUnderlyingName = rows.find((r) => r.tokenSymbol === "HYGWon");
+    expect(nullUnderlyingName).toBeDefined();
+    expect(nullUnderlyingName?.underlyingName).toBe(nullUnderlyingName?.underlyingTicker);
   });
 });
 

@@ -298,5 +298,55 @@
     "referencePrice": "273.5298706768672",
     "volume24H": "92250816.60904361",
     "marketCap": "14465827908"
+  },
+  {
+    "binanceChainId": "56",
+    "tokenContractAddress": "0x1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",
+    "platformId": "bstock",
+    "assetType": 1,
+    "tokenName": "Intuit (bStocks)",
+    "tokenSymbol": "INTWB",
+    "tokenLogoUrl": "https://onchainos.bnbstatic.com/images/web3-data/public/token/logos/d1e2f3a4b5c647d8e9f0a1b2c3d4e5f6.png",
+    "decimals": "18",
+    "underlyingTicker": "INTW",
+    "underlyingName": "Intuit Inc.",
+    "tokenToShareRatio": "1.000312445566778899",
+    "statusInfo": {
+      "openState": true,
+      "marketStatus": null,
+      "reasonCode": "TRADING",
+      "reasonMsg": null,
+      "nextOpenTime": null,
+      "nextCloseTime": null
+    },
+    "tokenPrice": "612.4400000000001",
+    "referencePrice": "612.11",
+    "volume24H": "1847213.55",
+    "marketCap": null
+  },
+  {
+    "binanceChainId": "56",
+    "tokenContractAddress": "0x9f8e7d6c5b4a392817263544f5e6d7c8b9a0f1e2",
+    "platformId": "ondo",
+    "assetType": 1,
+    "tokenName": "HYGW (Ondo Tokenized)",
+    "tokenSymbol": "HYGWon",
+    "tokenLogoUrl": "https://onchainos.bnbstatic.com/images/web3-data/public/token/logos/a1b2c3d4e5f647d8e9f0a1b2c3d4e5f6.png",
+    "decimals": "18",
+    "underlyingTicker": "HYGW",
+    "underlyingName": null,
+    "tokenToShareRatio": "1.00011122233344455",
+    "statusInfo": {
+      "openState": true,
+      "marketStatus": "premarket",
+      "reasonCode": "TRADING",
+      "reasonMsg": null,
+      "nextOpenTime": 1790256660000,
+      "nextCloseTime": 1790256540000
+    },
+    "tokenPrice": "78.2233440000000011",
+    "referencePrice": "78.1",
+    "volume24H": "532910.4",
+    "marketCap": "412500000"
   }
 ]

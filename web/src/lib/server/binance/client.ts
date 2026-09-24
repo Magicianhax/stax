@@ -22,12 +22,20 @@ export function signRequest(secret: string, timestamp: string, method: string, r
   return createHmac("sha256", secret).update(timestamp + method + requestPath + body, "utf8").digest("base64");
 }
 
+/** Every call gets this long on the wire before it counts as hung; see docs/BINANCE-WEB3.md's
+ * recorded slow-upstream failure (50000 after 4.2s). One process-wide queue means one hung
+ * response would otherwise stall every quote, catalog read and basket leg behind it. */
+const REQUEST_TIMEOUT_MS = 10_000;
+
 /**
  * Signs and sends one Binance Web3 call. Env vars are read here, not at module load, so a
  * request always uses whatever WEB3_API_KEY/WEB3_SECRET_KEY are current — real ones in
  * production, stubbed ones in a test. Every fetch goes through `limited()` so a basket of legs
  * never outruns the 5-per-window budget and a 429 backs off in place instead of surfacing as a
- * half-executed leg.
+ * half-executed leg. The timestamp and signature are built inside the closure `limited()` calls,
+ * not before it, so a retry that only runs once the queue and the backoff sleep are done is
+ * signed for the moment it actually goes out — a timestamp taken up front would still be the one
+ * replayed on a second or third attempt, and by then it can already be past the recv window.
  */
 export async function web3Request<T>(
   method: "GET" | "POST",
@@ -44,22 +52,31 @@ export async function web3Request<T>(
   const q = qs.toString();
   const requestPath = `${PREFIX}${path}${q ? `?${q}` : ""}`;
   const bodyStr = body === undefined ? "" : JSON.stringify(body);
-  const timestamp = new Date().toISOString();
-  const sign = signRequest(secretKey, timestamp, method, requestPath, bodyStr);
 
-  const res = await limited(() =>
-    fetch(ORIGIN + requestPath, {
-      method,
-      headers: {
-        "Content-Type": "application/json",
-        "X-OC-APIKEY": apiKey,
-        "X-OC-TIMESTAMP": timestamp,
-        "X-OC-SIGN": sign,
-        "X-OC-RECV-WINDOW": "60000",
-      },
-      body: bodyStr || undefined,
-    }),
-  );
+  let res: Response;
+  try {
+    res = await limited(() => {
+      const timestamp = new Date().toISOString();
+      const sign = signRequest(secretKey, timestamp, method, requestPath, bodyStr);
+      return fetch(ORIGIN + requestPath, {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          "X-OC-APIKEY": apiKey,
+          "X-OC-TIMESTAMP": timestamp,
+          "X-OC-SIGN": sign,
+          "X-OC-RECV-WINDOW": "60000",
+        },
+        body: bodyStr || undefined,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+    });
+  } catch (err) {
+    if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
+      throw new BinanceWeb3Error(-1, `request timed out after ${REQUEST_TIMEOUT_MS}ms`, 0);
+    }
+    throw err;
+  }
 
   const json = (await res.json()) as { code: number; msg: string; data: T; success?: boolean };
   // Business failures arrive as HTTP 200 with code != 0, and the one signature failure seen

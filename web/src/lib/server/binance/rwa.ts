@@ -31,13 +31,18 @@ const wireRwaToken = z.object({
   tokenLogoUrl: z.string(),
   decimals: z.string(),
   underlyingTicker: z.string(),
-  underlyingName: z.string(),
+  // Live catalog rows can carry either as null (seen on bstock rows like INTWB, KORUB, MVLLB,
+  // MUUB, SNXXB for marketCap, and on Ondo rows like HYGWon, SECUon, SYSBon for underlyingName) —
+  // rejecting the whole ~500-row array over a handful of incomplete display fields would leave
+  // every BSC screen with no stocks at all, so these two are nullable at the wire and given a
+  // fallback below rather than failing the batch.
+  underlyingName: z.string().nullable(),
   tokenToShareRatio: z.string(),
   statusInfo: wireStatusInfo,
   tokenPrice: z.string(),
   referencePrice: z.string(),
   volume24H: z.string(),
-  marketCap: z.string(),
+  marketCap: z.string().nullable(),
 });
 
 function parseRwaToken(row: z.infer<typeof wireRwaToken>): RwaToken {
@@ -51,7 +56,9 @@ function parseRwaToken(row: z.infer<typeof wireRwaToken>): RwaToken {
     tokenLogoUrl: row.tokenLogoUrl,
     decimals: Number(row.decimals),
     underlyingTicker: row.underlyingTicker,
-    underlyingName: row.underlyingName,
+    // Fall back to the ticker so RwaToken.underlyingName can stay a plain string; every caller
+    // that displays a name still gets something legible instead of "null".
+    underlyingName: row.underlyingName ?? row.underlyingTicker,
     tokenToShareRatio: Number(row.tokenToShareRatio),
     statusInfo: {
       openState: row.statusInfo.openState,
@@ -67,7 +74,9 @@ function parseRwaToken(row: z.infer<typeof wireRwaToken>): RwaToken {
     tokenPrice: Number(row.tokenPrice),
     referencePrice: Number(row.referencePrice),
     volume24H: Number(row.volume24H),
-    marketCap: Number(row.marketCap),
+    // 0 rather than NaN: a missing market cap is display-only and must not poison a sort or a
+    // sum anywhere downstream the way NaN would.
+    marketCap: row.marketCap === null ? 0 : Number(row.marketCap),
   };
 }
 
