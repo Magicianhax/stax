@@ -29,7 +29,7 @@ import { AAVE_POOL_ABI, AGNI_ROUTER_ABI, ERC20_ABI, FLUXION_ROUTER_ABI, UNISWAP_
 import { isRoutable, reverseRoute, type Asset, type RouteHop, type StaxChain } from "@/lib/chains";
 import { useChain } from "@/lib/chains/active";
 import { encodeV3Path, singleHopSqrtLimit } from "@/lib/swapRouting";
-import { fetchSwapQuote, usesAggregator } from "@/lib/swapQuote";
+import { aggregatorRouterFor, fetchSwapQuote, usesAggregator } from "@/lib/swapQuote";
 import { feeOf, STAX_TREASURY } from "@/lib/fees";
 import { usdToRaw } from "@/lib/units";
 
@@ -106,17 +106,19 @@ function singleHopSwapCall(
 }
 
 /**
- * Aggregator swap: [ approve(kyberRouter, amountIn), router.swap(data) ]. The calldata is
- * built server-side for sender = recipient = `account` and is only good for ~10s, so this
- * runs immediately before sendSponsoredCalls. The router must be the one the chain config
- * (and the executor whitelist) names — anything else is refused.
+ * Aggregator swap: [ approve(router, amountIn), router.swap(data) ]. `asset.via` picks the
+ * router (KyberSwap on Base, the Binance Web3 aggregator on BSC — `aggregatorRouterFor`). The
+ * calldata is built server-side for sender = recipient = `account` and is only good for ~10s,
+ * so this runs immediately before sendSponsoredCalls. The returned router must match the one
+ * the chain config (and the executor whitelist, once deployed) names — anything else is
+ * refused, mirroring `assertWhitelistedRouter` server-side.
  */
 async function aggregatorCalls(
   chain: StaxChain,
-  p: { symbol: string; side: "buy" | "sell"; tokenIn: `0x${string}`; amountIn: bigint; account: `0x${string}`; slippageBps: number },
+  p: { asset: Asset; side: "buy" | "sell"; tokenIn: `0x${string}`; amountIn: bigint; account: `0x${string}`; slippageBps: number },
 ): Promise<{ calls: Call[]; minOut: bigint }> {
   const q = await fetchSwapQuote({
-    symbol: p.symbol,
+    symbol: p.asset.symbol,
     side: p.side,
     amountIn: p.amountIn,
     sender: p.account,
@@ -124,17 +126,17 @@ async function aggregatorCalls(
     slippageBps: p.slippageBps,
     build: true,
   });
-  const router = chain.routers.kyber!;
-  if (q.router.toLowerCase() !== router.toLowerCase() || !q.data) {
+  const router = aggregatorRouterFor(chain, p.asset);
+  if (!router || q.router.toLowerCase() !== router.toLowerCase() || !q.data) {
     throw new Error("The swap route didn't match this network. Please try again.");
   }
   if (q.amountIn !== p.amountIn) throw new Error("The swap amount changed. Please try again.");
-  // Reset the allowance after the swap (mirrors the executor) so a partially consumed
-  // approval never lingers on the public router.
-  return {
-    calls: [approve(p.tokenIn, router, p.amountIn), { to: router, data: q.data }, approve(p.tokenIn, router, BigInt(0))],
-    minOut: q.minOut,
-  };
+  // Kyber: reset the allowance to 0 after the swap (mirrors the executor) so a partially
+  // consumed approval never lingers on the public router. Binance: the approve is already
+  // exact-amount and single-use, and its router expects no such reset — skip the third call.
+  const calls = [approve(p.tokenIn, router, p.amountIn), { to: router, data: q.data }];
+  if (router.toLowerCase() === chain.routers.kyber?.toLowerCase()) calls.push(approve(p.tokenIn, router, BigInt(0)));
+  return { calls, minOut: q.minOut };
 }
 
 export interface SwapResult {
@@ -199,7 +201,7 @@ export function useSwap() {
         // Platform fee skimmed to the treasury (gasless, batched below); the rest
         // is what we actually swap. expectedOutRaw was quoted for the gross amount,
         // so scale it down to the net before deriving the slippage floor.
-        const feeRaw = feeOf(amountIn);
+        const feeRaw = feeOf(amountIn, chain.key);
         const netIn = amountIn - feeRaw;
         const expectedNet = (expectedOutRaw * netIn) / amountIn;
         const minOut = (expectedNet * (BPS - BigInt(slippageBps))) / BPS;
@@ -220,7 +222,7 @@ export function useSwap() {
           // Kyber builds the swap for the NET amount; its minReturn + our quote floor both
           // derive from the user's slippage pick. Fee transfer is prepended below as usual.
           const agg = await aggregatorCalls(chain, {
-            symbol: asset.symbol,
+            asset,
             side: "buy",
             tokenIn: usdc,
             amountIn: netIn,
@@ -329,7 +331,7 @@ export function useSwap() {
           ];
         } else if (aggregator) {
           const agg = await aggregatorCalls(chain, {
-            symbol: asset.symbol,
+            asset,
             side: "sell",
             tokenIn: asset.address!,
             amountIn,

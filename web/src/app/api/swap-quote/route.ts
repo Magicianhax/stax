@@ -1,25 +1,31 @@
-// POST /api/swap-quote — KyberSwap aggregator quote (and optionally calldata) for the Pro
-// manual buy/sell panel on aggregator chains (Base).
+// POST /api/swap-quote — aggregator quote (and optionally calldata) for the Pro manual
+// buy/sell panel: KyberSwap on Base, the Binance Web3 DEX aggregator on BSC.
 //
 //   body     { symbol, side: "buy" | "sell", amountIn: string (raw units of tokenIn),
 //              sender, recipient, slippageBps?: number (default 100), build?: boolean }
-//   buy      USDC -> asset      sell  asset -> USDC
+//   buy      cash -> asset      sell  asset -> cash
 //   response { router, tokenIn, tokenOut, amountIn, amountOut, minOut, data?, expiresAt }
 //            amounts are raw-unit decimal strings; `data` (router calldata) only when build=true;
-//            `expiresAt` is unix ms — Kyber routes are good for ~10s, so the client fetches with
+//            `expiresAt` is unix ms — routes are good for ~10s, so the client fetches with
 //            build=true immediately before sending the UserOp.
-//   errors   400 unknown / coming / non-routable symbol or bad body · 404 no route · 502 Kyber down
+//   errors   400 unknown / coming / non-routable symbol, sub-$6 BSC leg, or bad body ·
+//            404 no Kyber route · 409 BSC token isn't buyable right now (Review Focus #1) ·
+//            502 aggregator down
 //
-// The client's sponsored UserOp is [ fee → treasury (buys), ERC20.approve(router, amountIn),
-// { to: router, data } ]. `sender` = `recipient` = the user's smart account, so the router pulls
-// tokenIn from the account and delivers tokenOut back to it. Stax's platform fee stays the
-// existing treasury transfer — Kyber's extraFee is never used.
+// The client's sponsored UserOp is [ fee → treasury (buys, Base/Mantle only — ADR-0007 makes
+// BSC fee-free), ERC20.approve(router, amountIn), { to: router, data } ]. `sender` = `recipient`
+// = the user's smart account, so the router pulls tokenIn from the account and delivers tokenOut
+// back to it. On BSC that "delivers back to it" is Binance's own msg.sender-only behaviour
+// (docs/BINANCE-WEB3.md §10) rather than an explicit recipient argument — either way the account
+// that calls the router is the one that receives the output.
 import type { NextRequest } from "next/server";
 import { isAddress } from "viem";
 import { z } from "zod";
 import { assetBySymbol, isRoutable } from "@/lib/chains";
 import { chainFromRequest } from "@/lib/server/chain";
 import { KyberError, KyberNoRoute, kyberBuild, kyberRoute } from "@/lib/server/kyber";
+import { BinanceLegError, bscLegUsdValue, buildBinanceLeg, checkBscBuyable } from "@/lib/server/binanceLegs";
+import { getBinanceWeb3 } from "@/lib/server/binance";
 import { requireApproved } from "@/lib/server/admin";
 import { verifyRequest } from "@/lib/server/privyAuth";
 import { rateLimit } from "@/lib/server/rateLimit";
@@ -73,7 +79,9 @@ export async function POST(req: NextRequest) {
   if (!limit.ok) return tooManyRequests(limit.retryAfter);
 
   const chain = chainFromRequest(req);
-  if (!chain.routers.kyber) return badRequest(`Aggregator quotes are not available on ${chain.name}.`);
+  if (!chain.routers.kyber && !chain.routers.binance) {
+    return badRequest(`Aggregator quotes are not available on ${chain.name}.`);
+  }
 
   let body: z.infer<typeof SwapQuoteRequestSchema>;
   try {
@@ -111,6 +119,53 @@ export async function POST(req: NextRequest) {
   } else if (!warnedNoAccount.has(user.userId)) {
     warnedNoAccount.add(user.userId);
     console.warn(`[swap-quote] no smart_accounts row for user ${user.userId} on ${chain.key}; sender unverified`);
+  }
+
+  const binanceVenue = Boolean(chain.routers.binance && asset.via === "binance");
+
+  if (binanceVenue) {
+    // Review Focus #1: refuse before ever asking Binance for a quote when the issuer isn't
+    // trading this token right now (fails closed if the catalog doesn't even list it).
+    let tokens: Awaited<ReturnType<ReturnType<typeof getBinanceWeb3>["rwaTokens"]>>;
+    try {
+      tokens = await getBinanceWeb3().rwaTokens();
+    } catch (err) {
+      return serverError("swap-quote", err);
+    }
+    const gate = checkBscBuyable(tokens, asset.address!, asset.symbol, Date.now());
+    if (!gate.ok) return jsonError(409, gate.message);
+    const usdValue = bscLegUsdValue(body.side, chain, amountIn, asset, gate.row);
+
+    try {
+      const leg = await buildBinanceLeg({
+        chain,
+        symbol: asset.symbol,
+        tokenIn,
+        tokenOut,
+        amountIn,
+        taker: sender,
+        slippageBps,
+        usdValue,
+      });
+      const result: SwapQuoteResponse = {
+        router: leg.router,
+        tokenIn,
+        tokenOut,
+        amountIn: amountIn.toString(),
+        amountOut: leg.expectedOut.toString(),
+        minOut: leg.minOut.toString(),
+        ...(body.build ? { data: leg.swapData } : {}),
+        expiresAt: Date.now() + QUOTE_TTL_MS,
+      };
+      return Response.json(result, { headers: { "Cache-Control": "no-store" } });
+    } catch (err) {
+      if (err instanceof BinanceLegError) {
+        console.error("[swap-quote]", err.message);
+        return jsonError(502, "The swap aggregator is unavailable right now. Please try again.");
+      }
+      if (err instanceof Error) return badRequest(err.message);
+      return serverError("swap-quote", err);
+    }
   }
 
   try {

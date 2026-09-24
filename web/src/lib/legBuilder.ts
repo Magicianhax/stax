@@ -33,6 +33,8 @@ import {
 import { priceLimitSqrtX96 } from "./swapGuards";
 import { assetBySymbol } from "./chains";
 import { kyberBuild, kyberRoute } from "./server/kyber";
+import { buildBinanceLeg } from "./server/binanceLegs";
+import { rawToUsd } from "./units";
 import type { Asset, AssetRoute, RouteHop, StaxChain } from "./chains/types";
 import type { Allocation } from "./allocation-schema";
 
@@ -381,7 +383,33 @@ async function buildKyberLeg(
   return { router, tokenOut, usdcIn, minOut, swapData: built.data };
 }
 
-type LegKind = "single" | "route" | "aave" | "kyber";
+type LegKind = "single" | "route" | "aave" | "kyber" | "binance";
+
+/**
+ * BSC executor leg (ADR-0005): unreachable today because `chain.contracts.deployed` is false
+ * for BSC until the human runs the deploy script (Task 10) — Vera's BSC invests go through the
+ * direct smart-account path instead. `binanceLegs.directCallsForLeg` is exported for
+ * `/api/invest-plan` to call server-side and return as `InvestPlanResult.calls`; `useInvest.ts`
+ * already forwards whatever `calls` a plan response carries, verbatim, as one sponsored user op
+ * (after `assertExecCallsAreSafe` in `lib/execution.ts` checks every recipient) — wiring
+ * `directCallsForLeg` into `/api/invest-plan` itself is the piece still missing. Kept here,
+ * inert, so the executor path needs no further plumbing on the day it is switched on: `buildLegs`
+ * already routes a "binance"-via asset here once `chain.contracts.deployed` flips to true (see
+ * the entry-classification loop below).
+ */
+async function buildBinanceExecutorLeg(chain: StaxChain, asset: Asset, usdcIn: bigint, slippageBps: bigint): Promise<Leg> {
+  const leg = await buildBinanceLeg({
+    chain,
+    symbol: asset.symbol,
+    tokenIn: chain.usdc.address,
+    tokenOut: asset.address!,
+    amountIn: usdcIn,
+    taker: chain.contracts.executor,
+    slippageBps: Number(slippageBps),
+    usdValue: rawToUsd(chain, usdcIn),
+  });
+  return { router: leg.router, tokenOut: asset.address!, usdcIn, minOut: leg.minOut, swapData: leg.swapData };
+}
 
 interface LegEntry {
   asset: Asset;
@@ -423,6 +451,8 @@ async function buildAll(
       switch (entry.kind) {
         case "aave":
           return buildAaveLeg(chain, asset, usdcIn);
+        case "binance":
+          return buildBinanceExecutorLeg(chain, asset, usdcIn, slippageBps);
         case "route":
           return buildRouteLeg(chain, client, asset, entry.route!, usdcIn, slippageBps, deadline);
         case "kyber": {
@@ -475,6 +505,15 @@ export async function buildLegs(args: BuildLegsArgs): Promise<BuildLegsResult> {
       notes.push(`Skipped ${a.symbol} (${a.weightPct}%): coming soon on ${chain.name}, not buyable yet.`);
     } else if (asset.via === "aave_v3" && asset.address && chain.routers.aavePool) {
       entries.push({ asset, kind: "aave", weightPct: a.weightPct });
+    } else if (asset.via === "binance" && asset.address && chain.routers.binance) {
+      // BSC (ADR-0005): the executor path only exists once the human deploys StaxExecutor —
+      // until then this is unreachable in practice (`chain.contracts.deployed` is false), and
+      // Vera's BSC invests build direct smart-account calls instead, outside `buildLegs`.
+      if (chain.contracts.deployed) {
+        entries.push({ asset, kind: "binance", weightPct: a.weightPct });
+      } else {
+        notes.push(`Skipped ${a.symbol} (${a.weightPct}%): the BSC executor isn't deployed yet.`);
+      }
     } else if (chain.routers.kyber && asset.address && asset.via !== "route") {
       // Aggregator chain: Kyber first, direct pool (if any) as the fallback inside buildAll.
       entries.push({ asset, kind: "kyber", weightPct: a.weightPct });

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { aaveMinOut, splitByWeight } from "@/lib/legBuilder";
+import type { PublicClient } from "viem";
+import { aaveMinOut, buildLegs, splitByWeight } from "@/lib/legBuilder";
+import { getChain } from "@/lib/chains";
+import { usdToRaw } from "@/lib/units";
 import type { Asset } from "@/lib/chains/types";
 
 // `splitByWeight` divides the USDC a user is spending across the legs of their allocation.
@@ -200,5 +203,29 @@ describe("aaveMinOut", () => {
   it("never returns a negative floor on dust", () => {
     expect(aaveMinOut(BigInt(3))).toBe(BigInt(0));
     expect(aaveMinOut(BigInt(0))).toBe(BigInt(0));
+  });
+});
+
+describe("buildLegs on BSC (ADR-0005: the executor path is inert until deploy)", () => {
+  // BSC's chain.contracts.deployed is false today, so a "binance"-via allocation must be
+  // dropped rather than routed to the executor's Binance branch — and dropped WITHOUT ever
+  // reaching a network client, since buildBinanceLeg would otherwise make a real Binance call
+  // during a Vera plan for a chain that has no executor to run it.
+  it("drops every BSC stock and reports why, never touching the client", async () => {
+    const chain = getChain("bsc");
+    await expect(
+      buildLegs({
+        chain,
+        allocation: {
+          summary: "test",
+          rationale: "test",
+          riskScore: 1,
+          allocations: [{ symbol: "NVDA", weightPct: 100, reason: "test" }],
+        },
+        usdcTotal: usdToRaw(chain, 10),
+        client: {} as PublicClient, // would throw if buildAll ever tried to read from it
+        nowSeconds: Math.floor(Date.now() / 1000),
+      }),
+    ).rejects.toThrow(/No investable assets/);
   });
 });

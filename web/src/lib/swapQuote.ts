@@ -41,7 +41,17 @@ export interface SwapQuoteArgs {
 
 /** True when `asset` is quoted + swapped through the aggregator on `chain`. */
 export function usesAggregator(chain: StaxChain, asset: Asset | null | undefined): boolean {
-  return Boolean(chain.routers.kyber && asset && asset.address && asset.via !== "aave_v3");
+  if (!asset || !asset.address || asset.via === "aave_v3") return false;
+  if (chain.routers.kyber) return true;
+  // BSC has no Kyber deployment; every "binance"-via asset routes through the Binance
+  // aggregator instead, quoted the same way through /api/swap-quote.
+  return Boolean(chain.routers.binance && asset.via === "binance");
+}
+
+/** The aggregator router `asset` actually swaps through on `chain` (Kyber or Binance). */
+export function aggregatorRouterFor(chain: StaxChain, asset: Asset | null | undefined): `0x${string}` | undefined {
+  if (asset?.via === "binance" && chain.routers.binance) return chain.routers.binance;
+  return chain.routers.kyber;
 }
 
 export async function fetchSwapQuote(args: SwapQuoteArgs): Promise<SwapQuote> {
