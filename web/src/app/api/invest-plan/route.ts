@@ -15,10 +15,12 @@ import { rateLimit } from "@/lib/server/rateLimit";
 import { getSmartAccount } from "@/lib/server/users";
 import { getBinanceWeb3 } from "@/lib/server/binance";
 import { bscCatalogSnapshot } from "@/lib/server/rwaCatalog";
-import { buildBscInvestCalls } from "@/lib/server/bscPlan";
+import { buildBscInvestCalls, venueAddressFor } from "@/lib/server/bscPlan";
 import { BinanceLegError, BinanceLegRefusal } from "@/lib/server/binanceLegs";
+import { decodeApproveAmount, dryRunBscSwap, pairLegCalls } from "@/lib/server/dryRun";
 import { unauthorized, badRequest, tooManyRequests, serverError, jsonError } from "@/lib/server/respond";
 import type { ExecCall } from "@/lib/execution";
+import type { DryRun } from "@/lib/dryRun";
 import type { InvestPlanResult } from "@/lib/invest-types";
 
 // Signs with the agent key + reads chain state — never cache.
@@ -110,23 +112,58 @@ export async function POST(req: NextRequest) {
       }
 
       let calls: ExecCall[];
+      let dryRuns: DryRun[] = [];
+      const taker = account.address as `0x${string}`;
       try {
         const [catalog, tokens] = await Promise.all([bscCatalogSnapshot(nowMs), getBinanceWeb3().rwaTokens()]);
         calls = await buildBscInvestCalls({
           chain,
           allocation,
           usdcTotal,
-          taker: account.address as `0x${string}`,
+          taker,
           catalog: catalog.tickers,
           tokens,
           nowMs,
         });
+
+        // A Binance dry run per leg, right before these calls go back for signing. Each leg
+        // is exactly [approve, swap] (directCallsForLeg), in the same order as
+        // allocation.allocations, so pairLegCalls lines them back up with the ticker each one
+        // targets. dryRunBscSwap simulates the whole [approve, swap] pair atomically (see its
+        // own comment), so it spends a Binance call for every leg once this account has sent
+        // its first on-chain trade — never zero calls just because a leg's own token hasn't
+        // been approved before. A brand-new account's very first-ever basket buy still spends
+        // zero (no deployed bytecode yet to simulate against); a multi-leg TOP-UP basket can
+        // spend up to one call per leg, sharing the same 5-per-window budget as everything
+        // else on this key — worth revisiting as one whole-basket simulate call if that budget
+        // ever gets tight (see openIssues in the dry-run stream's wave 5 report).
+        const byTicker = new Map(catalog.tickers.map((t) => [t.ticker, t]));
+        const pairs = pairLegCalls(calls);
+        dryRuns = await Promise.all(
+          pairs.map(async (pair, i) => {
+            const symbol = allocation.allocations[i]?.symbol;
+            const tokenOut = venueAddressFor(byTicker.get(symbol ?? ""));
+            const amountIn = decodeApproveAmount(pair.approve.data);
+            if (!tokenOut || amountIn === undefined) {
+              return { status: "skipped", reason: "Couldn't check this trade with Binance just now.", checkedAt: Date.now() };
+            }
+            return dryRunBscSwap({
+              chain,
+              taker,
+              router: pair.swap.to,
+              tokenIn: pair.approve.to,
+              tokenOut,
+              amountIn,
+              swapData: pair.swap.data,
+            });
+          }),
+        );
       } catch (err) {
         // Any leg failing fails the whole plan, naming that leg — never a partial batch.
         if (err instanceof BinanceLegRefusal) return badRequest(err.message);
         if (err instanceof BinanceLegError) {
           console.error("[invest-plan]", err.message);
-          return jsonError(502, "The swap aggregator is unavailable right now. Please try again.");
+          return jsonError(502, "We couldn't get a price just now. Try again in a moment.");
         }
         throw err;
       }
@@ -141,6 +178,7 @@ export async function POST(req: NextRequest) {
         explorer: chain.explorer.url,
         notes: [],
         calls,
+        dryRuns,
       };
       return Response.json(result);
     }

@@ -4,7 +4,8 @@
 // one) into that string, so the surfacing behaviour is a plain Node test, not something only
 // visible by clicking through the UI.
 import { describe, expect, it } from "vitest";
-import { quoteErrorMessage, swapQuoteErrorMessage } from "./swapQuote";
+import { assertDryRunAllowsSend, quoteErrorMessage, swapQuoteErrorMessage } from "./swapQuote";
+import type { DryRun } from "./dryRun";
 
 describe("swapQuoteErrorMessage", () => {
   it("uses the server's own message when the body has one", () => {
@@ -34,5 +35,25 @@ describe("quoteErrorMessage", () => {
     expect(quoteErrorMessage(undefined)).toBeUndefined();
     expect(quoteErrorMessage("plain string")).toBeUndefined();
     expect(quoteErrorMessage({ message: "not a real Error instance" })).toBeUndefined();
+  });
+});
+
+// Binance's dry run is the final word only when it actually ran and said the trade would
+// revert. useSwap calls this right before building the UserOp, so a "failed" check can never
+// reach sendSponsoredCalls — "skipped" (no approval yet) and "passed" both let the trade go.
+describe("assertDryRunAllowsSend", () => {
+  it("does nothing when there's no dry run, or it passed or was skipped", () => {
+    expect(() => assertDryRunAllowsSend(undefined)).not.toThrow();
+    expect(() => assertDryRunAllowsSend({ status: "passed", checkedAt: 0 })).not.toThrow();
+    expect(() => assertDryRunAllowsSend({ status: "skipped", reason: "not approved yet", checkedAt: 0 })).not.toThrow();
+  });
+
+  it("throws the dry run's own reason when Binance says the trade would revert", () => {
+    const failed: DryRun = { status: "failed", reason: "There isn't enough balance to complete this trade.", checkedAt: 0 };
+    expect(() => assertDryRunAllowsSend(failed)).toThrow("There isn't enough balance to complete this trade.");
+  });
+
+  it("has a calm fallback message when a failed dry run carries no reason", () => {
+    expect(() => assertDryRunAllowsSend({ status: "failed", checkedAt: 0 })).toThrow(/wouldn't go through/i);
   });
 });

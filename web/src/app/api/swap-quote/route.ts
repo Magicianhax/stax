@@ -26,6 +26,8 @@ import { chainFromRequest } from "@/lib/server/chain";
 import { KyberError, KyberNoRoute, kyberBuild, kyberRoute } from "@/lib/server/kyber";
 import { BinanceLegError, BinanceLegRefusal, bscLegUsdValue, buildBinanceLeg, checkBscBuyable } from "@/lib/server/binanceLegs";
 import { getBinanceWeb3 } from "@/lib/server/binance";
+import { dryRunBscSwap } from "@/lib/server/dryRun";
+import type { DryRun } from "@/lib/dryRun";
 import { resolveVenueAddress } from "@/lib/venues";
 import { requireApproved } from "@/lib/server/admin";
 import { verifyRequest } from "@/lib/server/privyAuth";
@@ -68,6 +70,13 @@ export interface SwapQuoteResponse {
   data?: `0x${string}`;
   /** Unix ms after which the client should re-quote. */
   expiresAt: number;
+  /**
+   * BSC only, present only when build=true: a Binance Transaction API dry run of this exact
+   * swap, run right before the client is expected to sign it. Never claims a check that
+   * didn't run (see lib/dryRun.ts and lib/server/dryRun.ts) — a "failed" status means the
+   * client must not send this trade.
+   */
+  dryRun?: DryRun;
 }
 
 export async function POST(req: NextRequest) {
@@ -159,6 +168,21 @@ export async function POST(req: NextRequest) {
         usdValue,
         build: Boolean(body.build),
       });
+      // Dry run only when there is a real swap to check (build=true — right before the user
+      // signs), never on the price-only quotes TradeScreen polls every 15s: that would spend
+      // the shared 5-per-window Binance budget on a check nobody is about to act on.
+      let dryRun: DryRun | undefined;
+      if (body.build) {
+        dryRun = await dryRunBscSwap({
+          chain,
+          taker: sender,
+          router: leg.router,
+          tokenIn,
+          tokenOut,
+          amountIn,
+          swapData: leg.swapData,
+        });
+      }
       const result: SwapQuoteResponse = {
         router: leg.router,
         tokenIn,
@@ -167,13 +191,14 @@ export async function POST(req: NextRequest) {
         amountOut: leg.expectedOut.toString(),
         minOut: leg.minOut.toString(),
         ...(body.build ? { data: leg.swapData } : {}),
+        ...(dryRun ? { dryRun } : {}),
         expiresAt: Date.now() + QUOTE_TTL_MS,
       };
       return Response.json(result, { headers: { "Cache-Control": "no-store" } });
     } catch (err) {
       if (err instanceof BinanceLegError) {
         console.error("[swap-quote]", err.message);
-        return jsonError(502, "The swap aggregator is unavailable right now. Please try again.");
+        return jsonError(502, "We couldn't get a price just now. Try again in a moment.");
       }
       if (err instanceof BinanceLegRefusal) return badRequest(err.message);
       return serverError("swap-quote", err);
@@ -215,7 +240,7 @@ export async function POST(req: NextRequest) {
     if (err instanceof KyberNoRoute) return jsonError(404, `No swap route for ${asset.symbol} on ${chain.name} right now.`);
     if (err instanceof KyberError) {
       console.error("[swap-quote]", err.message);
-      return jsonError(502, "The swap aggregator is unavailable right now. Please try again.");
+      return jsonError(502, "We couldn't get a price just now. Try again in a moment.");
     }
     return serverError("swap-quote", err);
   }

@@ -27,9 +27,10 @@ import { useDemo } from "@/components/demo/DemoProvider";
 import { useRefreshBalances } from "@/hooks/useBalances";
 import { AAVE_POOL_ABI, AGNI_ROUTER_ABI, ERC20_ABI, FLUXION_ROUTER_ABI, UNISWAP_ROUTER02_ABI } from "@/lib/abis";
 import { isRoutable, reverseRoute, type Asset, type RouteHop, type RwaPlatform, type StaxChain } from "@/lib/chains";
+import type { DryRun } from "@/lib/dryRun";
 import { useChain } from "@/lib/chains/active";
 import { encodeV3Path, singleHopSqrtLimit } from "@/lib/swapRouting";
-import { aggregatorRouterFor, fetchSwapQuote, usesAggregator } from "@/lib/swapQuote";
+import { aggregatorRouterFor, assertDryRunAllowsSend, fetchSwapQuote, usesAggregator } from "@/lib/swapQuote";
 import { feeOf, STAX_TREASURY } from "@/lib/fees";
 import { usdToRaw } from "@/lib/units";
 import { resolveVenueAddress } from "@/lib/venues";
@@ -125,7 +126,7 @@ async function aggregatorCalls(
     slippageBps: number;
     venue?: RwaPlatform;
   },
-): Promise<{ calls: Call[]; minOut: bigint }> {
+): Promise<{ calls: Call[]; minOut: bigint; dryRun?: DryRun }> {
   const q = await fetchSwapQuote({
     symbol: p.asset.symbol,
     side: p.side,
@@ -141,6 +142,11 @@ async function aggregatorCalls(
     throw new Error("The swap route didn't match this network. Please try again.");
   }
   if (q.amountIn !== p.amountIn) throw new Error("The swap amount changed. Please try again.");
+  // Binance's own check on this exact trade (BSC only) is the final word when it ran and
+  // says the trade would revert — never sent in that case. A "skipped" check (this wallet
+  // hasn't sent its first on-chain trade yet, so there's nothing deployed to simulate
+  // against) or no check at all (every other chain) both fall through normally.
+  assertDryRunAllowsSend(q.dryRun);
   // Belt-and-suspenders for the twin-venue bug this guards against elsewhere (TradeScreen's
   // holding lookup, resolveVenueAddress): the approve below is built from OUR resolved
   // `p.tokenIn`, so if the server's quote ever disagreed about which token this trade means,
@@ -154,7 +160,7 @@ async function aggregatorCalls(
   // exact-amount and single-use, and its router expects no such reset — skip the third call.
   const calls = [approve(p.tokenIn, router, p.amountIn), { to: router, data: q.data }];
   if (router.toLowerCase() === chain.routers.kyber?.toLowerCase()) calls.push(approve(p.tokenIn, router, BigInt(0)));
-  return { calls, minOut: q.minOut };
+  return { calls, minOut: q.minOut, dryRun: q.dryRun };
 }
 
 export interface SwapResult {
@@ -163,6 +169,8 @@ export interface SwapResult {
   amountUsd: number;
   /** "buy" (USDC -> asset) or "sell" (asset -> USDC). */
   side: "buy" | "sell";
+  /** BSC only: the Binance check this trade passed (or was skipped) before signing. */
+  dryRun?: DryRun;
 }
 
 export function useSwap() {
@@ -227,6 +235,7 @@ export function useSwap() {
         const minOut = (expectedNet * (BPS - BigInt(slippageBps))) / BPS;
 
         let calls: Call[];
+        let dryRun: DryRun | undefined;
         const route = chain.routes[asset.symbol];
         if (asset.via === "aave_v3") {
           // Safe dollars: supply USDC to Aave, aUSDC lands in the user's account 1:1.
@@ -254,6 +263,7 @@ export function useSwap() {
             throw new Error("The price moved too much since your quote. Please try again.");
           }
           calls = agg.calls;
+          dryRun = agg.dryRun;
         } else if (route) {
           // Multi-hop exactInput(path) has no per-hop price limit; minOut guards it alone.
           calls = [approve(usdc, route.router, netIn), routeSwapCall(chain, asset.symbol, route.hops, recipient, netIn, minOut)];
@@ -290,6 +300,7 @@ export function useSwap() {
           asset,
           amountUsd,
           side: "buy",
+          ...(dryRun ? { dryRun } : {}),
         });
         setPhase("done");
         refreshBalances(); // cash + holdings refetch now
@@ -350,6 +361,7 @@ export function useSwap() {
 
         const usdc = chain.usdc.address;
         let calls: Call[];
+        let dryRun: DryRun | undefined;
         if (asset.via === "aave_v3") {
           // aUSDC balance is the USDC amount (1:1, 6 dec); withdraw burns it from the caller.
           calls = [
@@ -372,6 +384,7 @@ export function useSwap() {
             throw new Error("The price moved too much since your quote. Please try again.");
           }
           calls = agg.calls;
+          dryRun = agg.dryRun;
         } else if (route) {
           calls = [
             approve(asset.address!, route.router, amountIn),
@@ -401,6 +414,7 @@ export function useSwap() {
           asset,
           amountUsd: estUsdcValue,
           side: "sell",
+          ...(dryRun ? { dryRun } : {}),
         });
         setPhase("done");
         refreshBalances(); // cash + holdings refetch now
