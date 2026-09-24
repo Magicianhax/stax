@@ -117,6 +117,14 @@ describe("candles", () => {
     expect(rows[0]).toEqual({ open: 223.1, high: 223.9, low: 222.8, close: 223.54, volume: 184032.5, t: 1790247600000, trades: 412 });
   });
 
+  it("keeps a null trade count (live older rows send it) without failing the chart", async () => {
+    mockWeb3Request.mockResolvedValueOnce([[221.11, 223.76, 219.27, 219.96, 203450.3, 1789912800000, null]]);
+    const { candles } = await import("./market");
+    const rows = await candles("0x02fca66c1d1afb4e2a7884261eb00f63598a7436", "1h", 1);
+    expect(rows[0].trades).toBeNull();
+    expect(rows[0].close).toBe(219.96);
+  });
+
   it("rejects a null field instead of charting it as a zero price", async () => {
     mockWeb3Request.mockResolvedValueOnce([[null, 223.9, 222.8, 223.54, 184032.5, 1790247600000, 412]]);
     const { candles } = await import("./market");

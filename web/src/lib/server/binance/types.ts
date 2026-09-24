@@ -80,7 +80,7 @@ export interface RwaSearchResult {
 }
 
 /** Parsed from the wire's [open, high, low, close, volume, tMs, trades] tuple. */
-export type Candle = { open: number; high: number; low: number; close: number; volume: number; t: number; trades: number };
+export type Candle = { open: number; high: number; low: number; close: number; volume: number; t: number; trades: number | null };
 
 export interface QuoteParams {
   fromToken: `0x${string}`;
