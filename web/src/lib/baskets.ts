@@ -275,6 +275,8 @@ const MANTLE_SEEDS: Seed[] = [
 export const CURATED_BASKETS: Record<ChainKey, Basket[]> = {
   base: curated("base", BASE_SEEDS),
   mantle: curated("mantle", MANTLE_SEEDS),
+  // BSC baskets arrive with Vera on BSC, built only from tickers the RWA catalog can trade.
+  bsc: [],
 };
 
 /** A curated basket by its static id ("base:big-tech") on `chain`, unfiltered — check `isBasketInvestable` before buying. */

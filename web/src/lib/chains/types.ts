@@ -1,8 +1,8 @@
 // Chain-agnostic shapes for the Stax multi-chain registry.
-// One `StaxChain` per supported network (Base = default, Mantle = legacy).
+// One `StaxChain` per supported network (Base = default, Mantle = legacy, BSC = BNB Hack).
 import type { Chain } from "viem";
 
-export type ChainKey = "base" | "mantle";
+export type ChainKey = "base" | "mantle" | "bsc";
 
 export type AssetTier = "stock" | "safe" | "crypto";
 
@@ -14,10 +14,23 @@ export type AssetTier = "stock" | "safe" | "crypto";
  *  - "aave_v3"     Aave v3 Pool.supply(USDC) → aToken (Base "safe dollars"); sell = Pool.withdraw
  *  - "kyber"       KyberSwap Aggregator (Base): server-built calldata for MetaAggregationRouterV2
  *                  (`chain.routers.kyber`); `pool`/`feeTier` kept as the Router02 fallback + price source
+ *  - "binance"     Binance Web3 DEX aggregator (BSC): server-built unsigned calldata for
+ *                  `chain.routers.binance`, which is also the approval spender
  *  - "merchant_moe" Mantle LB router (recorded, not routable)
  *  - "route"       listed only, no permissionless route (shown as "coming soon")
  */
-export type SwapVia = "fluxion" | "agni" | "uniswap_v3" | "aave_v3" | "kyber" | "merchant_moe" | "route";
+export type SwapVia = "fluxion" | "agni" | "uniswap_v3" | "aave_v3" | "kyber" | "binance" | "merchant_moe" | "route";
+
+/** Issuer of a BSC tokenized stock, exactly as the Binance RWA Data API names it. */
+export type RwaPlatform = "bstock" | "ondo";
+
+/** The same share from the other issuer: the best-venue buy and the price-gap view need both. */
+export interface RwaTwin {
+  platform: RwaPlatform;
+  address: `0x${string}`;
+  onchainSymbol: string;
+  decimals: number;
+}
 
 export interface Asset {
   symbol: string; // user-facing ticker, shared across chains ("AAPL" on both Base and Mantle)
@@ -36,6 +49,10 @@ export interface Asset {
   priceFeed?: `0x${string}`;
   /** Optional on-chain ticker when it differs from `symbol` (e.g. "AAPLc", "wAAPLx"). */
   onchainSymbol?: string;
+  /** BSC: which issuer `address` belongs to. */
+  platform?: RwaPlatform;
+  /** BSC: the same share from the other issuer, when both list it. */
+  twin?: RwaTwin;
 }
 
 /** One hop of a V3 route, with the pool we read for spot pricing. */
@@ -70,7 +87,7 @@ export interface StaxContracts {
 export interface StaxChain {
   key: ChainKey;
   id: number;
-  name: string; // "Base" | "Mantle"
+  name: string; // "Base" | "Mantle" | "BNB Chain"
   /** viem Chain (with multicall3) for clients + permissionless. */
   chain: Chain;
   rpcUrl: string;
@@ -83,19 +100,22 @@ export interface StaxChain {
    *  no-key history fallback for chains Etherscan's free tier refuses (Base). */
   blockscoutUrl?: string;
   nativeSymbol: string;
-  usdc: { address: `0x${string}`; symbol: "USDC"; decimals: 6 };
+  /** The cash asset. USDC (6 decimals) on Base and Mantle; USDT (18 decimals) on BSC. */
+  usdc: { address: `0x${string}`; symbol: "USDC" | "USDT"; decimals: number };
   multicall3: `0x${string}`;
   contracts: StaxContracts;
   routers: {
     /** Single-hop V3 router for `pool`-bearing assets. */
     v3: `0x${string}`;
-    v3Kind: "fluxion" | "uniswap_v3";
+    v3Kind: "fluxion" | "uniswap_v3" | "none";
     /** Uniswap QuoterV2 when available (Base) — exact quotes incl. price impact. */
     quoterV2?: `0x${string}`;
     /** Aave v3 Pool when the safe tier is an aToken (Base). */
     aavePool?: `0x${string}`;
     /** KyberSwap MetaAggregationRouterV2 when the chain swaps through the aggregator (Base). */
     kyber?: `0x${string}`;
+    /** Binance Web3 aggregator router: quote.approveTarget and swap.tx.to (BSC). */
+    binance?: `0x${string}`;
     /** Every router the executor must whitelist (deploy script + docs). */
     all: `0x${string}`[];
   };

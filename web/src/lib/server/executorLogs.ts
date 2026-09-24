@@ -53,6 +53,8 @@ const CHUNK_BACKOFF_MS = 600;
 const LOG_RPC_FALLBACKS: Record<ChainKey, string[]> = {
   base: ["https://mainnet.base.org"],
   mantle: ["https://mantle-rpc.publicnode.com"],
+  // No executor on BSC yet (ADR-0005), so nothing to scan; add a keyless getLogs RPC with the deploy.
+  bsc: [],
 };
 /** Etherscan pages per event per fetch (1000 logs each). */
 const MAX_ETHERSCAN_PAGES = 5;

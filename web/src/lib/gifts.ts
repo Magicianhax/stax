@@ -45,6 +45,8 @@ const ZERO = "0x0000000000000000000000000000000000000000" as const;
 const GIFT_ADDRESSES: Record<ChainKey, `0x${string}`> = {
   base: (process.env.NEXT_PUBLIC_STAX_GIFT_BASE || ZERO) as `0x${string}`,
   mantle: ZERO,
+  // Gifts stay Base-only (ADR-0009).
+  bsc: ZERO,
 };
 
 /** The TimelockGift address on `chain`, or null when gifting isn't live there. */
