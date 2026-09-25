@@ -8,6 +8,8 @@
 // so they work even while a chain's Stax contracts are still being switched on.
 // Assets with no liquid market yet are tagged "Coming soon" with the buy disabled
 // and the reason spelled out.
+import { useEarnings } from "@/hooks/useEarnings";
+import { EarningsChip } from "@/components/lite/earnings/EarningsChip";
 import { useState } from "react";
 import type { Asset, RwaPlatform } from "@/lib/chains";
 import { useChain } from "@/lib/chains/active";
@@ -110,6 +112,7 @@ export function AssetDetailScreen({
   // before Task 9's catalog API exists, or while it's still loading — the buy button only
   // reacts to a real answer, never to the absence of one.
   const bsc = chain.key === "bsc";
+  const earnings = useEarnings(bsc && asset.tier === "stock" ? asset.symbol : undefined);
   // `useRwa()` directly (not the `useRwaTicker` convenience wrapper) so this screen also gets
   // `refetch` — the "Try again" CTA (design critique P1 #12) needs to re-ask /api/rwa without a
   // full page reload. Same query key as every other BSC hook, so this shares the cache rather
@@ -357,6 +360,7 @@ export function AssetDetailScreen({
                   />
                 )}
                 <PriceGap venue={chosenVenueView} />
+                {earnings && <EarningsChip info={earnings} />}
               </div>
             ) : bsc ? (
               <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink-3)" }}>
@@ -404,7 +408,7 @@ export function AssetDetailScreen({
               it `chosenVenue` so the ring and the Buy button can never disagree. The tradeoff:
               "Best right now" can now tag the tapped/opened venue rather than strictly the
               catalog's smallest-gap venue when the two differ. */}
-          <VenuePicker venues={rwaTicker.venues} bestVenue={chosenVenue ?? null} onSelect={setPickedVenue} />
+          <VenuePicker venues={rwaTicker.venues} bestVenue={rwaTicker.bestVenue} selected={chosenVenue ?? null} onSelect={setPickedVenue} />
           {/* Price vs the real share, for whichever issuer is chosen above — one line chart, a
               plain sentence once we've actually confirmed there's nothing to draw yet, or nothing
               at all while that confirmation is still in flight (never a guess dressed as a fact). */}

@@ -695,6 +695,7 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
           tone={tone}
           rethinking={rethinking}
           busy={invest.busy}
+          dryRuns={invest.dryRuns}
           onNudge={onNudge}
           onInvest={onInvest}
           basket={basketPlan?.basket}

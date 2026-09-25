@@ -19,6 +19,7 @@
 // for. `chain.contracts.deployed` only gates the executor shape: a direct-path
 // response carries its own calls and needs no deployed executor to send them.
 import { useCallback, useState } from "react";
+import type { DryRun } from "@/lib/dryRun";
 import { encodeFunctionData } from "viem";
 import { useActiveWallet } from "@/hooks/useActiveWallet";
 import { sendSponsoredCalls, type Call } from "@/lib/aa";
@@ -43,6 +44,8 @@ export interface UseInvest {
   error: string | null;
   allocation: AllocateResult | null;
   success: InvestSuccess | null;
+  /** Binance's check of the last plan's legs (BSC direct path), for PlanScreen to show. */
+  dryRuns: DryRun[] | undefined;
   busy: boolean;
   allocate: (goal: string, amountUsd: number, riskTolerance?: string) => Promise<AllocateResult | null>;
   invest: (allocation: Allocation, amountUsd: number, address: string) => Promise<void>;
@@ -72,12 +75,14 @@ export function useInvest(): UseInvest {
   const [error, setError] = useState<string | null>(null);
   const [allocation, setAllocation] = useState<AllocateResult | null>(null);
   const [success, setSuccess] = useState<InvestSuccess | null>(null);
+  const [dryRuns, setDryRuns] = useState<DryRun[] | undefined>(undefined);
 
   const reset = useCallback(() => {
     setPhase("idle");
     setError(null);
     setAllocation(null);
     setSuccess(null);
+    setDryRuns(undefined);
   }, []);
 
   const clearError = useCallback(() => setError(null), []);
@@ -157,6 +162,7 @@ export function useInvest(): UseInvest {
         // Binance's own dry run is the final word when it actually ran: "failed" means it
         // simulated this exact trade and it would revert, so it is never sent — "skipped"
         // (the common case for a brand-new token) and "passed" both proceed as normal.
+        setDryRuns(plan.dryRuns);
         const failedCheck = plan.dryRuns?.find((d) => d.status === "failed");
         if (failedCheck) {
           throw new Error(failedCheck.reason ?? "Binance checked this trade and it wouldn't go through right now.");
@@ -282,6 +288,7 @@ export function useInvest(): UseInvest {
     error,
     allocation,
     success,
+    dryRuns,
     busy: phase === "thinking" || phase === "planning" || phase === "approving" || phase === "investing",
     allocate,
     invest,

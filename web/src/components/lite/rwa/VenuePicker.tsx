@@ -26,12 +26,18 @@ export const PLATFORM_LABEL: Record<RwaPlatform, string> = { bstock: "bStock", o
 export interface VenuePickerProps {
   venues: VenueView[];
   bestVenue: RwaPlatform | null;
+  /**
+   * The issuer the buy will actually use, when the caller already knows it (a board tap, a twin
+   * position, an earlier tap). The ring follows it; `bestVenue` then only drives the
+   * "Best right now" tag, so the tag keeps meaning the catalog's own pick.
+   */
+  selected?: RwaPlatform | null;
   /** Fires when the viewer picks a tradeable venue; the caller decides what that means. */
   onSelect?: (platform: RwaPlatform) => void;
   style?: CSSProperties;
 }
 
-export function VenuePicker({ venues, bestVenue, onSelect, style }: VenuePickerProps) {
+export function VenuePicker({ venues, bestVenue, selected, onSelect, style }: VenuePickerProps) {
   // Without `onSelect` a click has nowhere to go: the buy flow (Task 12) is what turns a picked
   // row into a different quote, and until that's wired, letting the ring move on a tap would
   // show a choice the buy ignores — the ring stays locked to whatever the caller says is the
@@ -41,7 +47,7 @@ export function VenuePicker({ venues, bestVenue, onSelect, style }: VenuePickerP
   // the ring follows `bestVenue`, which arrives after the catalog loads and moves with it.
   const [picked, setPicked] = useState<RwaPlatform | null>(null);
   const pickedLive = picked !== null && venues.some((v) => v.platform === picked && v.buyable);
-  const shown = interactive && pickedLive ? picked : bestVenue;
+  const shown = selected !== undefined ? selected : interactive && pickedLive ? picked : bestVenue;
   if (venues.length === 0) return null;
   // Design critique P0 #4 reviewer follow-up: only earns its place when there's a second row to
   // explain — AMZN has no twin, and a ticker whose twin `/tokens` doesn't list (AAPL/AAPLB)

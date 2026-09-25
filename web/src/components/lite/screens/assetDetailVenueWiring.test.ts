@@ -13,9 +13,9 @@ import { fileURLToPath } from "node:url";
 // the catalog's own best-gap pick, which VenuePicker also uses for its ring until an explicit
 // tap. Whenever the cheapest-price issuer (`chosenVenue`, e.g. from a "Which is cheaper?" row)
 // differs from the smallest-gap issuer (`defaultVenue`), the ring highlighted one issuer while
-// Buy bought the other. Until VenuePicker (not owned by this stream — see wiringNeeded) grows a
-// `selected` prop that the ring can prefer independently of the "Best right now" tag, the ring
-// is made to follow `chosenVenue` directly, so the two can never disagree.
+// Buy bought the other. VenuePicker now takes a `selected` prop that its ring prefers over
+// `bestVenue`, so the ring follows `chosenVenue` while "Best right now" keeps tagging the
+// catalog's own pick.
 const source = readFileSync(
   fileURLToPath(new URL("./AssetDetailScreen.tsx", import.meta.url)),
   "utf8",
@@ -23,7 +23,7 @@ const source = readFileSync(
 
 describe("AssetDetailScreen venue wiring", () => {
   it("feeds VenuePicker's ring the same venue the Buy button targets", () => {
-    expect(source).toContain("<VenuePicker venues={rwaTicker.venues} bestVenue={chosenVenue ?? null}");
+    expect(source).toMatch(/<VenuePicker\b[^>]*selected=\{chosenVenue \?\? null\}/);
   });
 
   it("never regresses to feeding the ring the catalog default instead of the chosen venue", () => {

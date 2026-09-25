@@ -74,11 +74,9 @@ export function PlanScreen({
   goal?: string;
   /**
    * One Binance Transaction API dry run per leg, same order as `allocation.allocations`
-   * (InvestPlanResult.dryRuns — wave-5 "dryrun" stream). Not wired end to end yet: useInvest.ts
-   * only learns these inside `invest()`, right as the hold-to-confirm fires, and doesn't expose
-   * them on its returned object for a screen to read beforehand — see wiringNeeded in the wave
-   * report for the smallest edit that would. Undefined here renders exactly what this screen
-   * already did.
+   * (InvestPlanResult.dryRuns), from useInvest. The server runs them when Invest is held, so
+   * they appear after the first attempt: a "failed" leg stops that attempt and stays shown here
+   * with its reason. Undefined before then renders exactly what this screen already did.
    */
   dryRuns?: DryRun[];
 }) {
