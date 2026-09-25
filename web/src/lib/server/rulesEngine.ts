@@ -28,6 +28,7 @@ import {
   evaluateBuyDiscount,
   evaluateMixKeeper,
   evaluateRebalance,
+  evaluateEarnings,
   evaluateSafetySwitch,
   formatRuleReceipt,
   SAFER_SYMBOLS,
@@ -44,6 +45,7 @@ import type { StaxChain } from "@/lib/chains/types";
 import type { RwaTickerView, VenueView } from "@/lib/rwa";
 import { bscCatalogSnapshot } from "./rwaCatalog";
 import { getSpreadHistory } from "./spreadStore";
+import { getNextEarnings } from "./earnings";
 
 /** How far the stock/crypto mix may drift from target before mix_keeper acts on it. */
 const MIX_TOLERANCE_PCT = 5;
@@ -196,9 +198,27 @@ export async function planRuleForAutopilot(chain: StaxChain, rule: EvaluableRule
     case "mix_keeper":
       return planMixKeeper(rule, ctx);
     case "earnings":
-      // nextEarningsMs has no data source yet (wiringNeeded) — never guess a date.
-      return skip(`Vera can't trade ${rule.symbol} around earnings yet; the earnings calendar isn't connected.`);
+      return planEarnings(chain, rule, ctx);
   }
+}
+
+/**
+ * Buy a stock a few days before it reports results. The date comes from lib/server/earnings.ts
+ * (Binance has none); no announced date means no trade, never a guess. The "sell after" half
+ * can't run yet: StaxExecutor only buys, so after earnings Vera holds and says so. A position
+ * already held means this window's buy has happened, so the rule doesn't buy again every day.
+ */
+async function planEarnings(chain: StaxChain, rule: Extract<Rule, { type: "earnings" }>, ctx: RuleRunContext): Promise<RulePlanResult> {
+  const info = (await getNextEarnings([rule.symbol]))[rule.symbol];
+  if (!info || info.nextMs === null) return skip(`${rule.symbol} hasn't announced its next results date yet.`);
+  const action = evaluateEarnings(ctx.nowMs, info.nextMs, rule.buyDaysBefore, rule.sellDaysAfter);
+  if (action === "hold") return ok(rule, []);
+  if (action === "sell") return skip(`Vera can't sell yet, so your ${rule.symbol} stays put after its results.`);
+  if (ctx.holdings?.some((h) => h.symbol === rule.symbol && h.usdValue > 0)) return ok(rule, []);
+  if (!assetBySymbol(chain, rule.symbol)) return skip(`${rule.symbol} isn't listed on ${chain.name} right now.`);
+  const usd = round2(ctx.budgetUsd);
+  if (usd <= 0) return ok(rule, []);
+  return ok(rule, [{ symbol: rule.symbol, action: "buy", usd, reason: `Buying ${rule.symbol} ${rule.buyDaysBefore} days before its results.` }]);
 }
 
 export type { RuleType };

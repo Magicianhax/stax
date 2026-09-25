@@ -192,8 +192,9 @@ describe("RULES_NEEDING_HOLDINGS", () => {
 });
 
 describe("HOLDINGS_RULE_TYPES", () => {
-  it("lists exactly the three rules whose plan depends on ctx.holdings", () => {
-    expect(HOLDINGS_RULE_TYPES).toEqual(["rebalance", "safety_switch", "mix_keeper"]);
+  it("lists exactly the rules whose plan depends on ctx.holdings", () => {
+    // earnings reads holdings only to avoid buying the same pre-results position twice.
+    expect(HOLDINGS_RULE_TYPES).toEqual(["rebalance", "safety_switch", "mix_keeper", "earnings"]);
   });
 
   it("excludes the two rules that never look at holdings (schedule_buy, buy_discount)", () => {

@@ -182,7 +182,7 @@ export const RULES_NEEDING_HOLDINGS: readonly RuleType[] = [];
  * balance read for at all (buy_discount and earnings ignore holdings entirely; fetching for them
  * would just be a wasted Binance/RPC round trip every run).
  */
-export const HOLDINGS_RULE_TYPES: readonly RuleType[] = ["rebalance", "safety_switch", "mix_keeper"];
+export const HOLDINGS_RULE_TYPES: readonly RuleType[] = ["rebalance", "safety_switch", "mix_keeper", "earnings"];
 
 export const RULE_COMING_SOON_REASON =
   "Coming soon: this rule needs to read your current BNB Chain holdings, and that isn't connected yet.";

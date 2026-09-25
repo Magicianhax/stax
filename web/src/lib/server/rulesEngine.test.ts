@@ -14,6 +14,8 @@ vi.mock("./rwaCatalog", () => ({ bscCatalogSnapshot: (...args: unknown[]) => bsc
 
 const getSpreadHistorySpy = vi.fn();
 vi.mock("./spreadStore", () => ({ getSpreadHistory: (...args: unknown[]) => getSpreadHistorySpy(...args) }));
+const getNextEarningsSpy = vi.fn();
+vi.mock("./earnings", () => ({ getNextEarnings: (...args: unknown[]) => getNextEarningsSpy(...args) }));
 
 import { planRuleForAutopilot } from "./rulesEngine";
 import { getChain } from "@/lib/chains";
@@ -259,8 +261,38 @@ describe("planRuleForAutopilot: mix_keeper", () => {
 });
 
 describe("planRuleForAutopilot: earnings", () => {
-  it("skips — the earnings data source isn't wired up yet (wiringNeeded)", async () => {
-    const plan = await planRuleForAutopilot(bsc, { type: "earnings", symbol: "NVDA", buyDaysBefore: 3, sellDaysAfter: 1 }, { nowMs: NOW, budgetUsd: 25 });
-    expect(plan).toEqual({ ok: false, reason: expect.stringContaining("earnings") });
+  const DAY = 24 * 60 * 60 * 1000;
+  const rule = { type: "earnings" as const, symbol: "NVDA", buyDaysBefore: 3, sellDaysAfter: 1 };
+  const withDate = (nextMs: number | null) =>
+    getNextEarningsSpy.mockResolvedValue({ NVDA: { nextMs, confirmed: true, source: "yahoo" } });
+
+  it("never guesses: no announced date means no trade", async () => {
+    withDate(null);
+    const plan = await planRuleForAutopilot(bsc, rule, { nowMs: NOW, budgetUsd: 25, holdings: [] });
+    expect(plan).toEqual({ ok: false, reason: expect.stringContaining("hasn't announced") });
+  });
+
+  it("buys inside the window before results, up to the period budget", async () => {
+    withDate(NOW + 2 * DAY);
+    const plan = await planRuleForAutopilot(bsc, rule, { nowMs: NOW, budgetUsd: 25, holdings: [] });
+    expect(plan.ok && plan.intents).toEqual([{ symbol: "NVDA", action: "buy", usd: 25, reason: expect.any(String) }]);
+  });
+
+  it("does nothing before the window opens", async () => {
+    withDate(NOW + 10 * DAY);
+    const plan = await planRuleForAutopilot(bsc, rule, { nowMs: NOW, budgetUsd: 25, holdings: [] });
+    expect(plan.ok && plan.intents).toEqual([]);
+  });
+
+  it("doesn't buy again once the position is held", async () => {
+    withDate(NOW + 2 * DAY);
+    const plan = await planRuleForAutopilot(bsc, rule, { nowMs: NOW, budgetUsd: 25, holdings: [{ symbol: "NVDA", usdValue: 30, tier: "stock" }] });
+    expect(plan.ok && plan.intents).toEqual([]);
+  });
+
+  it("says plainly that it can't sell after results yet", async () => {
+    withDate(NOW - 12 * 60 * 60 * 1000);
+    const plan = await planRuleForAutopilot(bsc, rule, { nowMs: NOW, budgetUsd: 25, holdings: [] });
+    expect(plan).toEqual({ ok: false, reason: expect.stringContaining("can't sell yet") });
   });
 });
