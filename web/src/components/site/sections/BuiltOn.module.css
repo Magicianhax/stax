@@ -18,12 +18,12 @@
   flex-wrap: nowrap;
   align-items: center;
   justify-content: center;
-  gap: 40px;
+  gap: 36px;
 }
 
 /* Inside the marquee the trailing gap closes the loop. */
 .rowScroll {
-  padding-right: 40px;
+  padding-right: 36px;
 }
 
 .item {
@@ -47,8 +47,22 @@
   transition: color 180ms var(--s-ease);
 }
 
+/* A name set as a wordmark: the UI face at the marks' cap height, same ink. */
+.word {
+  display: block;
+  font-family: var(--s-ui);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 24px;
+  white-space: nowrap;
+  color: var(--s-ink-3);
+  transition: color 180ms var(--s-ease);
+}
+
 @media (hover: hover) {
-  .item:hover .mark {
+  .item:hover .mark,
+  .item:hover .word {
     color: var(--s-ink);
   }
 }

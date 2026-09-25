@@ -1,112 +1,12 @@
-/* ── diagram: six steps, two columns each, one line across the discs ─────── */
-.diagram {
-  position: relative;
-}
-.steps {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  position: relative;
-  z-index: 1;
-}
-.step {
-  grid-column: 1 / -1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  min-width: 0;
-}
-.disc {
-  width: 56px;
-  height: 56px;
-  flex: none;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--s-primary-soft);
-  color: var(--s-primary-d);
-  box-shadow: 0 0 0 4px var(--s-paper);
-}
-:global(.site[data-mode="dark"]) .disc {
-  color: var(--s-primary);
-}
-/* the steps the chain touches wear the trust colour */
-.step[data-onchain="1"] .disc {
-  background: var(--s-surface);
-  color: var(--s-accent-2);
-  box-shadow:
-    0 0 0 4px var(--s-paper),
-    inset 0 0 0 1.5px color-mix(in srgb, var(--s-accent) 55%, transparent);
-}
-:global(.site[data-mode="dark"]) .step[data-onchain="1"] .disc {
-  color: var(--s-accent);
-}
-.stepTitle {
-  margin: 16px 0 0;
-  max-width: 14ch;
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: -0.012em;
-  line-height: 1.25;
-  color: var(--s-ink);
-  text-wrap: balance;
-}
-
-.line {
-  position: absolute;
-  overflow: visible;
-  pointer-events: none;
-}
-.across {
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 56px;
-}
-.down {
-  display: none;
-  top: 0;
-  left: 0;
-  width: 48px;
-  height: 100%;
-}
-.ghost,
-.ink {
-  fill: none;
-  stroke-width: 2px;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.ghost {
-  stroke: var(--s-line);
-}
-/* drawn by default; GSAP pulls the offset to 1 and scrubs it back to 0 */
-.ink {
-  stroke: var(--s-accent-2);
-  stroke-dasharray: 1;
-  stroke-dashoffset: 0;
-}
-:global(.site[data-mode="dark"]) .ink {
-  stroke: var(--s-accent);
-}
-
-/* ── the refusals: four promises on the container's own 12 tracks ────────── */
+/* ── the refusals: four rules on the container's own 12 tracks ─────────── */
 .refusals {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   column-gap: 24px;
   row-gap: 28px;
-  margin-top: 64px;
-}
-.eyebrow {
-  grid-column: 1 / -1;
+  list-style: none;
   margin: 0;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--s-ink-3);
+  padding: 0;
 }
 .refusal {
   grid-column: 1 / -1;
@@ -147,17 +47,20 @@
 }
 
 .verified {
-  grid-column: 1 / -1;
-  margin: 4px 0 0;
-  font-size: 14px;
-  color: var(--s-ink-3);
+  margin: 40px 0 0;
+  max-width: 72ch;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--s-ink-2);
+  text-wrap: pretty;
 }
 .verifiedLink {
   display: inline-flex;
   align-items: center;
+  vertical-align: bottom;
   gap: 6px;
   font-weight: 700;
-  color: var(--s-ink-2);
+  color: var(--s-ink);
   text-decoration: none;
   transition: color 0.18s var(--s-ease);
 }
@@ -200,49 +103,9 @@
   }
 }
 
-@media (min-width: 900px) {
-  .step {
-    grid-column: span 2;
-  }
-}
-
-/* ── narrow: the line runs down the left, steps become rows ─────────────── */
 @media (max-width: 899px) {
-  /* The vertical timeline shrinks to its content and sits centred as a block;
-     the down line is positioned inside .diagram, so it moves with the discs. */
-  .diagram {
-    width: fit-content;
-    max-width: 100%;
-    margin-inline: auto;
-  }
-  .diagram .steps {
-    grid-auto-rows: 1fr;
-    row-gap: 0;
-  }
-  .step {
-    flex-direction: row;
-    align-items: flex-start;
-    text-align: left;
-    gap: 16px;
-    padding: 8px 0 20px;
-  }
-  .disc {
-    width: 48px;
-    height: 48px;
-  }
-  .stepTitle {
-    margin-top: 12px;
-    max-width: 40ch;
-  }
-  .across {
-    display: none;
-  }
-  .down {
-    display: block;
-  }
-  .refusals {
-    margin-top: 40px;
-    row-gap: 24px;
+  .verified {
+    margin-top: 32px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

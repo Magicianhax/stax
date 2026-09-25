@@ -1,7 +1,9 @@
 "use client";
 
 // First viewport. Left, 7 columns: kicker with the two award rosettes, the
-// H1, one sentence, two buttons, the film link and the proof strip. Right,
+// H1 ("the broker that knows the market is closed"), one sentence, the live
+// US-market line in the visitor's own time, two buttons, the film link and
+// the proof strip. Right,
 // 5 columns: the seal, a 3D signed-plan slab that stamps itself verified (three, loaded
 // lazily, never server-rendered; a CSS silhouette holds its box until then).
 // The ground is the DotField (sparse breathing lattice + pointer glow), masked
@@ -18,6 +20,8 @@ import { DotField } from "@/components/site/ui/DotField";
 import { Reveal } from "@/components/site/ui/Reveal";
 import { ShineButton } from "@/components/site/ui/ShineButton";
 import L from "@/components/site/layout.module.css";
+import { HERO } from "@/lib/site/landing";
+import { MarketNowLine } from "./MarketNow";
 import { ProofWall } from "./ProofWall";
 import { AwardMark, AWARD_EVENT } from "./Awards";
 import s from "./Hero.module.css";
@@ -55,13 +59,13 @@ export function Hero() {
           </p>
 
           <h1 id="hero-title" className={s.h1}>
-            Say it. Own it.
+            {HERO.title.slice(0, -HERO.titleEm.length)}
+            <em className={s.em}>{HERO.titleEm}</em>
           </h1>
 
-          <p className={s.sub}>
-            Tell Vera your goal in plain words. She builds a plan of real stocks, a contract checks it, and you own it
-            in one tap.
-          </p>
+          <p className={s.sub}>{HERO.sub}</p>
+
+          <MarketNowLine className={s.market} />
 
           <div className={s.ctas}>
             {beta ? (
