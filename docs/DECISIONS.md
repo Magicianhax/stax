@@ -110,3 +110,39 @@ natural-language plans, baskets, Autopilot, no-seed-phrase onboarding and the on
 plus the market-hours and price-gap layer that only the RWA Data API enables.
 **Consequences:** Both $2,000 special prizes are out of reach; the main placements are the target.
 All build effort goes to the product and to the developer-experience report.
+
+## ADR-0011 BNB Chain is the default network (2026-09-24)
+**Status:** accepted
+**Context:** The hackathon entry is the BSC product; judges should land on it without finding a
+network switch.
+**Decision:** `DEFAULT_CHAIN_KEY = "bsc"`, listed first, server fallback included. The stored choice
+moved to a versioned key so returning users land on BNB Chain once. Gifts stay on Base, so gift
+screens switch to Base themselves.
+**Consequences:** Base remains one tap away in Settings; Base users see BNB Chain once.
+
+## ADR-0012 Binance dry-run of the whole user operation (2026-09-24)
+**Status:** accepted
+**Context:** The Transaction API simulates exactly one transaction, with no bundle and no state
+override (confirmed live). A first trade is an approve followed by a swap.
+**Decision:** Simulate the smart account's `executeBatch([approve, swap])` as one transaction from
+the EntryPoint. When the account isn't deployed yet, report "skipped", never "passed". A "failed"
+check blocks the trade.
+**Consequences:** Every trade from a deployed account gets a real Binance check before signing; a
+brand-new account's first trade is honestly unchecked.
+
+## ADR-0013 Rules buy only (2026-09-25)
+**Status:** accepted
+**Context:** StaxExecutor's only entry point buys (`investWithAI`); it has no way to sell a token
+back to USDT.
+**Decision:** Rebalance, safety switch, mix keeper and earnings act by adding new cash to what is
+short, never by selling. The screen says so. Options for later: run rules on the direct smart-account
+path (sells work, loses the on-chain plan check), or deploy an executor version that can sell.
+**Consequences:** Rules never fake a sell; a portfolio corrects more slowly.
+
+## ADR-0014 Earnings dates come from Yahoo's public page (2026-09-25)
+**Status:** accepted
+**Context:** No Binance endpoint has earnings dates, and Yahoo's JSON API now refuses keyless
+calls ("Invalid Crumb").
+**Decision:** Read the date from Yahoo's public quote page, cache 12 h, and show "not announced" on
+any failure. Never a guessed date.
+**Consequences:** Fragile if Yahoo reshapes the page; the feature degrades to "not announced".
