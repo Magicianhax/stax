@@ -9,8 +9,8 @@ import {
   TWITTER_HANDLE,
   GITHUB_URL,
   AWARDS,
+  SITE_DESCRIPTION,
 } from "@/lib/seo";
-import { SITE_DESCRIPTION_BSC as SITE_DESCRIPTION } from "@/lib/site/landing";
 
 // Stax "Soft" theme fonts (see globals.css):
 //   UI       → Hanken Grotesk  → --font-hanken     (clean humanist sans)

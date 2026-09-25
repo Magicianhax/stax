@@ -6,7 +6,7 @@ export const SITE_NAME = "Stax";
 
 export const SITE_TAGLINE = "Invest in plain words";
 export const SITE_DESCRIPTION =
-  "Own real companies in plain words. Vera, an AI broker, builds the plan and a contract on Base checks it before money moves. Tokenized stocks, email login, no seed phrase. For eligible non-US users.";
+  "Real tokenized stocks on BNB Chain, from bStock and Ondo. Vera, an AI broker, plans from what’s open and won’t buy at a weekend premium. Email login, no seed phrase, no Stax fee.";
 
 export const TWITTER_HANDLE = "@stax_market";
 export const GITHUB_URL = "https://github.com/Magicianhax/stax";
@@ -29,7 +29,7 @@ export const AWARDS = [
 
 /** Eligibility, in the words used on the site. */
 export const ELIGIBILITY =
-  "Stocks are issued by Coinbase on Base and Backed on Mantle for eligible non-US users.";
+  "Stocks are issued by bStock and Ondo on BNB Chain, Coinbase on Base and Backed on Mantle, for eligible non-US users.";
 
 // OG/Twitter share image dimensions (Open Graph standard).
 export const OG_SIZE = { width: 1200, height: 630 } as const;
