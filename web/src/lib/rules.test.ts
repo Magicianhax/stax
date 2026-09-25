@@ -17,6 +17,7 @@ import {
   formatRuleReceipt,
   describeRule,
   RULES_NEEDING_HOLDINGS,
+  HOLDINGS_RULE_TYPES,
   type Rule,
   type RuleIntent,
 } from "./rules";
@@ -185,13 +186,19 @@ describe("evaluateBuyDiscount", () => {
 });
 
 describe("RULES_NEEDING_HOLDINGS", () => {
-  it("lists exactly the three rules the engine can't yet act on without a live holdings read", () => {
-    expect(RULES_NEEDING_HOLDINGS).toEqual(["rebalance", "safety_switch", "mix_keeper"]);
+  it("is empty now that rebalance, safety_switch and mix_keeper can all act (buy-only) on a real holdings read", () => {
+    expect(RULES_NEEDING_HOLDINGS).toEqual([]);
+  });
+});
+
+describe("HOLDINGS_RULE_TYPES", () => {
+  it("lists exactly the three rules whose plan depends on ctx.holdings", () => {
+    expect(HOLDINGS_RULE_TYPES).toEqual(["rebalance", "safety_switch", "mix_keeper"]);
   });
 
-  it("excludes the two rules that already act for real (schedule_buy, buy_discount)", () => {
-    expect(RULES_NEEDING_HOLDINGS).not.toContain("schedule_buy");
-    expect(RULES_NEEDING_HOLDINGS).not.toContain("buy_discount");
+  it("excludes the two rules that never look at holdings (schedule_buy, buy_discount)", () => {
+    expect(HOLDINGS_RULE_TYPES).not.toContain("schedule_buy");
+    expect(HOLDINGS_RULE_TYPES).not.toContain("buy_discount");
   });
 });
 

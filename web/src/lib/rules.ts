@@ -166,14 +166,23 @@ export interface RuleCard {
 }
 
 /**
- * Rule types rulesEngine.ts cannot act on for real yet: rebalance, safety_switch and mix_keeper
- * all need a live per-asset holdings read (see rulesEngine.ts's file header) that isn't wired up
- * — without it they always resolve to a plain "waiting on your holdings" skip. Shown as "coming
- * soon" in the picker and refused both where Vera proposes a rule (rulesParser.ts) and where a
- * user saves one directly (`POST /api/autopilot`), so a card that can never act is never one you
- * can turn on and quietly get nothing from (review finding #5).
+ * Rule types rulesEngine.ts cannot act on for real yet. Empty now: rebalance, safety_switch and
+ * mix_keeper used to sit here because they need a live per-asset holdings read that wasn't wired
+ * up (a plain "waiting on your holdings" skip, always) — `lib/server/bscHoldings.ts` now supplies
+ * that read (see rulesEngine.ts's file header for how they act on it: buy-only, since the BSC
+ * executor can't sell). Kept as the one gate the picker, `POST /api/autopilot` and Vera's parser
+ * (rulesParser.ts) all check, so a future rule type that genuinely can't act yet has somewhere to
+ * go without three call sites drifting out of sync (review finding #5).
  */
-export const RULES_NEEDING_HOLDINGS: readonly RuleType[] = ["rebalance", "safety_switch", "mix_keeper"];
+export const RULES_NEEDING_HOLDINGS: readonly RuleType[] = [];
+
+/**
+ * Rule types whose plan depends on `RuleRunContext.holdings` — the caller that builds that
+ * context (`autopilotPlan.ts`) reads this to know which rules are worth fetching a live BSC
+ * balance read for at all (buy_discount and earnings ignore holdings entirely; fetching for them
+ * would just be a wasted Binance/RPC round trip every run).
+ */
+export const HOLDINGS_RULE_TYPES: readonly RuleType[] = ["rebalance", "safety_switch", "mix_keeper"];
 
 export const RULE_COMING_SOON_REASON =
   "Coming soon: this rule needs to read your current BNB Chain holdings, and that isn't connected yet.";
