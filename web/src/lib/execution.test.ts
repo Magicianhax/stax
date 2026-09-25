@@ -6,10 +6,11 @@
 // and refuse anything else before the client ever asks the wallet to sign.
 import { describe, expect, it } from "vitest";
 import { getChain } from "./chains";
-import { assertExecCallsAreSafe, type ExecCall } from "./execution";
+import { assertExecCallsAreSafe, assertSavingsCallsAreSafe, type ExecCall } from "./execution";
 
 const bsc = getChain("bsc");
 const DEAD = "0x000000000000000000000000000000000000dEaD" as const;
+const VENUS_VUSDT = "0xfD5840Cd36d94D7229439859C0112a4185BC0255" as const;
 
 describe("assertExecCallsAreSafe", () => {
   it("passes calls to cash, a catalog asset, and the aggregator router", () => {
@@ -33,5 +34,38 @@ describe("assertExecCallsAreSafe", () => {
       { to: DEAD, data: "0x2" },
     ];
     expect(() => assertExecCallsAreSafe(bsc, calls)).toThrow();
+  });
+
+  it("does not allow Venus's vUSDT market — that's Savings' own, narrower list", () => {
+    const calls: ExecCall[] = [{ to: VENUS_VUSDT, data: "0x1" }];
+    expect(() => assertExecCallsAreSafe(bsc, calls)).toThrow();
+  });
+});
+
+// Pin for the wave 5b "money" stream: assertSavingsCallsAreSafe is the only thing standing
+// between an untrusted /api/savings response and a blind wallet signature, same as
+// assertExecCallsAreSafe above but scoped to Savings' own two addresses.
+describe("assertSavingsCallsAreSafe", () => {
+  it("passes calls to cash and the pinned Venus vUSDT contract", () => {
+    const calls: ExecCall[] = [
+      { to: bsc.usdc.address, data: "0x1" },
+      { to: VENUS_VUSDT, data: "0x2" },
+    ];
+    expect(assertSavingsCallsAreSafe(bsc, calls)).toBe(calls);
+  });
+
+  it("refuses the trading router — a compromised savings response must not be able to swap", () => {
+    const calls: ExecCall[] = [{ to: bsc.routers.binance!, data: "0x1" }];
+    expect(() => assertSavingsCallsAreSafe(bsc, calls)).toThrow(/isn't cash or the pinned Venus contract/);
+  });
+
+  it("refuses a catalog asset address — a compromised savings response must not be able to buy stocks", () => {
+    const asset = bsc.assets.all.find((a) => a.address)!;
+    const calls: ExecCall[] = [{ to: asset.address!, data: "0x1" }];
+    expect(() => assertSavingsCallsAreSafe(bsc, calls)).toThrow();
+  });
+
+  it("refuses an unrecognized address", () => {
+    expect(() => assertSavingsCallsAreSafe(bsc, [{ to: DEAD, data: "0x1" }])).toThrow(/dEaD/i);
   });
 });

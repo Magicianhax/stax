@@ -1,0 +1,32 @@
+{
+  "binanceChainId": "56",
+  "defiProtocolId": "venus",
+  "protocolName": "Venus",
+  "protocolLogo": "https://bin.bnbstatic.com/image/admin_mgs_image_upload/20241028/0d696959-4857-4e0d-a2b5-3022264d34b5.jpg",
+  "investmentId": "5b77bfd8d8f7c18e9ee0d8f331c4d78f56744eed8addbe2e9970c0ef37e763cb",
+  "investmentName": "USDT",
+  "investType": "Earn",
+  "investable": true,
+  "apyBps": 338,
+  "apyDisplay": "3.38%",
+  "apyType": "APY",
+  "tvl": "180177293.37",
+  "poolAddress": null,
+  "feeRate": null,
+  "assetTokenList": [
+    {
+      "tokenAddress": "0x55d398326f99059ff775485246999027b3197955",
+      "tokenName": "Tether USDT",
+      "tokenSymbol": "USDT"
+    }
+  ],
+  "rewardTokenList": [
+    {
+      "tokenAddress": "0x55d398326f99059ff775485246999027b3197955",
+      "tokenName": "Tether USDT",
+      "tokenSymbol": "USDT"
+    }
+  ],
+  "lpTokenList": [],
+  "borrowTokenList": []
+}

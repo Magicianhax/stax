@@ -24,6 +24,7 @@ import { usd, shortAddress, txUrl } from "@/lib/format";
 import { useChain } from "@/lib/chains/active";
 import { haptic } from "@/lib/haptics";
 import { ONRAMP_PRESETS, offrampUrl, onrampEnabled, onrampSupported, onrampUrl } from "@/lib/onramp";
+import { SavingsCard } from "@/components/lite/savings/SavingsCard";
 import type { WalletTx } from "@/lib/walletTx";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { DEMO_TRANSACTIONS } from "@/lib/demo/demoData";
@@ -284,6 +285,9 @@ export function WalletScreen({
           <Icon name="chevR" size={18} style={{ color: "var(--ink-3)", flex: "none" }} />
         </button>
       </div>
+
+      {/* savings — BSC only, right under cash */}
+      {chain.key === "bsc" && <SavingsCard address={address ?? undefined} />}
 
       {/* cash flow — net in/out by week, from the same transfers listed below */}
       {txList.length > 0 && (

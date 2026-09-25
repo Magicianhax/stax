@@ -1,0 +1,9 @@
+# False positives only — every fingerprint here is a PUBLIC on-chain contract address (BSC USDT,
+# a Venus market), quoted in test fixtures/specs, never a credential. gitleaks' generic-api-key
+# rule flags 0x-prefixed 40-hex-char strings by entropy alone, which a token/contract address
+# always matches. Real secrets (WEB3_API_KEY / WEB3_SECRET_KEY) live only in local.env, are never
+# committed, and are not exempted here.
+web/src/lib/server/binance/__fixtures__/defi_build_deposit.json:generic-api-key:30
+web/src/lib/server/binance/defi.test.ts:generic-api-key:55
+web/src/lib/server/binance/defi.test.ts:generic-api-key:70
+web/src/lib/server/binance/defi.test.ts:generic-api-key:81

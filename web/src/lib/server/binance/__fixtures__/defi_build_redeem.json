@@ -1,0 +1,17 @@
+{
+  "_note": "Synthetic, not LIVE: the one LIVE redeem call in this research (a wallet with no Venus USDT position) returned code 40456 'no position found' rather than calldata (see defi_redeem_no_position.json). This fixture pins the successful shape docs/BINANCE-WEB3.md's DeFi section describes ('dataList: typically [REDEEM] or [APPROVE, REDEEM]') so redeem parsing has a shape to test against; verify it against a real position before shipping past the hackathon.",
+  "dataList": [
+    {
+      "callDataType": "REDEEM",
+      "from": "0xF977814e90dA44bFA03b6295A0616a897441aceC",
+      "to": "0xfD5840Cd36d94D7229439859C0112a4185BC0255",
+      "value": "0x0",
+      "data": "0xdb006a7500000000000000000000000000000000000000000000000d966dd5e6ba0000",
+      "gasLimit": "300000",
+      "gasPrice": "53613186",
+      "maxPriorityFeePerGas": "53613186",
+      "maxFeePerGas": "53613186"
+    }
+  ],
+  "redeemDelayDays": [0, 0]
+}
