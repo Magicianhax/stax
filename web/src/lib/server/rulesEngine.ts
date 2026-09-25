@@ -6,13 +6,24 @@ import "server-only";
 //
 // buy_discount is fully wired: it only needs the RWA catalog (lib/server/rwaCatalog.ts), which
 // this stream already reads elsewhere. rebalance, safety_switch and mix_keeper also need the
-// account's CURRENT per-asset holdings, and this stream owns no live balance reader for BSC —
-// that's the `money` stream's Wallet API work (wave5 plan). Rather than guess, or read balances
-// with machinery this stream doesn't own, `ctx.holdings` is an explicit optional input: absent,
-// these three rules report a plain "waiting on your holdings" skip, same as `planForAutopilot`
-// already does for a genuinely un-actionable state (a missing basket, a closed market). Once a
-// caller supplies real holdings (wiringNeeded), the same evaluators run for real with no change
-// here.
+// account's CURRENT per-asset holdings; `ctx.holdings` is an explicit optional input — absent
+// (the caller's balance read failed, or hasn't run), these three rules report a plain "waiting on
+// your holdings" skip, same as `planForAutopilot` already does for a genuinely un-actionable state
+// (a missing basket, a closed market). `autopilotPlan.ts` supplies real holdings from
+// `lib/server/bscHoldings.ts` for exactly these three rule types (`HOLDINGS_RULE_TYPES`).
+//
+// Sell intents, once holdings are known: `contracts/contracts/StaxExecutor.sol`'s only entry
+// point, `investWithAI`, pulls USDC from the caller and forwards the tokens it buys back to them —
+// there is no function anywhere in that contract that pulls an ERC20 token FROM the user and
+// swaps it back to cash. A rule's sell leg can therefore never actually execute on this chain, and
+// `autopilotExecutor.ts` refuses one outright rather than pretend otherwise (see its own header).
+// Rather than leave rebalance/safety_switch/mix_keeper permanently "coming soon" for a limitation
+// that has nothing to do with holdings, each one below runs its pure evaluator (lib/rules.ts)
+// UNCAPPED (`UNCAPPED_BUDGET` — big enough that the sell/buy pairing those evaluators do never
+// binds), to see how far the account has genuinely drifted, then keeps only the resulting BUY
+// legs — funded by this run's own new cash, not by a sale that can't happen — and drops every
+// sell (`buyOnly`, capped at the period's real budget like every other rule). The overweight side
+// is simply left alone until the day the executor can sell.
 import {
   evaluateBuyDiscount,
   evaluateMixKeeper,
@@ -39,6 +50,28 @@ const MIX_TOLERANCE_PCT = 5;
 /** The ticker whose reference price stands in for "the market" for the safety switch. */
 const MARKET_PROXY_TICKER = "SPY";
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * Passed as `budgetUsd` to a pure evaluator (lib/rules.ts) so its own sell/buy budget cap never
+ * binds — the real cap is applied afterward by `buyOnly`, against actual cash rather than a sale
+ * that can't happen (see this file's header).
+ */
+const UNCAPPED_BUDGET = Number.MAX_SAFE_INTEGER;
+
+/**
+ * Keeps only the buy legs from an evaluator's sell+buy output, capped at `budgetUsd` (this run's
+ * real new cash), scaling every buy down together if the uncapped total is more than that budget
+ * affords. See this file's header for why a sell can never be kept.
+ */
+function buyOnly(intents: readonly RuleIntent[], budgetUsd: number): RuleIntent[] {
+  const buys = intents.filter((i) => i.action === "buy");
+  const total = buys.reduce((s, i) => s + i.usd, 0);
+  if (total <= 0 || total <= budgetUsd) return buys;
+  const scale = budgetUsd / total;
+  return buys.map((b) => ({ ...b, usd: round2(b.usd * scale) }));
+}
 
 export interface RuleRunContext {
   nowMs: number;
@@ -104,8 +137,8 @@ async function planBuyDiscount(chain: StaxChain, rule: Extract<Rule, { type: "bu
 function planRebalance(rule: Extract<Rule, { type: "rebalance" }>, ctx: RuleRunContext): RulePlanResult {
   if (!ctx.holdings) return skip("Waiting on your current holdings before Vera can rebalance.");
   if (!ctx.targets || ctx.targets.length === 0) return skip("Pick a basket for Vera to rebalance against.");
-  const intents = evaluateRebalance(ctx.holdings as HoldingWeight[], ctx.targets, rule.driftPct, ctx.budgetUsd);
-  return ok(rule, intents, ctx.basketName);
+  const uncapped = evaluateRebalance(ctx.holdings as HoldingWeight[], ctx.targets, rule.driftPct, UNCAPPED_BUDGET);
+  return ok(rule, buyOnly(uncapped, ctx.budgetUsd), ctx.basketName);
 }
 
 /**
@@ -130,14 +163,14 @@ async function planSafetySwitch(chain: StaxChain, rule: Extract<Rule, { type: "s
   const drop = await marketDropPct(chain);
   if (drop === null) return skip("Couldn't read today's market move yet.");
   const stockHoldings = ctx.holdings.filter((h) => h.tier === "stock");
-  const intents = evaluateSafetySwitch(stockHoldings, drop, rule.dropPct, rule.movePct, SAFER_SYMBOLS, ctx.budgetUsd);
-  return ok(rule, intents);
+  const uncapped = evaluateSafetySwitch(stockHoldings, drop, rule.dropPct, rule.movePct, SAFER_SYMBOLS, UNCAPPED_BUDGET);
+  return ok(rule, buyOnly(uncapped, ctx.budgetUsd));
 }
 
 function planMixKeeper(rule: Extract<Rule, { type: "mix_keeper" }>, ctx: RuleRunContext): RulePlanResult {
   if (!ctx.holdings) return skip("Waiting on your current holdings before Vera can keep the mix.");
-  const intents = evaluateMixKeeper(ctx.holdings, rule.stockPct, MIX_TOLERANCE_PCT, ctx.budgetUsd);
-  return ok(rule, intents);
+  const uncapped = evaluateMixKeeper(ctx.holdings, rule.stockPct, MIX_TOLERANCE_PCT, UNCAPPED_BUDGET);
+  return ok(rule, buyOnly(uncapped, ctx.budgetUsd));
 }
 
 /**

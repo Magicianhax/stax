@@ -15,10 +15,13 @@ import "server-only";
 //
 // Rule runs (step 2's third case): a rule's buy intents are turned into an Allocation right here
 // and handed to the exact same buildLegs/sign/submit pipeline a goal or basket plan already uses
-// — no second leg-building path to keep in sync. A rule that also calls for a SELL (rebalance,
-// safety_switch, mix_keeper trimming an overweight holding) is refused instead of guessed at:
-// pricing a sell needs the account's live per-asset holdings, which is a Wallet API integration
-// this stream doesn't own (rulesEngine.ts's header has the detail; wiringNeeded lists it).
+// — no second leg-building path to keep in sync. A rule plan that calls for a SELL is refused
+// instead of guessed at: `StaxExecutor.sol`'s only entry point pulls cash FROM the caller and
+// forwards purchased tokens TO them — it has no function that pulls a token back and sells it —
+// so a sell can never actually execute on this chain. rulesEngine.ts already keeps
+// rebalance/safety_switch/mix_keeper buy-only for exactly this reason (its own header has the
+// detail), so this refusal should be unreachable today; it stays as the last-resort safety net in
+// case a future rule type, or a bug in that buy-only conversion, ever hands this a sell anyway.
 import { encodeFunctionData } from "viem";
 import { checkBounds, type AutopilotConfig } from "@/lib/autopilot";
 import { getChain, assetBySymbol } from "@/lib/chains";
