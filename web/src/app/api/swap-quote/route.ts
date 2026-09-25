@@ -92,6 +92,13 @@ export async function POST(req: NextRequest) {
   if (!limit.ok) return tooManyRequests(limit.retryAfter);
 
   const chain = chainFromRequest(req);
+  // BSC quotes spend Binance's shared 5-per-window budget (security review 2026-09-25): one
+  // user may not take more than one live quote every few seconds, so a busy screen can't starve
+  // everyone else's trades. Repeat price checks are also shared for 15s in buildBinanceLeg.
+  if (chain.routers.binance) {
+    const bscLimit = await rateLimit(`swap-quote:bsc:${user.userId}`, 20, 60_000);
+    if (!bscLimit.ok) return tooManyRequests(bscLimit.retryAfter);
+  }
   if (!chain.routers.kyber && !chain.routers.binance) {
     return badRequest(`Aggregator quotes are not available on ${chain.name}.`);
   }

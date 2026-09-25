@@ -24,6 +24,7 @@ import { rawToUsd } from "@/lib/units";
 import type { ExecCall } from "@/lib/execution";
 import type { Asset, StaxChain } from "@/lib/chains/types";
 import { getBinanceWeb3 } from "./binance";
+import { cached } from "./cache";
 import { BinanceWeb3Error } from "./binance/types";
 import type { RwaToken } from "./binance/types";
 
@@ -112,9 +113,13 @@ export async function buildBinanceLeg(a: BinanceLegArgs): Promise<BinanceLeg> {
   if (!router) throw new Error(`Binance aggregator isn't configured on ${a.chain.name}.`);
 
   const binance = getBinanceWeb3();
-  const q = await binance
-    .quote({ fromToken: a.tokenIn, toToken: a.tokenOut, amount: a.amountIn, taker: a.taker })
-    .catch((err) => wrap(a.symbol, err));
+  const fetchQuote = () =>
+    binance.quote({ fromToken: a.tokenIn, toToken: a.tokenOut, amount: a.amountIn, taker: a.taker }).catch((err) => wrap(a.symbol, err));
+  // A price check (build=false) is shared for 15 s across every caller asking the same pair and
+  // amount: TradeScreen re-polls every 15 s per viewer, and each live quote spends one call of
+  // Binance's shared 5-per-window budget that real trades, plan legs and dry runs also need.
+  // The swap build always gets a fresh quote.
+  const q = a.build === false ? await sharedPriceQuote(a, fetchQuote) : await fetchQuote();
   if (q.executionMode !== "SWAP") {
     throw new BinanceLegRefusal(`${a.symbol}: Binance returned an RFQ route, which a contract can't sign.`);
   }
@@ -246,4 +251,27 @@ export function cryptoLegUsdValue(
   if (side === "buy") return rawToUsd(chain, amountIn);
   if (priceUsd === undefined || !Number.isFinite(priceUsd) || priceUsd <= 0) return Number.NaN;
   return fromUnits(amountIn, asset.decimals ?? 18) * priceUsd;
+}
+
+type Quote = Awaited<ReturnType<ReturnType<typeof getBinanceWeb3>["quote"]>>;
+/** JSON-safe copy of the fields a price check reads (bigints don't survive the Redis cache). */
+type StoredQuote = Omit<Quote, "fromTokenAmount" | "toTokenAmount" | "raw"> & { fromTokenAmount: string; toTokenAmount: string };
+
+const PRICE_QUOTE_TTL_S = 15;
+
+async function sharedPriceQuote(a: BinanceLegArgs, fetchQuote: () => Promise<Quote>): Promise<Quote> {
+  const key = `binance:pq:${a.chain.key}:${a.tokenIn.toLowerCase()}:${a.tokenOut.toLowerCase()}:${a.amountIn}`;
+  const stored = await cached<StoredQuote>(key, PRICE_QUOTE_TTL_S, async () => {
+    const q = await fetchQuote();
+    return {
+      quoteId: q.quoteId,
+      vendorName: q.vendorName,
+      executionMode: q.executionMode,
+      priceImpactPercent: q.priceImpactPercent,
+      approveTarget: q.approveTarget,
+      fromTokenAmount: q.fromTokenAmount.toString(),
+      toTokenAmount: q.toTokenAmount.toString(),
+    };
+  });
+  return { ...stored, fromTokenAmount: BigInt(stored.fromTokenAmount), toTokenAmount: BigInt(stored.toTokenAmount), raw: undefined };
 }

@@ -338,3 +338,23 @@ describe("cryptoLegUsdValue", () => {
     expect(cryptoLegUsdValue("sell", bsc, BigInt(1), btcb, undefined)).toBeNaN();
   });
 });
+
+describe("shared price checks", () => {
+  it("serves a repeat price check for the same pair and amount from one Binance quote", async () => {
+    const amountIn = usdToRaw(bsc, 11.37);
+    quoteSpy.mockResolvedValue({ ...goodQuote, fromTokenAmount: amountIn });
+    const first = await buildBinanceLeg(args({ amountIn, usdValue: 11.37, build: false }));
+    const second = await buildBinanceLeg(args({ amountIn, usdValue: 11.37, build: false }));
+    expect(quoteSpy).toHaveBeenCalledTimes(1);
+    expect(second.expectedOut).toBe(first.expectedOut);
+    expect(typeof second.expectedOut).toBe("bigint");
+  });
+
+  it("always takes a fresh quote when building the swap to sign", async () => {
+    const amountIn = usdToRaw(bsc, 12.41);
+    quoteSpy.mockResolvedValue({ ...goodQuote, fromTokenAmount: amountIn });
+    await buildBinanceLeg(args({ amountIn, usdValue: 12.41, build: false }));
+    await buildBinanceLeg(args({ amountIn, usdValue: 12.41 }));
+    expect(quoteSpy).toHaveBeenCalledTimes(2);
+  });
+});
