@@ -47,6 +47,7 @@ const RuleInput = z.discriminatedUnion("type", [
   z.object({ type: z.literal("buy_discount"), symbol: z.string().min(1).max(12), discountPct: z.number() }),
   z.object({ type: z.literal("safety_switch"), dropPct: z.number(), movePct: z.number() }),
   z.object({ type: z.literal("mix_keeper"), stockPct: z.number() }),
+  z.object({ type: z.literal("earnings"), symbol: z.string().min(1).max(12), buyDaysBefore: z.number(), sellDaysAfter: z.number() }),
 ]);
 const ConfigInput = z.object({
   walletId: z.string().min(1), // Privy embedded-wallet id (server signs for this)
@@ -150,7 +151,7 @@ export async function POST(req: NextRequest) {
     // stored goal text (see file header) sanitized to its bounded defaults.
     let goal = body.goal;
     if (body.rule && body.rule.type !== "schedule_buy") {
-      if (body.rule.type === "buy_discount") {
+      if (body.rule.type === "buy_discount" || body.rule.type === "earnings") {
         const symbols = new Set(investableAssets(getChain(chain)).map((a) => a.symbol));
         if (!symbols.has(body.rule.symbol)) {
           return badRequest(`${body.rule.symbol} isn't tradeable on this chain right now.`);

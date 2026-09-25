@@ -380,7 +380,7 @@ describe("describeRule — the live 'What Vera will do' preview while setting a 
 
   it("describes earnings with the actual symbol and windows", () => {
     expect(describeRule({ type: "earnings", symbol: "AAPL", buyDaysBefore: 3, sellDaysAfter: 1 })).toBe(
-      "Vera will buy AAPL 3 days before its earnings and sell it 1 day after.",
+      "Vera will buy AAPL 3 days before it reports results, and keep it after.",
     );
   });
 });

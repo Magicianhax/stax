@@ -15,6 +15,7 @@ import { useEffect, useState } from "react";
 import { usePortfolio, type Holding } from "@/hooks/useBalances";
 import { useActivity } from "@/hooks/useActivity";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
+import { useSavingsBalance } from "@/hooks/useSavings";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { Icon, HoldingRow, LogoCluster, SectionTitle, Sparkline, VerifiedBadge, NetworkChip } from "@/components/design";
 import { Money, Reveal } from "@/components/motion";
@@ -104,9 +105,11 @@ export function HomeScreen({
   const balance = port?.cashUsd ?? 0;
   const holdings: Holding[] = port?.holdings ?? [];
   const invested = port?.investedUsd ?? 0;
-  const total = port?.totalUsd ?? 0;
+  // Savings (Venus, BSC) isn't in the portfolio total; add it so Home and Wallet agree.
+  const { data: savingsBal } = useSavingsBalance(address ?? undefined);
+  const total = (port?.totalUsd ?? 0) + (chain.key === "bsc" ? (savingsBal ?? 0) : 0);
 
-  const today = todayChange(holdings, total);
+  const today = todayChange(holdings, port?.totalUsd ?? 0);
   const up = (today?.abs ?? 0) >= 0;
   const todayLine = useTodayLine();
   // Demo: the deterministic portfolio series (stable screenshots). Real: the

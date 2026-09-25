@@ -528,7 +528,8 @@ export function describeRule(rule: Rule): string {
     case "mix_keeper":
       return `Vera will keep about ${rule.stockPct}% of your money in stocks and ${100 - rule.stockPct}% in crypto.`;
     case "earnings":
-      return `Vera will buy ${rule.symbol} ${rule.buyDaysBefore} day${rule.buyDaysBefore === 1 ? "" : "s"} before its earnings and sell it ${rule.sellDaysAfter} day${rule.sellDaysAfter === 1 ? "" : "s"} after.`;
+      // Buy-only (ADR-0013): the executor can't sell, so Vera keeps the stock after results.
+      return `Vera will buy ${rule.symbol} ${rule.buyDaysBefore} day${rule.buyDaysBefore === 1 ? "" : "s"} before it reports results, and keep it after.`;
   }
 }
 
