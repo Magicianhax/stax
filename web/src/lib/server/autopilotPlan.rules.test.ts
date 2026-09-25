@@ -16,6 +16,9 @@ vi.mock("./rwaCatalog", () => ({ bscCatalogSnapshot: (...args: unknown[]) => bsc
 const getSpreadHistorySpy = vi.fn();
 vi.mock("./spreadStore", () => ({ getSpreadHistory: (...args: unknown[]) => getSpreadHistorySpy(...args) }));
 
+const getBscHoldingsSpy = vi.fn();
+vi.mock("./bscHoldings", () => ({ getBscHoldings: (...args: unknown[]) => getBscHoldingsSpy(...args) }));
+
 // basketsStore pulls in the Neon/Drizzle client, which needs a real DATABASE_URL at import time.
 // Nothing under test here saves or reads a personal (stored) basket — every fixture uses a
 // curated id, resolved entirely in code — so the store is stubbed out rather than touched.
@@ -79,6 +82,9 @@ beforeEach(() => {
   generateObjectSpy.mockReset();
   bscCatalogSnapshotSpy.mockReset();
   getSpreadHistorySpy.mockReset().mockResolvedValue([]);
+  // Default: no live holdings read (matches "the read hasn't happened / failed" -> the existing
+  // "waiting on your holdings" skip every test below that doesn't care about holdings still gets.
+  getBscHoldingsSpy.mockReset().mockResolvedValue(null);
 });
 
 describe("planAutopilotRun: no rule encoded (every existing autopilot)", () => {
@@ -152,8 +158,49 @@ describe("planAutopilotRun: a real rule", () => {
 
     const plan = await planAutopilotRun(encoded, deployedBsc, NOW_S);
 
-    // No holdings supplied yet (wiringNeeded) — still an honest skip, but it must have found
-    // the curated basket's name/targets rather than refusing "pick a basket" outright.
+    // The live holdings read failed (mocked null above) — still an honest skip, but it must have
+    // found the curated basket's name/targets rather than refusing "pick a basket" outright.
     expect(plan).toEqual(expect.objectContaining({ ok: false, reason: expect.stringContaining("holdings") }));
+  });
+
+  it("fetches a live holdings read for a holdings-based rule (rebalance), for this config's own smart account", async () => {
+    const encoded = cfg({
+      goal: encodeRuleGoal({ type: "rebalance", driftPct: 10 }, "Keep my basket balanced"),
+      basketId: `bsc:us-tech-giants`,
+    });
+
+    await planAutopilotRun(encoded, deployedBsc, NOW_S);
+
+    expect(getBscHoldingsSpy).toHaveBeenCalledWith(deployedBsc, encoded.smartAccount, NOW_S * 1000);
+  });
+
+  it("never fetches a holdings read for buy_discount — it doesn't look at holdings at all", async () => {
+    bscCatalogSnapshotSpy.mockResolvedValue({ asOf: NOW_S * 1000, tickers: [ticker({ venues: [venue({ gapPct: -3 })] })] });
+    const encoded = cfg({ goal: encodeRuleGoal({ type: "buy_discount", symbol: "NVDA", discountPct: 2 }, "Buy NVDA cheap") });
+
+    await planAutopilotRun(encoded, deployedBsc, NOW_S);
+
+    expect(getBscHoldingsSpy).not.toHaveBeenCalled();
+  });
+
+  it("acts (buy-only) on a rebalance rule once the live holdings read comes back with a real drift to fix", async () => {
+    // NVDA is 100% of the account; the "US Tech Giants" basket targets it at 25% (see
+    // lib/baskets.ts) — everything else is underweight from zero.
+    getBscHoldingsSpy.mockResolvedValue([{ symbol: "NVDA", usdValue: 100, tier: "stock" }]);
+    const encoded = cfg({
+      goal: encodeRuleGoal({ type: "rebalance", driftPct: 10 }, "Keep my basket balanced"),
+      basketId: `bsc:us-tech-giants`,
+      amountUsd: 25,
+    });
+
+    const plan = await planAutopilotRun(encoded, deployedBsc, NOW_S);
+
+    expect(plan.ok).toBe(true);
+    if (plan.ok && "intents" in plan) {
+      expect(plan.intents.length).toBeGreaterThan(0);
+      // Buy-only: the executor can't sell the NVDA overweight, so every intent here must be a buy.
+      expect(plan.intents.every((i) => i.action === "buy")).toBe(true);
+      expect(plan.intents.some((i) => i.symbol === "NVDA")).toBe(false);
+    }
   });
 });

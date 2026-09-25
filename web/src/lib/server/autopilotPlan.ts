@@ -15,9 +15,10 @@ import { checkBasketCeiling, type AutopilotConfig } from "@/lib/autopilot";
 import type { Allocation } from "@/lib/allocation-schema";
 import { basketToAllocation, curatedBasketById, isBasketInvestable, isBasketShortId, type Basket } from "@/lib/baskets";
 import { getChain, type StaxChain } from "@/lib/chains";
-import { decodeRuleGoal, type Rule, type RuleIntent } from "@/lib/rules";
+import { decodeRuleGoal, HOLDINGS_RULE_TYPES, type Rule, type RuleIntent } from "@/lib/rules";
 import { buildAllocation } from "@/lib/server/allocate";
 import { getBasket } from "@/lib/server/basketsStore";
+import { getBscHoldings } from "@/lib/server/bscHoldings";
 import { planRuleForAutopilot, type EvaluableRule } from "@/lib/server/rulesEngine";
 
 const RISK_CEILING_BPS = 10000;
@@ -146,7 +147,13 @@ export async function planAutopilotRun(
   }
 
   const rule = decoded.rule as EvaluableRule;
-  const result = await planRuleForAutopilot(chain, rule, { nowMs: nowSeconds * 1000, budgetUsd: cfg.amountUsd, targets, basketName });
+  // Only the three holdings-based rule types ever look at ctx.holdings (rulesEngine.ts) — a live
+  // BSC balance read is a Wallet API call plus a fresh RWA catalog pull, so it's only worth paying
+  // for when the rule actually needs it (buy_discount and earnings never do).
+  const holdings = HOLDINGS_RULE_TYPES.includes(rule.type)
+    ? ((await getBscHoldings(chain, cfg.smartAccount, nowSeconds * 1000)) ?? undefined)
+    : undefined;
+  const result = await planRuleForAutopilot(chain, rule, { nowMs: nowSeconds * 1000, budgetUsd: cfg.amountUsd, targets, basketName, holdings });
   if (!result.ok) return { ok: false, kind: "rule", status: "skipped", reason: result.reason };
   return { ok: true, kind: "rule", rule, intents: result.intents, receipt: result.receipt };
 }
