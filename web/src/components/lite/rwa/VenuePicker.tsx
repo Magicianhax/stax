@@ -144,18 +144,19 @@ export function VenuePicker({ ticker, venues, bestVenue, selected, onSelect, sty
                   nested
                   style={{ marginTop: 4 }}
                 />
-              </div>
-              <div style={{ textAlign: "right", flex: "none" }}>
-                <div className="tnum" style={{ fontWeight: 600, fontSize: 14.5, color: "var(--ink)" }}>
-                  {usd(v.tokenPrice)}
-                </div>
                 {words && (
-                  // --ink-3 measured 2.31:1 on this surface (design critique P1 #7); --ink-2 is
-                  // DESIGN.md's floor for anything a user must actually read, not just glance past.
-                  <div className="tnum" style={{ fontSize: 12, fontWeight: 600, marginTop: 1, color: "var(--ink-2)" }}>
+                  // Under the status, not beside the price: in the right column this sentence set
+                  // that column's width and squeezed the status to a word per line. --ink-2 because
+                  // --ink-3 measured 2.31:1 here (design critique P1 #7).
+                  <div className="tnum" style={{ fontSize: 12, fontWeight: 600, marginTop: 4, color: "var(--ink-2)" }}>
                     {words}
                   </div>
                 )}
+              </div>
+              <div style={{ textAlign: "right", flex: "none", alignSelf: "flex-start" }}>
+                <div className="tnum" style={{ fontWeight: 600, fontSize: 14.5, color: "var(--ink)" }}>
+                  {usd(v.tokenPrice)}
+                </div>
               </div>
             </button>
           );
