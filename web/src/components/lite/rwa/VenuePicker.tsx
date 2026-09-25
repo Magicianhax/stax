@@ -3,7 +3,7 @@
 // VenuePicker — "Who you buy from": both issuers of a BSC tokenized stock side by side, with WHY
 // one is picked (design critique P0 #4 — the old "Venues" title and bare "bStock" / "Ondo" names
 // gave no reason for the choice). Selects `bestVenue` by default (buyable, then the smallest gap
-// — lib/rwa.ts computes it) and tags that row "Best right now"; the buy flow itself (Task 12) is
+// — lib/rwa.ts computes it) and tags that row "Better price right now"; the buy flow itself (Task 12) is
 // what wires a selection into a quote, so this only tracks which row is chosen and reports it
 // upward.
 //
@@ -29,7 +29,7 @@ export interface VenuePickerProps {
   /**
    * The issuer the buy will actually use, when the caller already knows it (a board tap, a twin
    * position, an earlier tap). The ring follows it; `bestVenue` then only drives the
-   * "Best right now" tag, so the tag keeps meaning the catalog's own pick.
+   * "Better price right now" tag, so the tag keeps meaning the catalog's own pick.
    */
   selected?: RwaPlatform | null;
   /** Fires when the viewer picks a tradeable venue; the caller decides what that means. */
@@ -52,7 +52,8 @@ export function VenuePicker({ venues, bestVenue, selected, onSelect, style }: Ve
   // Design critique P0 #4 reviewer follow-up: only earns its place when there's a second row to
   // explain — AMZN has no twin, and a ticker whose twin `/tokens` doesn't list (AAPL/AAPLB)
   // renders one row too, and both used to show "Two companies make a token..." under a single row.
-  const explainer = venuePickerExplainer(venues.length, bestVenue);
+  const other = venues.find((v) => v.platform !== bestVenue);
+  const explainer = venuePickerExplainer(venues.length, bestVenue, other ? { buyable: other.buyable, state: other.state } : undefined);
 
   return (
     <div style={style}>
@@ -71,7 +72,7 @@ export function VenuePicker({ venues, bestVenue, selected, onSelect, style }: Ve
               aria-disabled={off}
               // Include the visible status and gap words, not just the price — a screen reader
               // must hear the same "why" a sighted viewer reads off the row (design critique #15).
-              aria-label={`${PLATFORM_LABEL[v.platform]}${best ? ", best right now" : ""}, ${usd(v.tokenPrice)}${words ? `, ${words}` : ""}, ${status}`}
+              aria-label={`${PLATFORM_LABEL[v.platform]}${best ? ", better price right now" : ""}, ${usd(v.tokenPrice)}${words ? `, ${words}` : ""}, ${status}`}
               onClick={() => {
                 if (off || !interactive) return;
                 setPicked(v.platform);
@@ -120,13 +121,24 @@ export function VenuePicker({ venues, bestVenue, selected, onSelect, style }: Ve
                   {best && (
                     <span
                       className="chip"
-                      style={{ height: 18, padding: "0 7px", fontSize: 10.5, fontWeight: 700, background: "var(--primary-soft)", color: "var(--primary)", boxShadow: "none" }}
+                      // --primary text on --primary-soft missed AA at 10.5px (design critique
+                      // P1 #13); the words take --ink, the tint alone carries the "good" signal.
+                      style={{ height: "auto", minHeight: 18, padding: "1px 7px", fontSize: 11, fontWeight: 700, background: "var(--primary-soft)", color: "var(--ink)", boxShadow: "none" }}
                     >
-                      Best right now
+                      Better price right now
                     </span>
                   )}
                 </div>
-                <MarketStatusBadge state={v.state} nextOpenMs={v.nextOpenMs} buyable={v.buyable} platform={v.platform} nested style={{ marginTop: 4 }} />
+                {/* Inside the issuer's own row, "Open now" already says who: the row names it. */}
+                <MarketStatusBadge
+                  state={v.state}
+                  nextOpenMs={v.nextOpenMs}
+                  buyable={v.buyable}
+                  platform={v.platform}
+                  label={v.buyable ? "Open now" : undefined}
+                  nested
+                  style={{ marginTop: 4 }}
+                />
               </div>
               <div style={{ textAlign: "right", flex: "none" }}>
                 <div className="tnum" style={{ fontWeight: 600, fontSize: 14.5, color: "var(--ink)" }}>

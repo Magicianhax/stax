@@ -37,6 +37,8 @@ export interface MarketStatusBadgeProps {
   /** True inside a row that is already a `<button>` (VenuePicker, Market's list row): renders the
    *  plain chip, no tap target of its own and no sheet, so two interactive controls never nest. */
   nested?: boolean;
+  /** Overrides `stateLabel`'s wording — Market's header says a whole-market line instead. */
+  label?: string;
   style?: CSSProperties;
 }
 
@@ -50,6 +52,9 @@ function Chip({ text, live, style }: { text: string; live: boolean; style?: CSSP
         // old one-word "Paused"/"Closed", and a nowrap pill just overflowed its column and
         // overlapped whatever sat beside it (caught in the wave-5 UX preview screenshot) — this
         // wraps onto a second line inside whatever width the caller gives it instead.
+        // `.stax .chip` sets a fixed 38px height for tappable chips; a status chip is a label,
+        // so it sizes to its text (design critique P0 #4 — it rendered as a 38px grey pill).
+        height: "auto",
         minHeight: 22,
         padding: "3px 9px",
         gap: 6,
@@ -82,11 +87,11 @@ function Chip({ text, live, style }: { text: string; live: boolean; style?: CSSP
   );
 }
 
-export function MarketStatusBadge({ state, nextOpenMs, buyable, platform, nested, style }: MarketStatusBadgeProps) {
+export function MarketStatusBadge({ state, nextOpenMs, buyable, platform, nested, label, style }: MarketStatusBadgeProps) {
   const [open, setOpen] = useState(false);
   const live = buyable ?? state === "open";
   const platformLabel = platform ? PLATFORM_LABEL[platform] : undefined;
-  const text = stateLabel({ state, buyable: live, nextOpenMs, platformLabel });
+  const text = label ?? stateLabel({ state, buyable: live, nextOpenMs, platformLabel });
 
   if (nested) return <Chip text={text} live={live} style={style} />;
 

@@ -53,7 +53,8 @@ export function IssuerBoardScreen({
           </div>
         ) : (
           <>
-            <SectionTitle>Same stock, two prices</SectionTitle>
+            {/* Design critique P2 #14: not a repeat of the Market card that opened this screen. */}
+            <SectionTitle>Biggest differences first</SectionTitle>
             <Reveal>
               <IssuerBoard
                 rows={data?.board ?? []}
