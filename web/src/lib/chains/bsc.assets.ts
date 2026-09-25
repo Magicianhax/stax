@@ -10,12 +10,14 @@
 // venue whose address isn't in the live pull rather than dropping the whole ticker, so AAPL
 // still shows up with just its Ondo venue until bStock's list catches up.
 import type { Asset, RwaTwin } from "./types";
+import { BSC_LOGOS } from "./bsc.logos";
 
 const stock = (a: Omit<Asset, "tier" | "via" | "decimals">): Asset => ({
   ...a,
   tier: "stock",
   via: "binance",
   decimals: 18,
+  logo: a.address ? BSC_LOGOS[a.address.toLowerCase()] : undefined,
 });
 
 const bstockTwin = (address: `0x${string}`, onchainSymbol: string): RwaTwin => ({
@@ -23,6 +25,7 @@ const bstockTwin = (address: `0x${string}`, onchainSymbol: string): RwaTwin => (
   address,
   onchainSymbol,
   decimals: 18,
+  logo: BSC_LOGOS[address.toLowerCase()],
 });
 
 const ondoTwin = (address: `0x${string}`, onchainSymbol: string): RwaTwin => ({
@@ -30,6 +33,7 @@ const ondoTwin = (address: `0x${string}`, onchainSymbol: string): RwaTwin => ({
   address,
   onchainSymbol,
   decimals: 18,
+  logo: BSC_LOGOS[address.toLowerCase()],
 });
 
 export const BSC_STOCKS: Asset[] = [
