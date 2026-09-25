@@ -22,11 +22,11 @@ import { chainKeyFromRequest } from "@/lib/server/chain";
 import { requireApproved } from "@/lib/server/admin";
 import { verifyRequest } from "@/lib/server/privyAuth";
 import { rateLimit } from "@/lib/server/rateLimit";
-import { unauthorized, badRequest, tooManyRequests, serverError } from "@/lib/server/respond";
+import { unauthorized, badRequest, tooManyRequests, serverError, jsonError } from "@/lib/server/respond";
 import { getAutopilot, upsertAutopilot, deleteAutopilot } from "@/lib/server/autopilotStore";
 import { resolveAutopilotBasket } from "@/lib/server/autopilotPlan";
 import { getOwnedBasket } from "@/lib/server/basketsStore";
-import { touchUser } from "@/lib/server/users";
+import { getSmartAccount, touchUser } from "@/lib/server/users";
 import { curatedBasketById, isBasketShortId, type Basket } from "@/lib/baskets";
 import { getChain, investableAssets, type ChainKey } from "@/lib/chains";
 import { encodeRuleGoal, looksLikeEncodedRuleGoal, RULES_NEEDING_HOLDINGS, RULE_COMING_SOON_REASON, sanitizeRule, type Rule } from "@/lib/rules";
@@ -158,6 +158,13 @@ export async function POST(req: NextRequest) {
         }
       }
       goal = encodeRuleGoal(sanitizeRule(body.rule as Rule), body.goal);
+    }
+
+    // The smart account Autopilot reads balances and holdings for must be the caller's own on
+    // this chain (security review 2026-09-25), the same check /api/swap-quote makes.
+    const registered = await getSmartAccount(user.userId, chain);
+    if (registered && registered.address.toLowerCase() !== body.smartAccount.toLowerCase()) {
+      return jsonError(403, "Autopilot must use your own account.");
     }
 
     // Clock at request time (allowed in a handler) — anchors the schedule.

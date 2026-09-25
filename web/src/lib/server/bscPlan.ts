@@ -58,7 +58,9 @@ export function withoutUnaskedRisk<A extends Pick<Asset, "symbol" | "risk">>(ass
   const asksLeverage = ASKS_FOR_LEVERAGE.test(goal);
   return assets.filter((a) => {
     if (a.risk !== "leveraged" || asksLeverage) return true;
-    return new RegExp(`\\b${a.symbol}\\b`, "i").test(goal);
+    // Escaped so the test stays literal if a symbol ever comes from somewhere dynamic.
+    const literal = a.symbol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`\\b${literal}\\b`, "i").test(goal);
   });
 }
 

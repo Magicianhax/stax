@@ -9,7 +9,11 @@ import { NextRequest } from "next/server";
 vi.mock("@/lib/server/privyAuth", () => ({ verifyRequest: vi.fn().mockResolvedValue({ userId: "u1" }) }));
 vi.mock("@/lib/server/admin", () => ({ requireApproved: vi.fn().mockResolvedValue(null) }));
 vi.mock("@/lib/server/rateLimit", () => ({ rateLimit: vi.fn().mockResolvedValue({ ok: true }) }));
-vi.mock("@/lib/server/users", () => ({ touchUser: vi.fn().mockResolvedValue(undefined) }));
+const getSmartAccountMock = vi.fn().mockResolvedValue(null);
+vi.mock("@/lib/server/users", () => ({
+  touchUser: vi.fn().mockResolvedValue(undefined),
+  getSmartAccount: (...args: unknown[]) => getSmartAccountMock(...args),
+}));
 vi.mock("@/lib/server/basketsStore", () => ({ getOwnedBasket: vi.fn().mockResolvedValue(null) }));
 vi.mock("@/lib/server/autopilotPlan", () => ({ resolveAutopilotBasket: vi.fn() }));
 
@@ -66,6 +70,12 @@ describe("POST /api/autopilot: rules are BSC-only", () => {
 });
 
 describe("POST /api/autopilot: a goal can't fake the rule encoding", () => {
+  it("refuses an Autopilot aimed at someone else's smart account", async () => {
+    getSmartAccountMock.mockResolvedValueOnce({ address: "0x3333333333333333333333333333333333333333" });
+    const res = await POST(req(body()));
+    expect(res.status).toBe(403);
+  });
+
   it("refuses a plain goal that already looks like an encoded rule", async () => {
     const res = await POST(req(body({ goal: 'stax:rule:v1:{"type":"buy_discount","symbol":"NVDA","discountPct":2}::x' })));
     expect(res.status).toBe(400);
