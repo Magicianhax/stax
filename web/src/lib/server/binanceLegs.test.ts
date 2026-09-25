@@ -302,9 +302,21 @@ describe("buildBinanceLeg review fixes", () => {
     expect(buildSwapSpy).not.toHaveBeenCalled();
   });
 
-  it("marks RFQ and router rejections as refusals the route may show the user", async () => {
+  it("marks RFQ and router rejections as refusals coded 'route', never meant to be shown verbatim", async () => {
+    // Design critique P0 #3: "Binance returned an RFQ route" reached the Trade banner. The code
+    // lets swap-quote and invest-plan swap it for plain words without string-matching.
     quoteSpy.mockResolvedValueOnce({ ...goodQuote, executionMode: "RFQ" });
-    await expect(buildBinanceLeg(args())).rejects.toBeInstanceOf(BinanceLegRefusal);
+    const err = await buildBinanceLeg(args()).catch((e) => e);
+    expect(err).toBeInstanceOf(BinanceLegRefusal);
+    expect(err.code).toBe("route");
+    quoteSpy.mockResolvedValueOnce({ ...goodQuote, approveTarget: "0x000000000000000000000000000000000000dEaD" });
+    expect((await buildBinanceLeg(args()).catch((e) => e)).code).toBe("route");
+  });
+
+  it("codes the $6 floor 'min_trade' so the client can show it as-is", async () => {
+    const err = await buildBinanceLeg(args({ usdValue: 5 })).catch((e) => e);
+    expect(err).toBeInstanceOf(BinanceLegRefusal);
+    expect(err.code).toBe("min_trade");
   });
 });
 

@@ -10,6 +10,11 @@ export interface DryRun {
   /** What the account is expected to receive, in raw units of `token`, when status is "passed". */
   receiveRaw?: string;
   token?: `0x${string}`;
+  /**
+   * /api/invest-plan only: the plan leg this check belongs to. PlanScreen matches checks to
+   * legs by this (then by `token`), never by position.
+   */
+  symbol?: string;
   /** Plain-words reason for "failed" or "skipped", safe to show a first-time investor. */
   reason?: string;
   /** Epoch ms of the Binance call. */

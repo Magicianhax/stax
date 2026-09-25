@@ -134,7 +134,6 @@ export function parseReceivedAmount(
 export function plainFailReason(failReason: string): string {
   if (!failReason) return "Binance checked this trade and it wouldn't go through right now.";
   const lower = failReason.toLowerCase();
-  if (lower.includes("allowance")) return "This trade needs one more approval step first.";
   if (lower.includes("insufficient") || lower.includes("exceeds balance")) {
     return "There isn't enough balance to complete this trade.";
   }

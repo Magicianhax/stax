@@ -94,6 +94,9 @@ export function useInvest(): UseInvest {
     async (goal: string, amountUsd: number, riskTolerance?: string) => {
       setError(null);
       setSuccess(null);
+      // A new plan (first build or a nudge) never inherits the last plan's Binance checks: a
+      // stale "failed" leg used to stay pinned to the rebuilt plan (design critique P0 #1).
+      setDryRuns(undefined);
       setPhase("thinking");
       // Demo: canned plan after a believable "thinking" beat, no AI call.
       if (demo) {
@@ -132,6 +135,8 @@ export function useInvest(): UseInvest {
   const invest = useCallback(
     async (alloc: Allocation, amountUsd: number, address: string) => {
       setError(null);
+      // Every hold is re-checked by the server; the last attempt's checks are replaced, not kept.
+      setDryRuns(undefined);
       // Demo: walk the placing phases on a timer, then a canned success.
       if (demo) {
         setPhase("planning");
@@ -161,11 +166,14 @@ export function useInvest(): UseInvest {
         }
         // Binance's own dry run is the final word when it actually ran: "failed" means it
         // simulated this exact trade and it would revert, so it is never sent — "skipped"
-        // (the common case for a brand-new token) and "passed" both proceed as normal.
+        // (the common case for a brand-new token) and "passed" both proceed as normal. A
+        // failure bounces back to the plan with no error banner: PlanScreen names the part
+        // that failed and how to move on (lib/planDryRuns.ts), and Hold stays enabled because
+        // the server re-checks on every hold.
         setDryRuns(plan.dryRuns);
-        const failedCheck = plan.dryRuns?.find((d) => d.status === "failed");
-        if (failedCheck) {
-          throw new Error(failedCheck.reason ?? "Binance checked this trade and it wouldn't go through right now.");
+        if (plan.dryRuns?.some((d) => d.status === "failed")) {
+          setPhase("error");
+          return;
         }
 
         let calls: Call[];
