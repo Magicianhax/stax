@@ -14,7 +14,13 @@ import { isPermanent } from "@/lib/autopilotRetry";
 // next_run_at advanced — whether the run succeeded or failed.
 // (No per-chain filter: the claim is atomic and global, so filtering after it
 // would leave claimed rows stuck until the 30-minute claim TTL.)
-// Invoked by Vercel Cron (vercel.json) — daily on Hobby, hourly on Pro.
+// Invoked by Vercel Cron (vercel.json) — daily on Hobby, hourly on Pro. The Hobby schedule is
+// 15:00 UTC: 11:00 New York in summer (EDT, UTC-4) and 10:00 in winter (EST, UTC-5), so the one
+// daily tick always lands after the 9:30 ET open — a BSC stock-leg rule (buy_discount, rebalance,
+// safety_switch, mix_keeper) that only wants to trade while the real market is open would
+// otherwise be skipped every single day by a cron that fires before 9:30 ET on the Hobby plan's
+// one-run-a-day budget. Crypto legs don't care (they trade any time), and Base/Mantle's own
+// goal/basket runs don't either — this only matters once BSC rules start evaluating for real.
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
@@ -44,7 +50,7 @@ function nextSlotAfter(cfg: AutopilotConfig, now: number): number {
   return next;
 }
 
-type RunRow = { id: string; chain: ChainKey; ok: boolean; txHash?: string; reason?: string; attempts?: number };
+type RunRow = { id: string; chain: ChainKey; ok: boolean; txHash?: string; reason?: string; attempts?: number; retryable?: boolean };
 
 /** Retry a failed run this many extra times inside the same invocation. */
 const RETRY_ATTEMPTS = 2;
@@ -68,7 +74,12 @@ async function runGroup(cfgs: AutopilotConfig[], now: number): Promise<RunRow[]>
       } catch (e) {
         row = { id: cfg.id, chain: cfg.chain, ok: false, reason: e instanceof Error ? e.message : "run failed" };
       }
-      if (row.ok || isPermanent(row.reason)) break;
+      // `retryable === false` (runAutopilot's own call, e.g. "not deployed yet", "waiting on
+      // holdings", over the risk ceiling) is a decided, honest skip, not a transient fault —
+      // retrying it 2 more times just burns the shared 300s budget and repeats the same log
+      // row for nothing (review finding #4). `isPermanent`'s text match still covers reasons
+      // that never carried the flag (basket-store errors, signer faults, etc).
+      if (row.ok || isPermanent(row.reason) || row.retryable === false) break;
       if (attempt < RETRY_ATTEMPTS) {
         console.warn(`[autopilot] ${cfg.id} attempt ${attempts} failed: ${row.reason} — retrying`);
         await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS[attempt] ?? 4000));
@@ -81,7 +92,7 @@ async function runGroup(cfgs: AutopilotConfig[], now: number): Promise<RunRow[]>
       // more frequent cron picks it up and a daily one behaves exactly as before.
       const slot = nextSlotAfter(cfg, now);
       const soon = Math.floor(Date.now() / 1000) + RETRY_SOON_SECONDS;
-      const next = row.ok || isPermanent(row.reason) ? slot : Math.min(soon, slot);
+      const next = row.ok || isPermanent(row.reason) || row.retryable === false ? slot : Math.min(soon, slot);
       await releaseAutopilot(cfg.id, next);
     } catch (e) {
       // Left claimed: the 30-minute claim TTL lets the next cron pick it up.
