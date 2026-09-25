@@ -105,7 +105,35 @@ export interface IssuerDiff {
   pricierBuyable: boolean;
 }
 
-export type VenuePriceLike = Pick<VenueView, "platform" | "tokenPrice" | "buyable">;
+export type VenuePriceLike = Pick<VenueView, "platform" | "tokenPrice" | "buyable"> & { gapPct?: number | null };
+
+/**
+ * The single "which issuer is better for a buyer" rule (design critique P1 #7), shared by the
+ * catalog's `bestVenue` (rwaCatalog.ts), the board (`issuerDifference`/`cheaperIssuerNow`) and
+ * so the Buy button: ignoring buyability, the lower signed gap against the real share wins —
+ * most below, or least above. Without a gap on both sides, the lower token price.
+ */
+function compareCost(a: VenuePriceLike, b: VenuePriceLike): number {
+  const ga = a.gapPct ?? null;
+  const gb = b.gapPct ?? null;
+  if (ga !== null && gb !== null && ga !== gb) return ga - gb;
+  if (ga !== null && gb === null) return -1;
+  if (ga === null && gb !== null) return 1;
+  return a.tokenPrice - b.tokenPrice;
+}
+
+/** Sort comparator: buyable first, then `compareCost`. `[...venues].sort(compareForBuyer)[0]` is the pick. */
+export function compareForBuyer(a: VenuePriceLike, b: VenuePriceLike): number {
+  if (a.buyable !== b.buyable) return a.buyable ? -1 : 1;
+  return compareCost(a, b);
+}
+
+/** Board rows under this difference read "About the same price" and sit in their own group. */
+export const ABOUT_SAME_PRICE_PCT = 0.1;
+
+export function isAboutSamePrice(row: Pick<IssuerDiff, "diffPct">): boolean {
+  return row.diffPct < ABOUT_SAME_PRICE_PCT;
+}
 
 /**
  * The difference between bStock and Ondo for one ticker, from whichever venues it has right
@@ -118,10 +146,12 @@ export function issuerDifference(ticker: string, venues: readonly VenuePriceLike
   const ondo = venues.find((v) => v.platform === "ondo");
   if (!bstock || !ondo) return null;
 
-  const bIsCheaper = bstock.tokenPrice <= ondo.tokenPrice;
+  const bIsCheaper = compareCost(bstock, ondo) <= 0;
   const cheaper = bIsCheaper ? bstock : ondo;
   const pricier = bIsCheaper ? ondo : bstock;
-  const diffUsd = pricier.tokenPrice - cheaper.tokenPrice;
+  // Floored at 0: with two different reference prices the cheaper-vs-the-real-share issuer can
+  // cost a hair more in dollars, which reads as "About the same price", never a negative gap.
+  const diffUsd = Math.max(0, pricier.tokenPrice - cheaper.tokenPrice);
 
   return {
     ticker,
@@ -151,9 +181,14 @@ export function rankIssuerBoard(
   return rows.sort((a, b) => b.diffUsd - a.diffUsd);
 }
 
-/** The plain sentence one board row reads as, e.g. "Ondo is $0.40 cheaper than bStock right now". */
-export function issuerDiffSentence(row: Pick<IssuerDiff, "cheaper" | "pricier" | "diffUsd">): string {
-  return `${PLATFORM_LABEL[row.cheaper]} is $${row.diffUsd.toFixed(2)} cheaper than ${PLATFORM_LABEL[row.pricier]} right now`;
+/**
+ * The plain sentence one board row reads as: "Ondo is $2.30 cheaper (0.7%) · open now", or
+ * "About the same price" under 0.1% (design critique P2 #14).
+ */
+export function issuerDiffSentence(row: Pick<IssuerDiff, "cheaper" | "pricier" | "diffUsd" | "diffPct" | "cheaperBuyable">): string {
+  if (isAboutSamePrice(row)) return "About the same price";
+  const open = row.cheaperBuyable ? "open now" : "not open right now";
+  return `${PLATFORM_LABEL[row.cheaper]} is $${row.diffUsd.toFixed(2)} cheaper (${row.diffPct.toFixed(1)}%) · ${open}`;
 }
 
 /**
@@ -165,9 +200,7 @@ export function issuerDiffSentence(row: Pick<IssuerDiff, "cheaper" | "pricier" |
 export function cheaperIssuerNow(venues: readonly VenuePriceLike[]): RwaPlatform | null {
   const candidates = venues.filter((v): v is VenuePriceLike & { platform: RwaPlatform } => v.platform === "bstock" || v.platform === "ondo");
   if (candidates.length === 0) return null;
-  const buyable = candidates.filter((v) => v.buyable);
-  const pool = buyable.length > 0 ? buyable : candidates;
-  return pool.reduce((a, b) => (b.tokenPrice < a.tokenPrice ? b : a)).platform;
+  return [...candidates].sort(compareForBuyer)[0].platform;
 }
 
 /** One venue's recorded point in a ticker's price-vs-real-share history (Redis via spreadStore.ts). */
@@ -179,6 +212,23 @@ export interface SpreadPoint {
   gapPct: number | null;
   buyable: boolean;
   state: MarketState;
+}
+
+/** How far either side of the real share's price the chart always shows, at minimum. */
+const CHART_MIN_PAD = 0.02;
+
+/**
+ * PriceVsRealShare's y-domain: the points' own range, widened to at least ±2% of the latest
+ * real-share price, so a $1 wobble on a $180 share draws as the small move it is instead of
+ * filling the chart (design critique P1 #8).
+ */
+export function realShareChartDomain(points: readonly Pick<SpreadPoint, "tokenPrice" | "referencePrice">[]): { min: number; max: number } {
+  if (points.length === 0) return { min: 0, max: 1 };
+  const values = points.flatMap((p) => [p.tokenPrice, p.referencePrice]);
+  const ref = points[points.length - 1].referencePrice;
+  const lo = Math.min(...values, ref * (1 - CHART_MIN_PAD));
+  const hi = Math.max(...values, ref * (1 + CHART_MIN_PAD));
+  return hi > lo ? { min: lo, max: hi } : { min: lo - 1, max: hi + 1 };
 }
 
 export interface SpreadVenueHistory {

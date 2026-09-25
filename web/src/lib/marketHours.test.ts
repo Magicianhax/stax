@@ -2,7 +2,7 @@
 // no session at all (docs/BINANCE-WEB3.md §2). Times are built in America/New_York so the
 // tests don't depend on the machine's zone.
 import { describe, expect, it } from "vitest";
-import { usMarketState, nextUsOpenMs, usMarketClock, formatOpensLocal } from "./marketHours";
+import { usMarketState, nextUsOpenMs, nextUsCloseMs, usMarketClock, formatOpensLocal, formatClosesLocal } from "./marketHours";
 
 const ny = (iso: string) => new Date(new Date(iso + "-04:00").getTime()).getTime(); // EDT
 
@@ -81,5 +81,31 @@ describe("formatOpensLocal", () => {
     const now = new Date(2026, 8, 24, 23, 50, 0).getTime();
     const next = new Date(2026, 8, 25, 0, 5, 0).getTime();
     expect(formatOpensLocal(next, now)).toBe("opens Fri 12:05 AM your time");
+  });
+});
+
+// nextUsCloseMs / formatClosesLocal — Home and Market's header say when an OPEN market closes
+// ("US market open · closes 10:00 PM your time"), in the same local clock as every "opens" line.
+describe("nextUsCloseMs", () => {
+  it("is today's 16:00 New York close during the regular session", () => {
+    expect(nextUsCloseMs(ny("2026-09-24T10:00:00"))).toBe(ny("2026-09-24T16:00:00"));
+  });
+
+  it("is null whenever the regular session isn't live", () => {
+    expect(nextUsCloseMs(ny("2026-09-24T17:00:00"))).toBeNull();
+    expect(nextUsCloseMs(ny("2026-10-11T12:00:00"))).toBeNull();
+  });
+
+  it("honours an early close (the day after Thanksgiving closes at 13:00)", () => {
+    const now = new Date("2026-11-27T10:00:00-05:00").getTime();
+    expect(nextUsCloseMs(now)).toBe(new Date("2026-11-27T13:00:00-05:00").getTime());
+  });
+});
+
+describe("formatClosesLocal", () => {
+  it("reads 'closes <local time> your time', no weekday on the same local day", () => {
+    const now = new Date(2026, 8, 24, 16, 0, 0).getTime();
+    const close = new Date(2026, 8, 24, 22, 0, 0).getTime();
+    expect(formatClosesLocal(close, now)).toBe("closes 10:00 PM your time");
   });
 });

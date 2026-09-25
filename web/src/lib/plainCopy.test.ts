@@ -2,7 +2,7 @@
 // of these functions instead of formatting a number inline, so the wording (and the threshold
 // under which a gap reads as "same as the real share") lives in one tested place.
 import { describe, expect, it } from "vitest";
-import { gapSentence, gapWords, stateLabel, dryRunLine, venuePickerExplainer } from "./plainCopy";
+import { gapSentence, gapWords, stateLabel, dryRunLine, venuePickerExplainer, riskLine, shortGapLine, gapToRealShare, closedBuyLabel, planOpenIssuerNote } from "./plainCopy";
 import type { DryRun } from "./dryRun";
 
 describe("gapSentence", () => {
@@ -37,6 +37,19 @@ describe("gapWords", () => {
 describe("stateLabel", () => {
   it("says a tradeable venue is open now, regardless of the session name", () => {
     expect(stateLabel({ state: "overnight", buyable: true, nextOpenMs: null })).toBe("Open now");
+  });
+
+  it("names the issuer when it trades outside US market hours, so it can't contradict a 'closed' header", () => {
+    expect(stateLabel({ state: "overnight", buyable: true, nextOpenMs: null, platformLabel: "Ondo" })).toBe(
+      "Open now through Ondo",
+    );
+    expect(stateLabel({ state: "premarket", buyable: true, nextOpenMs: null, platformLabel: "Ondo" })).toBe(
+      "Open now through Ondo",
+    );
+  });
+
+  it("stays a plain 'Open now' during the regular session", () => {
+    expect(stateLabel({ state: "open", buyable: true, nextOpenMs: null, platformLabel: "bStock" })).toBe("Open now");
   });
 
   it("names the platform on a pause, never the jargon 'paused'", () => {
@@ -87,9 +100,25 @@ describe("venuePickerExplainer", () => {
     expect(venuePickerExplainer(0, null)).toBe("");
   });
 
-  it("names Stax's pick when at least one venue is buyable", () => {
+  it("names Stax's pick — the buyable one that costs less against the real share", () => {
+    // Design critique P1 #7: one rule for "best", said the way a buyer thinks about it.
     expect(venuePickerExplainer(2, "ondo")).toBe(
-      "Two companies make a token for this share. Stax picks the one that's open, with the price closest to the real share. Tap to choose the other.",
+      "Two companies make a token for this share. Stax picks the one you can buy now that costs less compared with the real share. Tap to choose the other.",
+    );
+    expect(venuePickerExplainer(2, "ondo", { buyable: true, state: "open" })).toBe(
+      "Two companies make a token for this share. Stax picks the one you can buy now that costs less compared with the real share. Tap to choose the other.",
+    );
+  });
+
+  it("doesn't invite a tap on the other one while it's paused", () => {
+    expect(venuePickerExplainer(2, "ondo", { buyable: false, state: "paused" })).toBe(
+      "Two companies make a token for this share. Stax picks the one you can buy now that costs less compared with the real share. The other one is paused right now.",
+    );
+  });
+
+  it("says the other one is closed when it's simply outside its hours", () => {
+    expect(venuePickerExplainer(2, "ondo", { buyable: false, state: "closed" })).toBe(
+      "Two companies make a token for this share. Stax picks the one you can buy now that costs less compared with the real share. The other one is closed right now.",
     );
   });
 
@@ -129,5 +158,81 @@ describe("dryRunLine", () => {
       kind: "blocking",
       text: "Binance couldn't confirm this trade would go through.",
     });
+  });
+});
+
+describe("shortGapLine", () => {
+  it("says nothing for an ordinary gap under 0.5%", () => {
+    expect(shortGapLine(0.49)).toBe("");
+    expect(shortGapLine(-0.3)).toBe("");
+    expect(shortGapLine(null)).toBe("");
+  });
+
+  it("reads a real premium or discount as one short clause for a Market row", () => {
+    expect(shortGapLine(0.6)).toBe("0.6% above the real price");
+    expect(shortGapLine(-0.62)).toBe("0.6% below the real price");
+    expect(shortGapLine(0.5)).toBe("0.5% above the real price");
+  });
+});
+
+describe("gapToRealShare", () => {
+  it("is the short per-stock clause Plan and Trade put next to the issuer", () => {
+    expect(gapToRealShare(-0.2)).toBe("0.2% below the real share");
+    expect(gapToRealShare(1.24)).toBe("1.2% above the real share");
+  });
+
+  it("calls a tiny gap the same price", () => {
+    expect(gapToRealShare(0.04)).toBe("same price as the real share");
+    expect(gapToRealShare(null)).toBe("");
+  });
+});
+
+describe("riskLine", () => {
+  it("warns a leveraged fund moves about 3x the market", () => {
+    expect(riskLine("leveraged")).toBe("Moves about 3× the market each day. It can lose value fast.");
+  });
+
+  it("warns a pre-IPO share isn't on an exchange yet", () => {
+    expect(riskLine("preipo")).toBe("Not listed on a stock exchange yet. Prices can swing a lot.");
+  });
+
+  it("has nothing to say for an ordinary stock", () => {
+    expect(riskLine(undefined)).toBe("");
+  });
+});
+
+// Design critique P2 #15: a paused issuer isn't "Market closed" — the market may be wide open.
+describe("closedBuyLabel", () => {
+  it("names the issuer that paused", () => {
+    expect(closedBuyLabel("paused", "bStock")).toBe("Paused by bStock");
+  });
+
+  it("says a closed market plainly", () => {
+    expect(closedBuyLabel("closed", "bStock")).toBe("Market closed");
+    expect(closedBuyLabel("overnight", "bStock")).toBe("Market closed");
+    expect(closedBuyLabel(undefined, undefined)).toBe("Market closed");
+  });
+
+  it("says a ticker Binance can't trade isn't available", () => {
+    expect(closedBuyLabel("unsupported", "Ondo")).toBe("Not available");
+  });
+});
+
+// Design critique P1 #10: Plan explains why a plan buys from Ondo while the US market is shut.
+describe("planOpenIssuerNote", () => {
+  it("names the issuer Vera buys from while the US market is closed", () => {
+    expect(planOpenIssuerNote(false, ["ondo", "ondo"])).toBe("The US market is closed. Vera buys from Ondo, which is open now.");
+  });
+
+  it("says nothing while the US market is open, or with no issuer on the plan", () => {
+    expect(planOpenIssuerNote(true, ["ondo"])).toBe("");
+    expect(planOpenIssuerNote(false, [undefined])).toBe("");
+    expect(planOpenIssuerNote(undefined, ["ondo"])).toBe("");
+  });
+
+  it("names both when the plan uses both", () => {
+    expect(planOpenIssuerNote(false, ["bstock", "ondo"])).toBe(
+      "The US market is closed. Vera buys from bStock and Ondo, which are open now.",
+    );
   });
 });

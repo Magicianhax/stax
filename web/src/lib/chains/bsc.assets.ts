@@ -136,6 +136,7 @@ export const BSC_STOCKS: Asset[] = [
   stock({
     // Underlying company unconfirmed in research; ticker kept as the display name rather than guess.
     symbol: "CBRS",
+    risk: "preipo",
     name: "Cerebras",
     address: "0xe81c6bb0266cd68b4f17278531dd03ea1f12da4e",
     platform: "bstock",
@@ -322,6 +323,7 @@ export const BSC_STOCKS: Asset[] = [
   }),
   stock({
     symbol: "SOXL",
+    risk: "leveraged",
     name: "Direxion Daily Semiconductor Bull 3X Shares",
     address: "0xd97d097a89113fa59b76c572e5b2eb647e8eefaf",
     platform: "bstock",
@@ -331,6 +333,7 @@ export const BSC_STOCKS: Asset[] = [
   stock({
     // Docs list a "SpaceX" catalog sector; SPCX is presumed to be SpaceX pre-IPO shares, unconfirmed.
     symbol: "SPCX",
+    risk: "preipo",
     name: "SpaceX",
     address: "0xbe9d156892e55e7154bcd3cb0fea677f9d3103e1",
     platform: "bstock",
@@ -347,6 +350,7 @@ export const BSC_STOCKS: Asset[] = [
   }),
   stock({
     symbol: "TQQQ",
+    risk: "leveraged",
     name: "ProShares UltraPro QQQ",
     address: "0x462b5f13b7c7748279358962925c5de83bb9e598",
     platform: "bstock",

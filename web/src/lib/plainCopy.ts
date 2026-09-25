@@ -3,7 +3,7 @@
 // every screen that needs it. Design critique P0 #3/#4, P1 #8, and the dry-run render decision.
 import { formatOpensLocal } from "./marketHours";
 import type { MarketState } from "./rwa";
-import type { RwaPlatform } from "./chains";
+import type { AssetRisk, RwaPlatform } from "./chains";
 import type { DryRun } from "./dryRun";
 
 /** Below this, the two prices round to the same cent often enough that a signed number just
@@ -46,7 +46,10 @@ export function stateLabel(params: {
   nowMs?: number;
 }): string {
   const { state, buyable, nextOpenMs, platformLabel, nowMs = Date.now() } = params;
-  if (buyable) return "Open now";
+  // Ondo trades pre-market, after hours and overnight while the US market itself is shut: a bare
+  // "Open now" there sat right under a "US market closed" header and read as a contradiction
+  // (design critique P0 #2). Naming the issuer says WHO is open, not the stock market.
+  if (buyable) return state !== "open" && platformLabel ? `Open now through ${platformLabel}` : "Open now";
   if (state === "unsupported") return "Can't be bought here";
   // A pause is a pause whatever `nextOpenMs` says: `rwaCatalog.ts`'s `buildVenue` always fills it
   // in for a non-buyable venue (bStock's own calendar fallback, or Ondo's `nextOpenTime`), so a
@@ -67,12 +70,49 @@ export function stateLabel(params: {
  * explainer promising a second row that never renders. Also never claims Stax "picks the one
  * that's open" when neither venue actually is.
  */
-export function venuePickerExplainer(venueCount: number, bestVenue: RwaPlatform | null): string {
+export function venuePickerExplainer(
+  venueCount: number,
+  bestVenue: RwaPlatform | null,
+  /** The venue that ISN'T the pick, when known — a paused or closed one isn't worth a tap. */
+  other?: { buyable: boolean; state: MarketState },
+): string {
   if (venueCount <= 1) return "";
   if (bestVenue === null) {
     return "Two companies make a token for this share, but neither is open right now. Tap to see the other one's price.";
   }
-  return "Two companies make a token for this share. Stax picks the one that's open, with the price closest to the real share. Tap to choose the other.";
+  // Design critique P1 #7: one rule for "best" everywhere (lib/spread.ts's `compareForBuyer`):
+  // buyable first, then the lower price against the real share.
+  const pick = "Two companies make a token for this share. Stax picks the one you can buy now that costs less compared with the real share.";
+  if (other && !other.buyable) {
+    return `${pick} The other one is ${other.state === "paused" ? "paused" : "closed"} right now.`;
+  }
+  return `${pick} Tap to choose the other.`;
+}
+
+/** Under this, a Market row says nothing about the gap — most rows are within it (P1 #5). */
+const ROW_GAP_THRESHOLD_PCT = 0.5;
+
+/**
+ * Market's per-row clause: "0.6% above the real price" only when the gap is worth noticing
+ * (|gap| >= 0.5%), else nothing. The full sentence stays on Asset detail (`gapSentence`).
+ */
+export function shortGapLine(gapPct: number | null): string {
+  if (gapPct === null || Math.abs(gapPct) < ROW_GAP_THRESHOLD_PCT) return "";
+  return `${Math.abs(gapPct).toFixed(1)}% ${gapPct > 0 ? "above" : "below"} the real price`;
+}
+
+/** "0.2% below the real share" — the clause beside an issuer's name on Plan and Trade. */
+export function gapToRealShare(gapPct: number | null): string {
+  if (gapPct === null) return "";
+  if (Math.abs(gapPct) < SAME_PRICE_THRESHOLD_PCT) return "same price as the real share";
+  return `${Math.abs(gapPct).toFixed(1)}% ${gapPct > 0 ? "above" : "below"} the real share`;
+}
+
+/** The one warning line a riskier listing carries on Market (design critique P1 #6). */
+export function riskLine(risk: AssetRisk | undefined): string {
+  if (risk === "leveraged") return "Moves about 3× the market each day. It can lose value fast.";
+  if (risk === "preipo") return "Not listed on a stock exchange yet. Prices can swing a lot.";
+  return "";
 }
 
 export type DryRunLine = { kind: "none" } | { kind: "quiet"; text: string } | { kind: "blocking"; text: string };
@@ -89,4 +129,24 @@ export function dryRunLine(dryRun: DryRun | undefined, qty: string, symbol: stri
     return { kind: "quiet", text: `Checked with Binance · you'll get about ${qty} ${symbol}` };
   }
   return { kind: "blocking", text: dryRun.reason ?? "Binance couldn't confirm this trade would go through." };
+}
+
+/** The Buy button's words when the chosen issuer won't fill a buy right now (P2 #15). */
+export function closedBuyLabel(state: MarketState | undefined, platformLabel: string | undefined): string {
+  if (state === "paused") return platformLabel ? `Paused by ${platformLabel}` : "Paused for now";
+  if (state === "unsupported") return "Not available";
+  return "Market closed";
+}
+
+const ISSUER_LABEL: Record<RwaPlatform, string> = { bstock: "bStock", ondo: "Ondo" };
+
+/**
+ * Plan's line under the summary while the US market is shut (P1 #10): why a plan can still buy
+ * right now. `usMarketOpen` undefined (clock not mounted yet) says nothing.
+ */
+export function planOpenIssuerNote(usMarketOpen: boolean | undefined, venues: readonly (RwaPlatform | undefined)[]): string {
+  if (usMarketOpen !== false) return "";
+  const names = (["bstock", "ondo"] as const).filter((p) => venues.includes(p)).map((p) => ISSUER_LABEL[p]);
+  if (names.length === 0) return "";
+  return `The US market is closed. Vera buys from ${names.join(" and ")}, which ${names.length > 1 ? "are" : "is"} open now.`;
 }

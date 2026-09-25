@@ -98,7 +98,7 @@ describe("GET /api/rwa/spread — success path", () => {
     // Board: only dual-listed NVDA has two issuers to compare; single-issuer AAPL has nothing to rank.
     expect(body.board.map((r: { ticker: string }) => r.ticker)).toEqual(["NVDA"]);
     expect(body.board[0].cheaper).toBe("ondo");
-    expect(body.board[0].sentence).toMatch(/ondo.+cheaper.+bstock/i);
+    expect(body.board[0].sentence).toMatch(/^Ondo is \$[\d.]+ cheaper \([\d.]+%\)/);
 
     // Per-ticker calls cover every catalog ticker, including the single-issuer one.
     const nvda = body.tickers.find((t: { ticker: string }) => t.ticker === "NVDA");

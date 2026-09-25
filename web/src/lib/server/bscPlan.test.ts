@@ -24,6 +24,7 @@ import {
   parseCryptoMix,
   unavailableNote,
   venueAddressFor,
+  withoutUnaskedRisk,
 } from "./bscPlan";
 
 const bsc = getChain("bsc");
@@ -502,5 +503,30 @@ describe("applyCryptoMix", () => {
   it("does nothing when the target is ~0% crypto and none was picked — there's nothing to add", () => {
     const legs = [{ symbol: "NVDA", weightPct: 100 }];
     expect(applyCryptoMix(bsc, legs, { cryptoPct: 2 })).toEqual(legs);
+  });
+});
+
+// Design critique P1 #6: SOXL/TQQQ are 3x leveraged funds. A first-time investor asking Vera for
+// "tech stocks" must never get one by default; someone who names leverage (or the fund) can.
+describe("withoutUnaskedRisk", () => {
+  const chain = getChain("bsc");
+  const universe = chain.assets.all.filter((a) => ["NVDA", "SOXL", "TQQQ", "SPCX"].includes(a.symbol));
+  const symbols = (goal: string) => withoutUnaskedRisk(universe, goal).map((a) => a.symbol).sort();
+
+  it("drops leveraged funds from an ordinary goal", () => {
+    expect(symbols("Grow my money with big tech")).toEqual(["NVDA", "SPCX"]);
+  });
+
+  it("keeps them when the goal asks for leverage", () => {
+    expect(symbols("I want leveraged tech exposure")).toEqual(["NVDA", "SOXL", "SPCX", "TQQQ"]);
+    expect(symbols("a 3x chip fund please")).toEqual(["NVDA", "SOXL", "SPCX", "TQQQ"]);
+  });
+
+  it("keeps only the one the goal names", () => {
+    expect(symbols("put it all in tqqq")).toEqual(["NVDA", "SPCX", "TQQQ"]);
+  });
+
+  it("never matches a ticker inside another word", () => {
+    expect(symbols("soxlike growth")).toEqual(["NVDA", "SPCX"]);
   });
 });

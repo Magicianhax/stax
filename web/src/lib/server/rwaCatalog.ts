@@ -7,6 +7,7 @@ import { BSC } from "../chains/bsc";
 import type { Asset } from "../chains/types";
 import type { RwaPlatform } from "../chains";
 import { nextUsOpenMs, usMarketState } from "../marketHours";
+import { compareForBuyer } from "../spread";
 import {
   gapPct,
   isBuyable,
@@ -79,20 +80,15 @@ function buildVenue(token: RwaToken, nowMs: number): VenueView {
   };
 }
 
-/** The buyable venue with the smallest |gap|; a venue with no usable gap sorts last. */
+/**
+ * The venue a buy should use right now: buyable, then the one that costs less against the real
+ * share (lib/spread.ts's `compareForBuyer` — the same rule the "Which is cheaper?" board uses,
+ * design critique P1 #7). Null when nothing is buyable.
+ */
 function pickBestVenue(venues: VenueView[]): RwaPlatform | null {
   const buyable = venues.filter((v) => v.buyable);
   if (buyable.length === 0) return null;
-  let best = buyable[0];
-  let bestGap = best.gapPct === null ? Infinity : Math.abs(best.gapPct);
-  for (const v of buyable.slice(1)) {
-    const gap = v.gapPct === null ? Infinity : Math.abs(v.gapPct);
-    if (gap < bestGap) {
-      best = v;
-      bestGap = gap;
-    }
-  }
-  return best.platform;
+  return [...buyable].sort(compareForBuyer)[0].platform;
 }
 
 /**

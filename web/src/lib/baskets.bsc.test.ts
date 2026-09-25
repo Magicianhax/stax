@@ -95,3 +95,20 @@ describe("BSC wave 5 themed baskets", () => {
     expect(tiers).toContain("stock");
   });
 });
+
+// Design critique P1 #6: the risk flag, not a hand-kept list, decides what a curated basket may hold.
+describe("BSC curated baskets and risk flags", () => {
+  const chain = getChain("bsc");
+
+  it("never holds an asset flagged leveraged", () => {
+    for (const b of CURATED_BASKETS.bsc) {
+      for (const item of b.items) expect(assetBySymbol(chain, item.symbol)?.risk).not.toBe("leveraged");
+    }
+  });
+
+  it("says the risk out loud on any basket holding a pre-IPO share", () => {
+    const withPreIpo = CURATED_BASKETS.bsc.filter((b) => b.items.some((i) => assetBySymbol(chain, i.symbol)?.risk === "preipo"));
+    expect(withPreIpo.length).toBeGreaterThan(0);
+    for (const b of withPreIpo) expect(b.tagline.toLowerCase()).toContain("risk");
+  });
+});

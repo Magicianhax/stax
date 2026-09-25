@@ -42,25 +42,31 @@ export function daysUntil(targetMs: number, nowMs: number): number {
 const CHIP_DATE_FMT = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric" });
 
 /**
- * "Wed, Oct 28 your time" — the one place an earnings instant becomes a calendar date. No
- * explicit `timeZone` (same trick as marketHours.ts's `formatOpensLocal`): `Intl` resolves to
- * the runtime's own zone, so a viewer far from US market hours sees the date THEIR calendar
- * would call it, and "your time" says so instead of implying it's Eastern.
+ * "Wed, Oct 28" — the one place an earnings instant becomes a calendar date. No explicit
+ * `timeZone` (same trick as marketHours.ts's `formatOpensLocal`): `Intl` resolves to the runtime's
+ * own zone, so a viewer far from US market hours sees the date THEIR calendar would call it. No
+ * "your time" suffix: that belongs on a clock time, and on a bare date it only read as noise
+ * (design critique P2 #15).
  */
 export function formatEarningsDateLocal(nextMs: number): string {
-  return `${CHIP_DATE_FMT.format(new Date(nextMs))} your time`;
+  return CHIP_DATE_FMT.format(new Date(nextMs));
 }
 
+const NOT_ANNOUNCED = "Next results date not announced yet";
+
 /**
- * The one sentence EarningsChip (and later AssetDetailScreen / the rules evaluator's copy) shows
- * for a ticker. A stale date that has already passed reads exactly like "no date at all" rather
- * than a countdown gone negative — the cache missed a refresh, that's not the user's problem to
- * parse, and "Earnings in -2 days" would just be a confusing way to say the same thing.
+ * The one sentence EarningsChip shows for a company: "Nvidia reports results in 33 days · Wed,
+ * Oct 28". A stale date that has already passed reads exactly like "no date at all" rather than
+ * a countdown gone negative — the cache missed a refresh, that's not the user's problem to parse.
  */
-export function earningsChipText(info: EarningsInfo | null | undefined, nowMs: number = Date.now()): string {
-  if (!info || info.nextMs === null) return "Earnings date not announced yet";
+export function earningsChipText(
+  info: EarningsInfo | null | undefined,
+  nowMs: number = Date.now(),
+  companyName = "This company",
+): string {
+  if (!info || info.nextMs === null) return NOT_ANNOUNCED;
   const days = daysUntil(info.nextMs, nowMs);
-  if (days < 0) return "Earnings date not announced yet";
-  const when = days === 0 ? "Earnings today" : days === 1 ? "Earnings tomorrow" : `Earnings in ${days} days`;
-  return `${when} · ${formatEarningsDateLocal(info.nextMs)}`;
+  if (days < 0) return NOT_ANNOUNCED;
+  const when = days === 0 ? "today" : days === 1 ? "tomorrow" : `in ${days} days`;
+  return `${companyName} reports results ${when} · ${formatEarningsDateLocal(info.nextMs)}`;
 }
