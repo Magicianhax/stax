@@ -19,6 +19,7 @@ import { useUsdcBalance, usePortfolio } from "@/hooks/useBalances";
 import { usePrice } from "@/hooks/usePrices";
 import { useMarketHistory } from "@/hooks/useMarket";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
+import { assetLogo } from "@/lib/assetLogo";
 import { displayFor } from "@/lib/displayAssets";
 import { Icon, AssetTile, useMarketStatus, AmountInput, Keypad } from "@/components/design";
 import { useAmountKeypad } from "@/hooks/useAmountKeypad";
@@ -389,7 +390,9 @@ export function TradeScreen({
         <button onClick={() => go(-1)} style={iconBtn} className="tap" aria-label="Back">
           <Icon name="back" size={20} />
         </button>
-        <AssetTile asset={d} size={32} />
+        {/* BSC: the venue this trade actually resolves to (default issuer, or the position/pick
+            being sold); off BSC this is exactly `d.logo`, unchanged. */}
+        <AssetTile asset={{ ...d, logo: assetLogo(chain, asset.symbol, wantVenue) }} size={32} />
         <h1
           style={{
             margin: 0,

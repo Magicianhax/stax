@@ -45,6 +45,9 @@ export const BSC: StaxChain = {
   },
   assets: BSC_ASSETS,
   routes: {},
-  brand: { tagline: "on BNB Chain", logo: "/chains/bsc.svg", accent: "#F0B90B" },
+  // The official BNB mark (Trust Wallet asset, same file NetworkMark already uses for BSC
+  // deposits — lib/chainMarks.tsx), not the hand-drawn placeholder that used to live at
+  // /chains/bsc.svg.
+  brand: { tagline: "on BNB Chain", logo: "/icons/networks/bnb.png", accent: "#F0B90B" },
   issuer: "Tokenized stocks on BNB Chain are issued by bStock and Ondo, not by Stax.",
 };

@@ -30,6 +30,8 @@ export interface RwaTwin {
   address: `0x${string}`;
   onchainSymbol: string;
   decimals: number;
+  /** BSC: this issuer's own branded token logo (bsc.logos.ts), never the other issuer's. */
+  logo?: string;
 }
 
 export interface Asset {
@@ -53,6 +55,9 @@ export interface Asset {
   platform?: RwaPlatform;
   /** BSC: the same share from the other issuer, when both list it. */
   twin?: RwaTwin;
+  /** BSC: this asset's own issuer's branded token logo (bsc.logos.ts). Undefined off BSC —
+   *  Base/Mantle/crypto keep using displayAssets.ts's logo instead. */
+  logo?: string;
   /**
    * Riskier than an ordinary share, said plainly wherever it's listed: "leveraged" (a 3x daily
    * fund — kept out of Vera's default picks and curated baskets) or "preipo" (a private company

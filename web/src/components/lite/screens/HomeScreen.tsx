@@ -19,6 +19,7 @@ import { useSavingsBalance } from "@/hooks/useSavings";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { Icon, HoldingRow, LogoCluster, SectionTitle, Sparkline, VerifiedBadge, NetworkChip } from "@/components/design";
 import { Money, Reveal } from "@/components/motion";
+import { assetLogo } from "@/lib/assetLogo";
 import { toTile, catFor } from "@/lib/displayAssets";
 import { PLATFORM_LABEL } from "@/components/lite/rwa/VenuePicker";
 import { usd, tokenQty } from "@/lib/format";
@@ -363,11 +364,13 @@ export function HomeScreen({
               {shown.map((h, i) => {
                 const base = toTile(h.asset.symbol, h.asset.name);
                 // Real 1D market data (from the server) replaces the presentational
-                // tint whenever the asset has a live source.
+                // tint whenever the asset has a live source. On BSC, a twin holding row shows
+                // THIS row's own issuer's logo (h.venue), not the default issuer's.
                 const tile = {
                   ...base,
                   day: h.dayChangePct ?? base.day,
                   spark: h.spark ?? base.spark,
+                  logo: assetLogo(chain, h.asset.symbol, h.venue),
                 };
                 const day = h.dayChangePct;
                 const qty = tokenQty(h.raw, h.asset.decimals ?? 18);
