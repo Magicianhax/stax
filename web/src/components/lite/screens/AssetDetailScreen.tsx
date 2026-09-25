@@ -18,6 +18,10 @@ import { useMarketHistory, type MarketRange } from "@/hooks/useMarket";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { useBaskets } from "@/hooks/useBaskets";
 import { useRwa, useBscBuyGate } from "@/hooks/useRwa";
+import { useSpreadHistory } from "@/hooks/useSpread";
+import { PriceVsRealShare } from "@/components/lite/spread/PriceVsRealShare";
+import { historyStatus } from "@/lib/priceHistoryStatus";
+import { chosenVenueFor } from "@/lib/assetVenuePicker";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { displayFor } from "@/lib/displayAssets";
 import { pickHolding, resolveVenueAddress } from "@/lib/venues";
@@ -112,15 +116,18 @@ export function AssetDetailScreen({
   // than firing a second request.
   const rwaQuery = useRwa();
   const rwaTicker = rwaQuery.data?.tickers.find((t) => t.ticker === asset.symbol);
-  // Which issuer Buy will actually use: an explicit tap on the Venues panel, else the catalog's
-  // bestVenue, else the asset's own platform — the same fallback order VenuePicker itself uses
-  // for its ring, so the highlighted row and the button never disagree about the venue. A picked
-  // venue that stops trading (the issuer pauses mid-session) falls back the same way VenuePicker's
-  // own ring does, rather than keep pointing the buy at a venue that just went dark.
+  // Which issuer Buy will actually use: an explicit tap on the Venues panel, else the issuer the
+  // screen was opened with (a "Which is cheaper?" row or a twin holding — `openedVenue`), else
+  // the catalog's bestVenue, else the asset's own platform — the same fallback order VenuePicker
+  // itself uses for its ring, so the highlighted row and the button never disagree about the
+  // venue. A picked or opened venue that stops trading (the issuer pauses mid-session) falls back
+  // the same way VenuePicker's own ring does, rather than keep pointing the buy at a venue that
+  // just went dark. `chosenVenueFor` is the tested rule (lib/assetVenuePicker.ts) — this line just
+  // reads its verdict. Regression: this used to start the picker at `undefined` and ignore
+  // `openedVenue` entirely, so tapping "Ondo is cheaper" on the board could still land on bStock.
   const [pickedVenue, setPickedVenue] = useState<RwaPlatform | undefined>(undefined);
-  const pickedLive = pickedVenue !== undefined && rwaTicker?.venues.some((v) => v.platform === pickedVenue && v.buyable);
   const defaultVenue = rwaTicker?.bestVenue ?? asset.platform;
-  const chosenVenue = pickedLive ? pickedVenue : defaultVenue;
+  const chosenVenue = chosenVenueFor(pickedVenue, openedVenue, rwaTicker?.venues, defaultVenue);
   // The chosen issuer's own row — the single source for the price, the gap sentence and the
   // status badge above the chart (design critique P0 #3 / P1 #5), so all three always describe
   // the same venue instead of "whichever is first" or the default the viewer just tapped past.
@@ -134,6 +141,19 @@ export function AssetDetailScreen({
   // The gate still fails closed (not open) before the catalog has answered at all — bscBuyGate in
   // useRwa.ts is the single tested rule; this screen just reads its verdict for the chosen venue.
   const bscGate = useBscBuyGate(asset.symbol, chosenAddress);
+  // Price vs the real share, for the chosen issuer only — mounted under "Who you buy from" below.
+  // Crypto (no `platform`) never queries this: there's no issuer, no reference price to compare.
+  const { data: spreadHistory, isLoading: historyLoading, isError: historyErrored } = useSpreadHistory(
+    bsc && asset.platform ? asset.symbol : undefined,
+  );
+  const chosenHistoryPoints = chosenVenue
+    ? (spreadHistory?.venues.find((v) => v.platform === chosenVenue)?.points ?? [])
+    : [];
+  // "loading"/"error" mean the fetch that would back up "empty" hasn't succeeded yet — see
+  // lib/priceHistoryStatus.ts. Regression: without this, every BSC stock page briefly (or, on a
+  // fetch error, permanently) claimed "we start recording this stock's price history" before the
+  // request that would actually confirm that had returned anything.
+  const chosenHistoryStatus = historyStatus(chosenHistoryPoints.length, { isLoading: historyLoading, isError: historyErrored });
   const bscBuyable = bsc ? bscGate.status === "ready" && bscGate.buyable : undefined;
   const [r, setR] = useState(2);
   const range = RANGES[r] as MarketRange;
@@ -375,10 +395,28 @@ export function AssetDetailScreen({
         <div style={{ padding: "18px 22px 0" }}>
           {/* Design critique P0 #4: "Venues" named a category, not a decision. */}
           <SectionTitle>Who you buy from</SectionTitle>
-          {/* Tapping a row picks that issuer for Buy (see `chosenVenue` above); the ring still
-              falls back to the catalog's bestVenue until the viewer taps something else, or if
-              their pick stops trading mid-visit. */}
-          <VenuePicker venues={rwaTicker.venues} bestVenue={defaultVenue ?? null} onSelect={setPickedVenue} />
+          {/* Reviewer-found regression: this used to pass `bestVenue={defaultVenue}` — the
+              catalog's smallest-gap pick — so the ring could highlight one issuer (e.g. bStock,
+              the smallest-gap venue) while Buy targeted another (e.g. Ondo, the cheaper-price
+              venue a board row opened this screen with). VenuePicker uses `bestVenue` for both
+              its ring and its "Best right now" tag; until it grows a `selected` prop that can
+              drive the ring independently (wiringNeeded — VenuePicker isn't owned here), we feed
+              it `chosenVenue` so the ring and the Buy button can never disagree. The tradeoff:
+              "Best right now" can now tag the tapped/opened venue rather than strictly the
+              catalog's smallest-gap venue when the two differ. */}
+          <VenuePicker venues={rwaTicker.venues} bestVenue={chosenVenue ?? null} onSelect={setPickedVenue} />
+          {/* Price vs the real share, for whichever issuer is chosen above — one line chart, a
+              plain sentence once we've actually confirmed there's nothing to draw yet, or nothing
+              at all while that confirmation is still in flight (never a guess dressed as a fact). */}
+          {chosenHistoryStatus === "loading" || chosenHistoryStatus === "error" ? null : chosenHistoryStatus === "empty" ? (
+            <p style={{ margin: "12px 2px 0", fontSize: 12.5, lineHeight: 1.5, color: "var(--ink-3)" }}>
+              No price history for this stock yet. Check back later today.
+            </p>
+          ) : (
+            <div style={{ marginTop: 12 }}>
+              <PriceVsRealShare ticker={asset.symbol} points={chosenHistoryPoints} />
+            </div>
+          )}
         </div>
       )}
 

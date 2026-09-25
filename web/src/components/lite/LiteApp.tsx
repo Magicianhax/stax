@@ -54,6 +54,7 @@ import { SendScreen } from "./screens/SendScreen";
 import { AutopilotScreen } from "./screens/AutopilotScreen";
 import { BasketsScreen } from "./screens/BasketsScreen";
 import { BasketDetailScreen } from "./screens/BasketDetailScreen";
+import { IssuerBoardScreen } from "./screens/IssuerBoardScreen";
 // ── gift-ui ─────────────────────────────────────────────────────────────────
 import { GiftScreen } from "./screens/GiftScreen";
 import { GiftViewScreen } from "./screens/GiftViewScreen";
@@ -69,6 +70,7 @@ type Screen =
   | "hub"
   | "baskets"
   | "basket"
+  | "issuers"
   // ── gift-ui: give a basket ("gift") and your gifts ("gifts") ──────────────
   | "gift"
   | "gifts"
@@ -559,6 +561,7 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
       hub: "Invest",
       baskets: "Baskets",
       basket: "Basket",
+      issuers: "Which is cheaper?",
       // gift-ui
       gift: "Give a basket",
       gifts: "Gifts",
@@ -671,6 +674,9 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
           shared={params.basket as Basket | undefined}
         />
       );
+      break;
+    case "issuers":
+      view = <IssuerBoardScreen go={go} />;
       break;
     // ── gift-ui ───────────────────────────────────────────────────────────────
     case "gift":

@@ -67,6 +67,19 @@ export function HubScreen({
       hint: "Ready-made mixes, one tap each",
       onClick: () => go("baskets"),
     },
+    // BSC only: some stocks here have two versions (bStock and Ondo). Off BSC there's only ever
+    // one issuer, so the board would have nothing to compare.
+    ...(chain.key === "bsc"
+      ? [
+          {
+            id: "issuers",
+            icon: "trend" as IconName,
+            title: "Which is cheaper?",
+            hint: "Same stock, two prices — see which one to buy",
+            onClick: () => go("issuers"),
+          },
+        ]
+      : []),
   ];
 
   return (
