@@ -1,5 +1,6 @@
 "use client";
 import type { ActivityLeg } from "@/lib/onchainHistory";
+import type { RwaPlatform } from "@/lib/chains";
 
 // Stax app shell — a small screen router that mirrors the design's go(screen,
 // params) orchestrator (app.jsx) while wiring the REAL hooks end to end.
@@ -130,6 +131,8 @@ export interface TradeOrder {
   feeUsd: number;
   /** Buy: total paid (fee included). Sell: what lands in cash. */
   amountUsd: number;
+  /** BSC buys: the issuer this trade used, so "Buy more" reopens Trade on the same one. */
+  venue?: RwaPlatform;
 }
 
 /** Trade form state restored when a trade bounces back with an error. */

@@ -255,7 +255,7 @@ export function ReceiptScreen({
         <Reveal delay={0.3} style={{ display: "flex", gap: 8, padding: "14px 22px 0" }}>
           {(
             [
-              ["Buy more", "plus", () => go("trade", { symbol: order.symbol, side: "buy" })],
+              ["Buy more", "plus", () => go("trade", { symbol: order.symbol, side: "buy", ...(order.venue ? { venue: order.venue } : {}) })],
               ["View position", "trend", close],
               ["Share", "send", share],
             ] as const
