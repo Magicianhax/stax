@@ -12,11 +12,15 @@
 // keep the same visual language (soft card, --primary/--accent, --line-2 gridline, tabular
 // numerals) without pretending either series moved when it didn't.
 //
+// Design critique P1 #8: the y-domain is padded to at least ±2% of the real share's price
+// (lib/spread.ts `realShareChartDomain`), so a $1 wobble on a $180 share draws as the small move
+// it is; the card has a title, plain legend words, and each line's latest $ value at its end.
+//
 // Times render in the viewer's own clock (`toLocaleString` with no timeZone, same as
 // MarketStatusBadge), labelled "your time" per this stream's copy rule.
 import { useEffect, useId, useMemo, useState, type CSSProperties } from "react";
 import { usd } from "@/lib/format";
-import type { SpreadPoint } from "@/lib/spread";
+import { realShareChartDomain, type SpreadPoint } from "@/lib/spread";
 
 export interface PriceVsRealShareProps {
   ticker: string;
@@ -61,9 +65,7 @@ export function PriceVsRealShare({ ticker, points, height = 160, style }: PriceV
 
   const geom = useMemo(() => {
     if (points.length < 2) return null;
-    const values = points.flatMap((p) => [p.tokenPrice, p.referencePrice]);
-    const min = Math.min(...values);
-    const max = Math.max(...values);
+    const { min, max } = realShareChartDomain(points);
     const span = max - min || 1;
     const pad = 10; // % of height kept clear top/bottom
     const at = (v: number, i: number) => {
@@ -73,11 +75,24 @@ export function PriceVsRealShare({ ticker, points, height = 160, style }: PriceV
     };
     const tokenPts = points.map((p, i) => at(p.tokenPrice, i));
     const refPts = points.map((p, i) => at(p.referencePrice, i));
+    // End labels sit in a right gutter at each line's last y (% of height), nudged apart so the
+    // two never overlap when the prices are close.
+    let tokenY = tokenPts[tokenPts.length - 1][1];
+    let refY = refPts[refPts.length - 1][1];
+    const MIN_GAP = 13; // % of height ≈ one label line at the default 160px
+    if (Math.abs(tokenY - refY) < MIN_GAP) {
+      const mid = (tokenY + refY) / 2;
+      const tokenAbove = tokenY <= refY;
+      tokenY = Math.max(6, Math.min(94, mid + (tokenAbove ? -MIN_GAP / 2 : MIN_GAP / 2)));
+      refY = Math.max(6, Math.min(94, mid + (tokenAbove ? MIN_GAP / 2 : -MIN_GAP / 2)));
+    }
     return {
       tokenLine: smoothPath(tokenPts),
       refLine: smoothPath(refPts),
       first: points[0],
       last: points[points.length - 1],
+      tokenY,
+      refY,
     };
   }, [points]);
 
@@ -85,18 +100,21 @@ export function PriceVsRealShare({ ticker, points, height = 160, style }: PriceV
   const last = points[points.length - 1];
   const description =
     first && last
-      ? `${ticker} token price ${usd(first.tokenPrice)} to ${usd(last.tokenPrice)}, real share price ${usd(first.referencePrice)} to ${usd(last.referencePrice)}, over the shown period.`
+      ? `Price here ${usd(first.tokenPrice)} to ${usd(last.tokenPrice)}, real share ${usd(first.referencePrice)} to ${usd(last.referencePrice)}, over the shown period.`
       : `No price history for ${ticker} yet.`;
 
   return (
     <div className="card" style={{ padding: "16px 16px 14px", ...style }}>
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", rowGap: 4, marginBottom: 10 }}>
+      <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, letterSpacing: "-.01em", color: "var(--ink)" }}>
+        What you pay vs the real share
+      </h3>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", rowGap: 4, margin: "6px 0 10px" }}>
         <div className="body-sm" style={{ display: "flex", alignItems: "center", gap: 14, flex: "none" }}>
-          <Legend swatch="var(--primary)" label={`${ticker} on-chain`} />
-          <Legend swatch="var(--ink-3)" label="Real share" dashed />
+          <Legend swatch="var(--primary)" label="Price here" />
+          <Legend swatch="var(--ink-2)" label="Real share" dashed />
         </div>
         {last && mounted && (
-          <span className="tnum body-sm" style={{ color: "var(--ink-3)", whiteSpace: "nowrap" }}>
+          <span className="tnum body-sm" style={{ color: "var(--ink-2)", whiteSpace: "nowrap" }}>
             as of {new Date(last.t).toLocaleString(undefined, TIME_FMT)}, your time
           </span>
         )}
@@ -105,20 +123,20 @@ export function PriceVsRealShare({ ticker, points, height = 160, style }: PriceV
       {!geom ? (
         <div
           className="body-sm"
-          style={{ height, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--ink-3)" }}
+          style={{ height, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--ink-2)" }}
         >
           Not enough history yet — check back soon.
         </div>
       ) : (
-        <div style={{ position: "relative", height }} role="img" aria-label={description}>
-          <svg viewBox="0 0 100 100" preserveAspectRatio="none" width="100%" height="100%" aria-hidden>
+        <div style={{ position: "relative", height, paddingRight: 66 }} role="img" aria-label={description}>
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" width="100%" height="100%" aria-hidden style={{ display: "block", overflow: "visible" }}>
             <line x1="0" y1="25" x2="100" y2="25" stroke="var(--line-2)" strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
             <line x1="0" y1="50" x2="100" y2="50" stroke="var(--line-2)" strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
             <line x1="0" y1="75" x2="100" y2="75" stroke="var(--line-2)" strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
             <path
               d={geom.refLine}
               fill="none"
-              stroke="var(--ink-3)"
+              stroke="var(--ink-2)"
               strokeWidth={1.6}
               strokeDasharray="3 3"
               vectorEffect="non-scaling-stroke"
@@ -135,9 +153,40 @@ export function PriceVsRealShare({ ticker, points, height = 160, style }: PriceV
               strokeLinejoin="round"
             />
           </svg>
+          <EndLabel y={geom.tokenY} color="var(--primary)" value={usd(geom.last.tokenPrice)} strong />
+          <EndLabel y={geom.refY} color="var(--ink-2)" value={usd(geom.last.referencePrice)} />
         </div>
       )}
     </div>
+  );
+}
+
+function EndLabel({ y, color, value, strong }: { y: number; color: string; value: string; strong?: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className="tnum"
+      style={{
+        position: "absolute",
+        right: 0,
+        top: `${y}%`,
+        transform: "translateY(-50%)",
+        width: 60,
+        textAlign: "right",
+        fontSize: 12,
+        fontWeight: strong ? 700 : 600,
+        lineHeight: 1.2,
+        color: strong ? "var(--ink)" : "var(--ink-2)",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "flex-end",
+        gap: 5,
+        whiteSpace: "nowrap",
+      }}
+    >
+      <span style={{ width: 6, height: 6, borderRadius: 99, background: color, flex: "none" }} />
+      {value}
+    </span>
   );
 }
 

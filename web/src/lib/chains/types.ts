@@ -53,7 +53,15 @@ export interface Asset {
   platform?: RwaPlatform;
   /** BSC: the same share from the other issuer, when both list it. */
   twin?: RwaTwin;
+  /**
+   * Riskier than an ordinary share, said plainly wherever it's listed: "leveraged" (a 3x daily
+   * fund — kept out of Vera's default picks and curated baskets) or "preipo" (a private company
+   * not yet on an exchange). Design critique P1 #6.
+   */
+  risk?: AssetRisk;
 }
+
+export type AssetRisk = "leveraged" | "preipo";
 
 /** One hop of a V3 route, with the pool we read for spot pricing. */
 export interface RouteHop {

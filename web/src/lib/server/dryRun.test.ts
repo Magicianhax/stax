@@ -132,6 +132,12 @@ describe("plainFailReason", () => {
     expect(reason.length).toBeGreaterThan(0);
   });
 
+  it("never asks a first-time investor for an 'approval step' they can't take", () => {
+    // Design critique P0 #3: the approve is batched into the same user op, so there is no extra
+    // step the person could take — the words only confused them.
+    expect(plainFailReason("execution reverted: BEP20: transfer amount exceeds allowance")).not.toMatch(/approval/i);
+  });
+
   it("has a calm fallback for an empty reason", () => {
     expect(plainFailReason("")).toBeTruthy();
   });

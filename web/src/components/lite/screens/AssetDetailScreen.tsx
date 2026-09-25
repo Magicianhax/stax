@@ -32,6 +32,7 @@ import { MarketStatusBadge } from "@/components/lite/rwa/MarketStatusBadge";
 import { PriceGap } from "@/components/lite/rwa/PriceGap";
 import { VenuePicker, PLATFORM_LABEL } from "@/components/lite/rwa/VenuePicker";
 import { formatOpensLocal } from "@/lib/marketHours";
+import { closedBuyLabel } from "@/lib/plainCopy";
 import { Money, Reveal, Tick, useFlashRow } from "@/components/motion";
 import { usd, tokenQty, timeAgo } from "@/lib/format";
 import { priceSeries } from "@/lib/demoSeries";
@@ -226,7 +227,8 @@ export function AssetDetailScreen({
     ...(live?.marketPrice !== undefined
       ? [
           {
-            k: "Reference price",
+            // Design critique P2 #15: "Reference price" is trader shorthand for the real share.
+            k: "Real share price",
             v: `${usd(live.marketPrice)}${live.marketPriceAt ? ` · updated ${timeAgo(live.marketPriceAt)}` : ""}`,
           },
         ]
@@ -360,10 +362,10 @@ export function AssetDetailScreen({
                   />
                 )}
                 <PriceGap venue={chosenVenueView} />
-                {earnings && <EarningsChip info={earnings} />}
+                {earnings && <EarningsChip info={earnings} companyName={d.name} />}
               </div>
             ) : bsc ? (
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink-3)" }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink-2)" }}>
                 {bscGate.status === "unavailable" ? "Couldn't check the market." : "Checking market…"}
               </span>
             ) : (
@@ -413,7 +415,7 @@ export function AssetDetailScreen({
               plain sentence once we've actually confirmed there's nothing to draw yet, or nothing
               at all while that confirmation is still in flight (never a guess dressed as a fact). */}
           {chosenHistoryStatus === "loading" || chosenHistoryStatus === "error" ? null : chosenHistoryStatus === "empty" ? (
-            <p style={{ margin: "12px 2px 0", fontSize: 12.5, lineHeight: 1.5, color: "var(--ink-3)" }}>
+            <p style={{ margin: "12px 2px 0", fontSize: 12.5, lineHeight: 1.5, color: "var(--ink-2)" }}>
               No price history for this stock yet. Check back later today.
             </p>
           ) : (
@@ -641,7 +643,8 @@ export function AssetDetailScreen({
                 : unavailable
                   ? "Try again"
                   : bscBuyable === false
-                    ? "Market closed"
+                    ? // Design critique P2 #15: a paused issuer isn't a closed market.
+                      closedBuyLabel(chosenVenueView?.state, chosenPlatformLabel)
                     : "Buy"}
           </button>
         </div>

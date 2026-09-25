@@ -27,3 +27,17 @@ export function chosenVenueFor(
   const wantedLive = wanted !== undefined && (venues?.some((v) => v.platform === wanted && v.buyable) ?? false);
   return wantedLive ? wanted : defaultVenue;
 }
+
+/**
+ * The other issuer Trade can offer ("Buy from Ondo instead · open now") — only when the one
+ * this trade uses is closed and the other is open right now (design critique P1 #9).
+ */
+export function otherOpenVenue(
+  chosen: RwaPlatform | undefined,
+  venues: readonly VenueBuyability[] | undefined,
+): RwaPlatform | undefined {
+  if (!chosen || !venues) return undefined;
+  const mine = venues.find((v) => v.platform === chosen);
+  if (!mine || mine.buyable) return undefined;
+  return venues.find((v) => v.platform !== chosen && v.buyable)?.platform;
+}

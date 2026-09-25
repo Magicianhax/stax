@@ -6,6 +6,7 @@
 import { authedFetch } from "@/lib/authedFetch";
 import type { Asset, RwaPlatform, StaxChain } from "@/lib/chains";
 import type { DryRun } from "@/lib/dryRun";
+import { formatOpensLocal } from "@/lib/marketHours";
 
 /** Wire shape of /api/swap-quote (amounts are raw-unit decimal strings). */
 export interface SwapQuoteWire {
@@ -72,6 +73,68 @@ export function swapQuoteErrorMessage(json: unknown, fallback = "Couldn't get a 
 }
 
 /**
+ * The refusals /api/swap-quote marks as meant for the person (design critique P0 #3), so the
+ * client never string-matches server text: a closed market (with `nextOpenMs`), the $6 minimum,
+ * and the per-user price-check limit. Anything without a code is an internal or upstream
+ * problem and is never shown verbatim.
+ */
+export type SwapQuoteErrorCode = "closed" | "min_trade" | "rate_limited";
+const CODES: ReadonlySet<string> = new Set<SwapQuoteErrorCode>(["closed", "min_trade", "rate_limited"]);
+
+export class SwapQuoteError extends Error {
+  constructor(
+    message: string,
+    readonly code?: SwapQuoteErrorCode,
+    readonly nextOpenMs?: number | null,
+  ) {
+    super(message);
+    this.name = "SwapQuoteError";
+  }
+}
+
+/** A failed /api/swap-quote response as a typed error. Any 429 is the per-user limit. */
+export function swapQuoteErrorFrom(json: unknown, status: number): SwapQuoteError {
+  const body = (json ?? {}) as { code?: unknown; nextOpenMs?: unknown };
+  const code =
+    status === 429 ? "rate_limited" : typeof body.code === "string" && CODES.has(body.code) ? (body.code as SwapQuoteErrorCode) : undefined;
+  const nextOpenMs = typeof body.nextOpenMs === "number" ? body.nextOpenMs : null;
+  return new SwapQuoteError(swapQuoteErrorMessage(json), code, nextOpenMs);
+}
+
+export interface QuoteProblemContext {
+  bsc: boolean;
+  /** "Nvidia" — displayFor's name, never the ticker. */
+  companyName: string;
+  /** BSC: the issuer this trade uses ("bStock"). */
+  issuer?: string;
+  /** BSC: the other issuer of the same share, when there is one to suggest. */
+  otherIssuer?: string;
+  side: "buy" | "sell";
+  nowMs?: number;
+}
+
+/**
+ * The one sentence Trade shows for a failed quote (or a swap that failed at its build-time
+ * quote). User-meant refusals keep their meaning; everything else — RFQ routes, an unexpected
+ * router, "No swap route", an aggregator amount change — becomes the same plain sentence
+ * naming the company and the issuer, with a next step. Undefined when there is no error.
+ */
+export function quoteProblemText(error: unknown, ctx: QuoteProblemContext): string | undefined {
+  if (!(error instanceof Error)) return undefined;
+  if (error instanceof SwapQuoteError) {
+    if (error.code === "min_trade") return error.message;
+    if (error.code === "rate_limited") return "Too many price checks — wait a few seconds";
+    if (error.code === "closed" && typeof error.nextOpenMs === "number") {
+      return `${ctx.companyName} is closed right now. It ${formatOpensLocal(error.nextOpenMs, ctx.nowMs)}.`;
+    }
+  }
+  if (!ctx.bsc || !ctx.issuer) return `We can't get a price for ${ctx.companyName} right now. Try again in a few minutes.`;
+  const what = ctx.side === "buy" ? `buy ${ctx.companyName} from ${ctx.issuer}` : `sell ${ctx.companyName} through ${ctx.issuer}`;
+  const other = ctx.side === "buy" && ctx.otherIssuer ? `Try ${ctx.otherIssuer}, or try again in a few minutes.` : "Try again in a few minutes.";
+  return `We can't ${what} right now. ${other}`;
+}
+
+/**
  * The message a quote-fetching hook (useQuote / useSellQuote) should show for its query's
  * `error`. Only a real Error carries a message worth showing — react-query can hand back
  * anything a thrown value happened to be — so anything else reads as "no message", never a
@@ -101,7 +164,7 @@ export async function fetchSwapQuote(args: SwapQuoteArgs): Promise<SwapQuote> {
   });
   const json = (await res.json().catch(() => null)) as (SwapQuoteWire & { error?: string }) | null;
   if (!res.ok || !json) {
-    throw new Error(swapQuoteErrorMessage(json));
+    throw swapQuoteErrorFrom(json, res.status);
   }
   return {
     router: json.router,

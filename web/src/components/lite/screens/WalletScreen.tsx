@@ -25,6 +25,7 @@ import { useChain } from "@/lib/chains/active";
 import { haptic } from "@/lib/haptics";
 import { ONRAMP_PRESETS, offrampUrl, onrampEnabled, onrampSupported, onrampUrl } from "@/lib/onramp";
 import { SavingsCard } from "@/components/lite/savings/SavingsCard";
+import { useSavingsBalance } from "@/hooks/useSavings";
 import type { WalletTx } from "@/lib/walletTx";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { DEMO_TRANSACTIONS } from "@/lib/demo/demoData";
@@ -95,6 +96,7 @@ export function WalletScreen({
   const chain = useChain();
   const { user } = usePrivy();
   const { data: bal, isLoading: balLoading } = useUsdcBalance(address ?? undefined);
+  const { data: savingsBal } = useSavingsBalance(address ?? undefined);
   const { data: port, isLoading: portLoading } = usePortfolio(address ?? undefined);
   const { data: txs, isLoading: txLoading } = useTransactions(address ?? undefined);
   const { data: activity } = useActivity(address ?? undefined);
@@ -139,7 +141,10 @@ export function WalletScreen({
 
   const cash = bal?.value ?? 0;
   const invested = port?.investedUsd ?? 0;
-  const total = cash + invested;
+  // BSC Savings (Venus) isn't a portfolio holding, so it's added here: the parts under the
+  // total must add up to it (design critique P1 #12).
+  const inSavings = chain.key === "bsc" ? (savingsBal ?? 0) : 0;
+  const total = cash + invested + inSavings;
 
   // Transactions, 10 per page. The demo mirrors Home's activity (same plans,
   // same hashes) so the two screens never contradict each other.
@@ -214,13 +219,18 @@ export function WalletScreen({
               </div>
             )}
           </div>
-          <div style={{ display: "flex", gap: 16, marginTop: 10 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", columnGap: 16, rowGap: 4, marginTop: 10 }}>
             <span style={{ fontSize: 13, color: "var(--ink-2)" }}>
               Cash <b className="tnum" style={{ color: "var(--ink)" }}>{hide ? DOTS : usd(cash)}</b>
             </span>
             <span style={{ fontSize: 13, color: "var(--ink-2)" }}>
               Invested <b className="tnum" style={{ color: "var(--ink)" }}>{hide ? DOTS : usd(invested)}</b>
             </span>
+            {inSavings > 0 && (
+              <span style={{ fontSize: 13, color: "var(--ink-2)" }}>
+                Savings <b className="tnum" style={{ color: "var(--ink)" }}>{hide ? DOTS : usd(inSavings)}</b>
+              </span>
+            )}
           </div>
         </div>
       </div>

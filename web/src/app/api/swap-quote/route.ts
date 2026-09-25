@@ -10,7 +10,10 @@
 //            build=true immediately before sending the UserOp.
 //   errors   400 unknown / coming / non-routable symbol, sub-$6 BSC leg, or bad body ·
 //            404 no Kyber route · 409 BSC token isn't buyable right now (Review Focus #1) ·
-//            502 aggregator down
+//            429 per-user limit · 502 aggregator down
+//            Refusals meant for the person carry `code` ("closed" + nextOpenMs, "min_trade",
+//            "rate_limited"); the client (lib/swapQuote.ts quoteProblemText) shows its own plain
+//            words for everything uncoded instead of echoing this route's text.
 //
 // The client's sponsored UserOp is [ fee → treasury (buys, Base/Mantle only — ADR-0007 makes
 // BSC fee-free), ERC20.approve(router, amountIn), { to: router, data } ]. `sender` = `recipient`
@@ -168,7 +171,14 @@ export async function POST(req: NextRequest) {
         return serverError("swap-quote", err);
       }
       const gate = checkBscBuyable(tokens, resolved.address, asset.symbol, Date.now());
-      if (!gate.ok) return Response.json({ error: gate.message, nextOpenMs: gate.nextOpenMs ?? null }, { status: 409 });
+      // `code: "closed"` only with a real reopen instant — the client re-says it in the viewer's
+      // own clock; an unlisted token (no instant) gets the client's plain generic sentence.
+      if (!gate.ok) {
+        return Response.json(
+          { error: gate.message, nextOpenMs: gate.nextOpenMs ?? null, ...(gate.nextOpenMs ? { code: "closed" } : {}) },
+          { status: 409 },
+        );
+      }
       usdValue = bscLegUsdValue(body.side, chain, amountIn, asset, gate.row);
     }
 
@@ -216,7 +226,15 @@ export async function POST(req: NextRequest) {
         console.error("[swap-quote]", err.message);
         return jsonError(502, "We couldn't get a price just now. Try again in a moment.");
       }
-      if (err instanceof BinanceLegRefusal) return badRequest(err.message);
+      if (err instanceof BinanceLegRefusal) {
+        // Design critique P0 #3: a "route" refusal (RFQ, unexpected router, changed amount) is
+        // real, but its words are for the log — the client shows its own plain sentence.
+        if (err.code === "route") {
+          console.error("[swap-quote]", err.message);
+          return jsonError(502, "We couldn't get a price just now. Try again in a moment.");
+        }
+        return jsonError(400, err.message, undefined, err.code ? { code: err.code } : undefined);
+      }
       return serverError("swap-quote", err);
     }
   }

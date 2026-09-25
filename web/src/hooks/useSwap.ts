@@ -182,11 +182,15 @@ export function useSwap() {
   const refreshBalances = useRefreshBalances();
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
+  // The thrown value behind `error`, so Trade can re-word a swap-quote refusal (a
+  // SwapQuoteError from the build-time quote) instead of showing server text (P0 #3).
+  const [errorCause, setErrorCause] = useState<unknown>(null);
   const [result, setResult] = useState<SwapResult | null>(null);
 
   const reset = useCallback(() => {
     setPhase("idle");
     setError(null);
+    setErrorCause(null);
     setResult(null);
   }, []);
 
@@ -207,6 +211,7 @@ export function useSwap() {
       const { asset, amountUsd, expectedOutRaw, slippageBps, recipient: rcpt, venue } = params;
       const recipient = rcpt as `0x${string}`;
       setError(null);
+      setErrorCause(null);
       setResult(null);
       // Demo mode: simulate a successful buy without ever touching the chain.
       if (demo) {
@@ -306,6 +311,7 @@ export function useSwap() {
         refreshBalances(); // cash + holdings refetch now
       } catch (e) {
         setError(e instanceof Error ? e.message : "The buy didn't go through.");
+        setErrorCause(e);
         setPhase("error");
       }
     },
@@ -335,6 +341,7 @@ export function useSwap() {
       const slippageBps = params.slippageBps ?? 100;
       const recipient = rcpt as `0x${string}`;
       setError(null);
+      setErrorCause(null);
       setResult(null);
       // Demo mode: simulate a successful sell without ever touching the chain.
       if (demo) {
@@ -420,11 +427,12 @@ export function useSwap() {
         refreshBalances(); // cash + holdings refetch now
       } catch (e) {
         setError(e instanceof Error ? e.message : "The sell didn't go through.");
+        setErrorCause(e);
         setPhase("error");
       }
     },
     [activeWallet, chain, demo, refreshBalances],
   );
 
-  return { phase, error, result, busy: phase === "swapping", buy, sell, reset };
+  return { phase, error, errorCause, result, busy: phase === "swapping", buy, sell, reset };
 }

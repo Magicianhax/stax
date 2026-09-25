@@ -23,13 +23,14 @@ import { displayFor } from "@/lib/displayAssets";
 import { Icon, AssetTile, useMarketStatus, AmountInput, Keypad } from "@/components/design";
 import { useAmountKeypad } from "@/hooks/useAmountKeypad";
 import { describeNextChange } from "@/lib/marketHours";
-import { stateLabel, dryRunLine } from "@/lib/plainCopy";
+import { stateLabel, dryRunLine, gapSentence } from "@/lib/plainCopy";
+import { otherOpenVenue } from "@/lib/assetVenuePicker";
 import { BSC_MIN_LEG_USD } from "@/lib/rwa";
 import type { DryRun } from "@/lib/dryRun";
 import { usd, tokenQty, fromUnits } from "@/lib/format";
 import { feeUsd, feeOf } from "@/lib/fees";
 import { usdToRaw } from "@/lib/units";
-import { quoteErrorMessage } from "@/lib/swapQuote";
+import { quoteProblemText, SwapQuoteError } from "@/lib/swapQuote";
 import { holdingVenue } from "@/lib/venues";
 import { PLATFORM_LABEL } from "@/components/lite/rwa/VenuePicker";
 import { haptic } from "@/lib/haptics";
@@ -47,7 +48,7 @@ export function TradeScreen({
   go,
   symbol,
   initialSide = "buy",
-  venue,
+  venue: venueProp,
   swap,
   draft,
 }: {
@@ -64,6 +65,10 @@ export function TradeScreen({
 }) {
   const chain = useChain();
   const bsc = chain.key === "bsc";
+  // Design critique P1 #9: "Buy from Ondo instead" switches the issuer right here, without a
+  // trip back to Asset detail. The prop is where the trade started; this is where it is now.
+  const [venueOverride, setVenueOverride] = useState<RwaPlatform | undefined>(undefined);
+  const venue = venueOverride ?? venueProp;
   const asset: Asset = chain.assets.all.find((a) => a.symbol === symbol) ?? chain.assets.all[0];
   const d = displayFor(asset.symbol, asset.name);
   const ticker = d.ticker ?? asset.symbol;
@@ -107,6 +112,18 @@ export function TradeScreen({
   // same story in the viewer's own clock; showing the raw quote error underneath it too just
   // repeated the fact in a second, worse-labelled clock right below the first.
   const venueKnownClosed = bsc && Boolean(tradeVenueView) && !tradeVenueView!.buyable;
+  // The other issuer of the same share, when this one is closed and that one is open right now.
+  const switchTo = bsc ? otherOpenVenue(wantVenue, rwaTicker?.venues) : undefined;
+  const otherVenueView = bsc ? rwaTicker?.venues.find((v) => v.platform !== wantVenue) : undefined;
+  // Design critique P0 #3: what a failed quote says, in plain words naming the company and the
+  // issuer — server and Binance text never reaches the banner (lib/swapQuote.ts quoteProblemText).
+  const problemCtx = (s: "buy" | "sell") => ({
+    bsc,
+    companyName: d.name,
+    issuer: wantVenue ? PLATFORM_LABEL[wantVenue] : undefined,
+    otherIssuer: otherVenueView?.buyable ? PLATFORM_LABEL[otherVenueView.platform] : undefined,
+    side: s,
+  });
 
   const [side, setSide] = useState<"buy" | "sell">(initialSide);
   // The amount is the shared keypad state: one rule set, and the cash on hand is
@@ -130,7 +147,7 @@ export function TradeScreen({
   // real message, not a blank amount — swap-quote's own text, surfaced verbatim. Except when the
   // catalog already named this venue closed above (`venueKnownClosed`): that quote error is the
   // same closed-market refusal, in a second, ET-labelled sentence right under the first.
-  const quoteErrorText = venueKnownClosed ? undefined : quoteErrorMessage(quoteError);
+  const quoteErrorText = venueKnownClosed ? undefined : quoteProblemText(quoteError, problemCtx("buy"));
 
   // Sell side: share of the held position to sell. No default — "All" is a chip.
   const [sellPct, setSellPct] = useState(draft?.sellPct ?? 0);
@@ -142,7 +159,7 @@ export function TradeScreen({
     isFetching: sellFetching,
     error: sellQuoteError,
   } = useSellQuote(side === "sell" && sellable ? asset : null, side === "sell" ? sellRaw : BigInt(0), bsc ? venue : undefined);
-  const sellQuoteErrorText = venueKnownClosed ? undefined : quoteErrorMessage(sellQuoteError);
+  const sellQuoteErrorText = venueKnownClosed ? undefined : quoteProblemText(sellQuoteError, problemCtx("sell"));
 
   const over = side === "buy" && n > balance + 1e-6;
   // What the line under the amount says. `over` is a value that no longer fits
@@ -193,6 +210,8 @@ export function TradeScreen({
           priceUsd: quote.pricePerToken,
           feeUsd: fee,
           amountUsd: n,
+          // Receipt's "Buy more" reopens Trade on the same issuer (design critique P1 #9).
+          ...(bsc && venue ? { venue } : {}),
         }
       : side === "sell" && canSell && sellQuote
         ? {
@@ -247,7 +266,10 @@ export function TradeScreen({
   // quote (market closed, below the $6 minimum) or a failed dry run is a normal state the person
   // can act on, so it never borrows the red banner (`isRealError` below decides the styling).
   const quoteRefusalText = side === "buy" ? (quoteErrorText ?? (dryRunBlocking ? dryRunInfo.text : undefined)) : sellQuoteErrorText;
-  const bannerError = swap.error ?? quoteRefusalText;
+  // A swap that failed at its build-time quote carries the same SwapQuoteError: same plain words.
+  const swapErrorText =
+    swap.errorCause instanceof SwapQuoteError ? quoteProblemText(swap.errorCause, problemCtx(side)) : swap.error;
+  const bannerError = swapErrorText ?? quoteRefusalText;
   const isRealError = Boolean(swap.error);
 
   // Every amount change clears a stale swap error along with it, so the screen
@@ -404,8 +426,12 @@ export function TradeScreen({
       {/* Design critique P1 #5: name the issuer AND its price right under the header, so a pick
           made on Asset detail is never silently different from what this screen is about to buy. */}
       {bsc && side === "buy" && venueLabel && tradeVenueView && (
-        <div className="tnum" style={{ padding: "4px 22px 0", fontSize: 12.5, color: "var(--ink-2)" }}>
+        <div className="tnum" style={{ padding: "4px 22px 0", fontSize: 12.5, lineHeight: 1.45, color: "var(--ink-2)" }}>
           Buying from {venueLabel} · {usd(tradeVenueView.tokenPrice)} a token
+          {/* Design critique P1 #9: what that price means against the real share, right here. */}
+          {gapSentence(tradeVenueView.gapPct, tradeVenueView.referencePrice) && (
+            <div>{gapSentence(tradeVenueView.gapPct, tradeVenueView.referencePrice)}</div>
+          )}
         </div>
       )}
 
@@ -451,6 +477,25 @@ export function TradeScreen({
             Market closed · price can drift until {describeNextChange(market).replace(/^opens /, "")}
           </div>
         )
+      )}
+
+      {/* Design critique P1 #9: this issuer is closed but the other one is open — one tap moves
+          the buy there instead of a dead end. Secondary (ghost): Review stays the main action. */}
+      {side === "buy" && switchTo && (
+        <div style={{ padding: "10px 22px 0" }}>
+          <button
+            type="button"
+            className="btn btn-ghost btn-block tap"
+            style={{ minHeight: 44, fontSize: 14.5 }}
+            onClick={() => {
+              haptic.select();
+              setVenueOverride(switchTo);
+              if (swap.error) swap.reset();
+            }}
+          >
+            Buy from {PLATFORM_LABEL[switchTo]} instead · open now
+          </button>
+        </div>
       )}
 
       {/* buy/sell toggle */}

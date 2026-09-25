@@ -144,10 +144,13 @@ export async function POST(req: NextRequest) {
             const symbol = allocation.allocations[i]?.symbol;
             const tokenOut = venueAddressFor(byTicker.get(symbol ?? ""));
             const amountIn = decodeApproveAmount(pair.approve.data);
+            // Every entry names its own leg (symbol + target token) so PlanScreen matches a
+            // check to the right stock, never by position (design critique P0 #1).
+            const leg = { ...(symbol ? { symbol } : {}), ...(tokenOut ? { token: tokenOut } : {}) };
             if (!tokenOut || amountIn === undefined) {
-              return { status: "skipped", reason: "Couldn't check this trade with Binance just now.", checkedAt: Date.now() };
+              return { status: "skipped", reason: "Couldn't check this trade with Binance just now.", checkedAt: Date.now(), ...leg } satisfies DryRun;
             }
-            return dryRunBscSwap({
+            const dr = await dryRunBscSwap({
               chain,
               taker,
               router: pair.swap.to,
@@ -156,11 +159,19 @@ export async function POST(req: NextRequest) {
               amountIn,
               swapData: pair.swap.data,
             });
+            return { ...dr, ...leg };
           }),
         );
       } catch (err) {
         // Any leg failing fails the whole plan, naming that leg — never a partial batch.
-        if (err instanceof BinanceLegRefusal) return badRequest(err.message);
+        if (err instanceof BinanceLegRefusal) {
+          // A "route" refusal's words are for the log, never Vera's plan screen (P0 #3).
+          if (err.code === "route") {
+            console.error("[invest-plan]", err.message);
+            return jsonError(502, "We couldn't get a price just now. Try again in a moment.");
+          }
+          return badRequest(err.message);
+        }
         if (err instanceof BinanceLegError) {
           console.error("[invest-plan]", err.message);
           return jsonError(502, "We couldn't get a price just now. Try again in a moment.");

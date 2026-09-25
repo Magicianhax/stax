@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chosenVenueFor } from "./assetVenuePicker";
+import { chosenVenueFor, otherOpenVenue } from "./assetVenuePicker";
 
 const venues = [
   { platform: "bstock" as const, buyable: true },
@@ -28,5 +28,23 @@ describe("chosenVenueFor", () => {
 
   it("fails closed to the default venue before the catalog has answered (no venues yet)", () => {
     expect(chosenVenueFor(undefined, "ondo", undefined, "bstock")).toBe("bstock");
+  });
+});
+
+// Design critique P1 #9: when the issuer a trade uses is closed and the other one is open, Trade
+// offers "Buy from Ondo instead · open now" — this is the rule for when that button appears.
+describe("otherOpenVenue", () => {
+  it("offers the other issuer when the chosen one is closed and the other is open", () => {
+    expect(otherOpenVenue("bstock", [{ platform: "bstock", buyable: false }, { platform: "ondo", buyable: true }])).toBe("ondo");
+  });
+
+  it("offers nothing while the chosen one is open", () => {
+    expect(otherOpenVenue("bstock", [{ platform: "bstock", buyable: true }, { platform: "ondo", buyable: true }])).toBeUndefined();
+  });
+
+  it("offers nothing when neither is open, or there is no other issuer", () => {
+    expect(otherOpenVenue("bstock", [{ platform: "bstock", buyable: false }, { platform: "ondo", buyable: false }])).toBeUndefined();
+    expect(otherOpenVenue("bstock", [{ platform: "bstock", buyable: false }])).toBeUndefined();
+    expect(otherOpenVenue(undefined, undefined)).toBeUndefined();
   });
 });

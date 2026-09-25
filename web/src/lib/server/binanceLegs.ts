@@ -77,7 +77,20 @@ export class BinanceLegError extends Error {}
  * is written for the user, so /api/swap-quote returns it as a 400. Anything that is neither
  * this nor a BinanceLegError is an internal fault and is never echoed to the browser.
  */
-export class BinanceLegRefusal extends Error {}
+export class BinanceLegRefusal extends Error {
+  /**
+   * "min_trade": the $6 floor, written for the person and safe to show as-is. "route": Binance
+   * handed back something Stax won't sign (an RFQ route, an unexpected router, a changed
+   * amount) — a real refusal, but its words are for logs, never the screen (design critique
+   * P0 #3). Uncoded refusals keep their existing user-facing wording.
+   */
+  constructor(
+    message: string,
+    readonly code?: "min_trade" | "route",
+  ) {
+    super(message);
+  }
+}
 
 /** Wraps a final BinanceWeb3Error with the leg's token so a basket/quote failure names it. */
 function wrap(symbol: string, err: unknown): never {
@@ -107,7 +120,7 @@ export async function buildBinanceLeg(a: BinanceLegArgs): Promise<BinanceLeg> {
     // and sell legs, and "the smallest buy is $6" told someone selling a $5.70 position (bought
     // at the $6 floor, dipped since, no amount field on the Sell tab to "enter more" into) that
     // they needed to make a bigger BUY.
-    throw new BinanceLegRefusal(`The smallest trade is $${BSC_MIN_LEG_USD}. Enter $${BSC_MIN_LEG_USD} or more.`);
+    throw new BinanceLegRefusal(`The smallest trade is $${BSC_MIN_LEG_USD}. Enter $${BSC_MIN_LEG_USD} or more.`, "min_trade");
   }
   const router = a.chain.routers.binance;
   if (!router) throw new Error(`Binance aggregator isn't configured on ${a.chain.name}.`);
@@ -121,13 +134,13 @@ export async function buildBinanceLeg(a: BinanceLegArgs): Promise<BinanceLeg> {
   // The swap build always gets a fresh quote.
   const q = a.build === false ? await sharedPriceQuote(a, fetchQuote) : await fetchQuote();
   if (q.executionMode !== "SWAP") {
-    throw new BinanceLegRefusal(`${a.symbol}: Binance returned an RFQ route, which a contract can't sign.`);
+    throw new BinanceLegRefusal(`${a.symbol}: Binance returned an RFQ route, which a contract can't sign.`, "route");
   }
   if (q.approveTarget.toLowerCase() !== router.toLowerCase()) {
-    throw new BinanceLegRefusal(`${a.symbol}: Binance quoted an unexpected router.`);
+    throw new BinanceLegRefusal(`${a.symbol}: Binance quoted an unexpected router.`, "route");
   }
   if (q.fromTokenAmount !== a.amountIn) {
-    throw new BinanceLegRefusal(`${a.symbol}: Binance quoted a different amount than requested.`);
+    throw new BinanceLegRefusal(`${a.symbol}: Binance quoted a different amount than requested.`, "route");
   }
 
   const slippageFloor = (q.toTokenAmount * (BPS - BigInt(a.slippageBps))) / BPS;
@@ -159,10 +172,10 @@ export async function buildBinanceLeg(a: BinanceLegArgs): Promise<BinanceLeg> {
     })
     .catch((err) => wrap(a.symbol, err));
   if (built.executionMode !== "SWAP") {
-    throw new BinanceLegRefusal(`${a.symbol}: Binance returned an RFQ route, which a contract can't sign.`);
+    throw new BinanceLegRefusal(`${a.symbol}: Binance returned an RFQ route, which a contract can't sign.`, "route");
   }
   if (built.tx.to.toLowerCase() !== router.toLowerCase()) {
-    throw new BinanceLegRefusal(`${a.symbol}: Binance's swap calldata targeted an unexpected router.`);
+    throw new BinanceLegRefusal(`${a.symbol}: Binance's swap calldata targeted an unexpected router.`, "route");
   }
   const minOut = built.tx.minReceiveAmount < slippageFloor ? built.tx.minReceiveAmount : slippageFloor;
 

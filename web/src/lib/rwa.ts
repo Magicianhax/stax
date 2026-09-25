@@ -48,7 +48,7 @@ export interface RwaTickerView {
   name: string;
   type: "stock" | "etf" | "other";
   venues: VenueView[];
-  /** The venue a buy should use right now: buyable, then the smallest gap. Null when none is. */
+  /** The venue a buy should use right now: buyable, then the lower cost against the real share (lib/spread.ts compareForBuyer). Null when none is. */
   bestVenue: RwaPlatform | null;
 }
 

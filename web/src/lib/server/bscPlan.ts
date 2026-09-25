@@ -6,7 +6,7 @@ import "server-only";
 // the $6-per-leg rule, the "what's buyable right now" filter, and the calls this plan hands the
 // client for signing are all testable without mocking Privy auth or standing up a route — the
 // same reasoning binanceLegs.ts gives for keeping checkBscBuyable/bscLegUsdValue pure.
-import { assetBySymbol, isRoutable, type StaxChain } from "@/lib/chains";
+import { assetBySymbol, isRoutable, type Asset, type StaxChain } from "@/lib/chains";
 import { splitByWeight } from "@/lib/legBuilder";
 import { formatNextOpen, nextUsOpenMs } from "@/lib/marketHours";
 import { BSC_MIN_LEG_USD, type RwaTickerView } from "@/lib/rwa";
@@ -44,6 +44,22 @@ export function closedMessage(symbol: string, ticker: RwaTickerView | undefined,
 /** Vera's BSC candidate universe: catalog tickers with a venue buyable right now. */
 export function buyableTickers(tickers: RwaTickerView[]): RwaTickerView[] {
   return tickers.filter((t) => t.bestVenue !== null);
+}
+
+/** Words that mean the person actually asked for a leveraged fund. */
+const ASKS_FOR_LEVERAGE = /\bleverag|\b[23]\s*[x×]\b|\btriple\b/i;
+
+/**
+ * Vera's default universe leaves out leveraged funds (SOXL, TQQQ — 3x daily moves): a plain
+ * "grow my money" goal must never land a first-time investor in one (design critique P1 #6).
+ * They come back only when the goal asks for leverage, or names the fund itself.
+ */
+export function withoutUnaskedRisk<A extends Pick<Asset, "symbol" | "risk">>(assets: readonly A[], goal: string): A[] {
+  const asksLeverage = ASKS_FOR_LEVERAGE.test(goal);
+  return assets.filter((a) => {
+    if (a.risk !== "leveraged" || asksLeverage) return true;
+    return new RegExp(`\\b${a.symbol}\\b`, "i").test(goal);
+  });
 }
 
 /**

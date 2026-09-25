@@ -32,38 +32,42 @@ describe("daysUntil", () => {
   });
 });
 
+// Design critique P2 #15: a calendar date has no "your time" (only a clock time does), and
+// "Earnings" is trader shorthand — say who reports what.
 describe("formatEarningsDateLocal", () => {
-  it("reads as weekday, month, day, then 'your time'", () => {
-    expect(formatEarningsDateLocal(local(2026, 9, 28))).toBe("Wed, Oct 28 your time");
+  it("reads as weekday, month, day — no 'your time' on a date", () => {
+    expect(formatEarningsDateLocal(local(2026, 9, 28))).toBe("Wed, Oct 28");
   });
 });
 
 describe("earningsChipText", () => {
   const info = (nextMs: number | null, confirmed = true): EarningsInfo => ({ nextMs, confirmed, source: "yahoo" });
 
-  it("counts down in plain words for a future date", () => {
-    expect(earningsChipText(info(local(2026, 9, 28)), NOW)).toBe("Earnings in 3 days · Wed, Oct 28 your time");
+  it("names the company and counts down in plain words", () => {
+    expect(earningsChipText(info(local(2026, 9, 28)), NOW, "Nvidia")).toBe("Nvidia reports results in 3 days · Wed, Oct 28");
   });
 
   it("says 'today' at zero days, not 'in 0 days'", () => {
-    expect(earningsChipText(info(local(2026, 9, 25, 20)), NOW)).toBe("Earnings today · Sun, Oct 25 your time");
+    expect(earningsChipText(info(local(2026, 9, 25, 20)), NOW, "Nvidia")).toBe("Nvidia reports results today · Sun, Oct 25");
   });
 
   it("says 'tomorrow' at one day, not 'in 1 days'", () => {
-    expect(earningsChipText(info(local(2026, 9, 26)), NOW)).toBe("Earnings tomorrow · Mon, Oct 26 your time");
+    expect(earningsChipText(info(local(2026, 9, 26)), NOW, "Nvidia")).toBe("Nvidia reports results tomorrow · Mon, Oct 26");
+  });
+
+  it("falls back to 'This company' without a name", () => {
+    expect(earningsChipText(info(local(2026, 9, 28)), NOW)).toBe("This company reports results in 3 days · Wed, Oct 28");
   });
 
   it("reads as not-announced when no source has a date", () => {
-    expect(earningsChipText(info(null), NOW)).toBe("Earnings date not announced yet");
+    expect(earningsChipText(info(null), NOW, "Nvidia")).toBe("Next results date not announced yet");
   });
 
   it("reads as not-announced when info itself is missing (loading / unknown ticker)", () => {
-    expect(earningsChipText(undefined, NOW)).toBe("Earnings date not announced yet");
+    expect(earningsChipText(undefined, NOW)).toBe("Next results date not announced yet");
   });
 
   it("never shows a countdown for a stale date that's already passed", () => {
-    // A source can go stale between cache refreshes; showing "Earnings in -2 days" would be a
-    // lie about the future, so a passed date reads the same as no date at all.
-    expect(earningsChipText(info(local(2026, 9, 23)), NOW)).toBe("Earnings date not announced yet");
+    expect(earningsChipText(info(local(2026, 9, 23)), NOW, "Nvidia")).toBe("Next results date not announced yet");
   });
 });

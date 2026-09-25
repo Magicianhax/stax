@@ -28,6 +28,7 @@ import {
   parseCryptoMix,
   unavailableNote,
   venueAddressFor,
+  withoutUnaskedRisk,
   type CryptoMixRequest,
 } from "./bscPlan";
 import { bscCatalogSnapshot } from "./rwaCatalog";
@@ -138,7 +139,8 @@ export async function buildAllocation(
     if (stocksClosed && cryptoMix) {
       cryptoMix = { cryptoPct: 100 };
     }
-    universe = [...universe.filter((a) => buyableSymbols.has(a.symbol)), ...cryptoUniverse];
+    // Leveraged funds stay out unless the goal asks for them (design critique P1 #6).
+    universe = [...withoutUnaskedRisk(universe.filter((a) => buyableSymbols.has(a.symbol)), goal), ...cryptoUniverse];
     catalogBySymbol = new Map(catalog.tickers.map((t) => [t.ticker, t]));
     const maxLegs = maxBscLegs(amountUsd);
     if (maxLegs === 0) {

@@ -290,6 +290,11 @@ export function formatOpensLocal(nextOpenMs: number, nowMs: number = Date.now())
   return `opens ${day}${LOCAL_OPEN_TIME_FMT.format(next)} your time`;
 }
 
+/** "closes 10:00 PM your time" — `formatOpensLocal`'s twin for a market that is open now. */
+export function formatClosesLocal(closeMs: number, nowMs: number = Date.now()): string {
+  return formatOpensLocal(closeMs, nowMs).replace(/^opens /, "closes ");
+}
+
 // ── BSC RWA catalog support (docs/BINANCE-WEB3.md §2) ──
 //
 // bStock rows report no session at all (`marketStatus`/`nextOpenTime`/`nextCloseTime` are
@@ -322,6 +327,12 @@ export function nextUsOpenMs(nowMs: number): number {
     return etInstant(p.y, p.m, p.d, OPEN_MIN).getTime();
   }
   return nextOpenAfter(p.y, p.m, p.d).getTime();
+}
+
+/** Today's regular-session close (16:00 ET, 13:00 on an early close) while it's live; else null. */
+export function nextUsCloseMs(nowMs: number): number | null {
+  const s = marketStatus(new Date(nowMs));
+  return s.open ? s.nextChange.getTime() : null;
 }
 
 /** What `usMarketClock` reports — a `stateLabel`-ready view of the NYSE calendar clock. */

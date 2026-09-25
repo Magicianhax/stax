@@ -20,6 +20,10 @@ import { Spinner } from "@/components/lite/screens/primitives";
 
 const PRESETS = [25, 50, 100];
 
+/** Said on the card and again right above the confirm in the move-in sheet (design critique P1 #12). */
+const RISK_LINE =
+  "The rate changes over time. Your money isn’t insured like a bank account — if Venus has a problem, you could lose some or all of it.";
+
 export function SavingsCard({ address }: { address?: string }) {
   const demo = useDemo();
   const { data: rate } = useSavingsRate();
@@ -99,7 +103,7 @@ export function SavingsCard({ address }: { address?: string }) {
               Lent through Venus, a lending app on BNB Chain. You can take it back any time.
             </div>
             {!effectiveRate?.available && (
-              <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 3 }}>Rate unavailable right now — try again shortly.</div>
+              <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 3 }}>Rate unavailable right now — try again shortly.</div>
             )}
             {hasSavings && (
               <div className="tnum" style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)", marginTop: 7 }}>
@@ -109,7 +113,9 @@ export function SavingsCard({ address }: { address?: string }) {
           </div>
         </div>
         <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
-          <button type="button" className="btn btn-primary tap" style={{ flex: 1, height: 44, fontSize: 14.5 }} onClick={openIn}>
+          {/* Secondary, not primary: Wallet's one obvious action is Add money (DESIGN.md), and
+              moving money into a lending app shouldn't out-shout it (design critique P1 #12). */}
+          <button type="button" className="btn btn-ghost tap" style={{ flex: 1, height: 44, fontSize: 14.5 }} onClick={openIn}>
             Move money in
           </button>
           <button
@@ -122,9 +128,7 @@ export function SavingsCard({ address }: { address?: string }) {
             Move money out
           </button>
         </div>
-        <p style={{ fontSize: 11.5, color: "var(--ink-3)", margin: "10px 2px 0", lineHeight: 1.5 }}>
-          The rate changes over time. Your money isn’t insured like a bank account — if Venus has a problem, you could lose some or all of it.
-        </p>
+        <p style={{ fontSize: 13, color: "var(--ink-2)", margin: "12px 2px 0", lineHeight: 1.5 }}>{RISK_LINE}</p>
       </div>
 
       {/* Move money in */}
@@ -136,7 +140,7 @@ export function SavingsCard({ address }: { address?: string }) {
             <p style={{ margin: 0, fontSize: 14, color: "var(--ink-2)", lineHeight: 1.5 }}>
               Move cash from your spendable balance into Savings. You can move it back anytime.
             </p>
-            <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>Spendable cash: {usd(cash)}</div>
+            <div className="tnum" style={{ fontSize: 13, color: "var(--ink-2)" }}>Spendable cash: {usd(cash)}</div>
             <div role="radiogroup" aria-label="Amount" style={{ display: "flex", gap: 8 }}>
               {PRESETS.map((p) => (
                 <button
@@ -178,6 +182,8 @@ export function SavingsCard({ address }: { address?: string }) {
                 />
               </div>
             )}
+            {/* The risk, said once more right where the decision is made. */}
+            <p style={{ margin: 0, fontSize: 13, color: "var(--ink-2)", lineHeight: 1.5 }}>{RISK_LINE}</p>
             {savings.error && <ErrorLine text={savings.error} />}
             <button
               type="button"

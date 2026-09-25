@@ -147,16 +147,16 @@ describe("buildCatalog", () => {
     expect(nvda.bestVenue).toBe("ondo");
   });
 
-  it("compares gap by absolute size, so a negative gap can still beat a smaller-looking positive one", () => {
-    // bstock discount of -0.5% vs. ondo premium of +0.2%: |0.2| < |0.5|, so ondo wins even
-    // though -0.5 < 0.2 numerically — this pins Math.abs, not a signed comparison.
+  it("compares the signed gap: for a buyer a discount beats a smaller premium (design critique P1 #7)", () => {
+    // bstock discount of -0.5% vs. ondo premium of +0.2%: bStock costs less against the real
+    // share, so it wins — the same rule the "Which is cheaper?" board uses (lib/spread.ts).
     const skewed = tokens.map((t) => {
       if (t.underlyingTicker !== "NVDA") return t;
       if (t.platformId === "bstock") return { ...t, tokenPrice: t.referencePrice * 0.995 };
       return { ...t, tokenPrice: t.referencePrice * 1.002 };
     });
     const nvda = buildCatalog(skewed, assets, NOW).find((t) => t.ticker === "NVDA")!;
-    expect(nvda.bestVenue).toBe("ondo");
+    expect(nvda.bestVenue).toBe("bstock");
   });
 
   it("tolerates a curated venue missing from the token list: the ticker keeps its other venue", () => {

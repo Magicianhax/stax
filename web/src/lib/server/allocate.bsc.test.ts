@@ -92,6 +92,23 @@ describe("buildAllocation on BSC", () => {
     expect(system).toMatch(/TSLA/);
   });
 
+  it("keeps leveraged funds out of Vera's universe unless the goal asks for them (design critique P1 #6)", async () => {
+    bscCatalogSnapshotSpy.mockResolvedValue({
+      asOf: NOW,
+      tickers: [ticker({ ticker: "NVDA" }), ticker({ ticker: "TQQQ", name: "ProShares UltraPro QQQ" })],
+    });
+    generateObjectSpy.mockResolvedValue(objectResult([{ symbol: "NVDA", weightPct: 100, reason: "why" }]));
+
+    await buildAllocation(bsc, "grow my money with tech", 100);
+    const plain = (generateObjectSpy.mock.calls[0][0] as { system: string }).system;
+    expect(plain).toMatch(/available assets on BNB Chain:.*NVDA/);
+    expect(plain).not.toMatch(/TQQQ/);
+
+    await buildAllocation(bsc, "I want leveraged tech", 100);
+    const asked = (generateObjectSpy.mock.calls[1][0] as { system: string }).system;
+    expect(asked).toMatch(/TQQQ/);
+  });
+
   it("refuses before ever calling the model when nothing in the catalog is buyable", async () => {
     bscCatalogSnapshotSpy.mockResolvedValue({
       asOf: NOW,
