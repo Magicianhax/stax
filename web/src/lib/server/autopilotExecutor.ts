@@ -21,9 +21,11 @@ import "server-only";
 // this stream doesn't own (rulesEngine.ts's header has the detail; wiringNeeded lists it).
 import { encodeFunctionData } from "viem";
 import { checkBounds, type AutopilotConfig } from "@/lib/autopilot";
-import { getChain } from "@/lib/chains";
+import { getChain, assetBySymbol } from "@/lib/chains";
 import type { StaxChain } from "@/lib/chains/types";
 import type { Allocation } from "@/lib/allocation-schema";
+import { riskScoreFor } from "@/lib/baskets";
+import { resolveVenueAddress } from "@/lib/venues";
 import { serverClient } from "@/lib/server/chain";
 import { recordRun, logRun, pauseAutopilot } from "@/lib/server/autopilotStore";
 import { planAutopilotRun } from "@/lib/server/autopilotPlan";
@@ -42,6 +44,16 @@ export interface RunResult {
   ok: boolean;
   txHash?: string;
   reason?: string;
+  /**
+   * False for a "skipped" outcome — a real, decided state (not deployed yet, waiting on
+   * holdings, over the risk ceiling, cap reached) rather than a transient fault. The cron's
+   * retry loop (review finding #4) used to retry every failure identically, which meant a BSC
+   * config hit `runAutopilot` 3x/day with 4s+12s sleeps for a "not deployed" skip that could
+   * never resolve inside the same invocation — with ~18 users that alone could blow the shared
+   * 300s Vercel Hobby budget and starve other chains' runs in the same tick. Undefined (the
+   * default) leaves the existing text-based `isPermanent` check in charge, same as before.
+   */
+  retryable?: boolean;
 }
 
 /**
@@ -69,7 +81,7 @@ export async function runAutopilot(
   if (!chain.contracts.deployed) {
     const reason = `Stax is not deployed on ${chain.name} yet.`;
     await log({ status: "skipped", reason });
-    return { ok: false, reason };
+    return { ok: false, reason, retryable: false };
   }
 
   const client = serverClient(chain);
@@ -99,7 +111,10 @@ export async function runAutopilot(
     if (!plan.ok) {
       await log({ status: plan.status, reason: plan.reason });
       if (plan.pause) await pauseAutopilot(working.id);
-      return { ok: false, reason: plan.reason };
+      // A "skipped" rule plan (waiting on holdings, market closed, nothing to fix) is a decided,
+      // honest state, not a fault worth retrying 2 more times in the same tick — see RunResult's
+      // header.
+      return { ok: false, reason: plan.reason, retryable: plan.status === "skipped" ? false : undefined };
     }
     if (plan.intents.some((i) => i.action === "sell")) {
       const reason = "Selling existing holdings for this rule isn't wired up yet.";
@@ -113,11 +128,32 @@ export async function runAutopilot(
       return { ok: true };
     }
     spendUsd = plan.intents.reduce((s, i) => s + i.usd, 0);
+    const weights = plan.intents.map((i) => ({ symbol: i.symbol, weightPct: (i.usd / spendUsd) * 100 }));
+    // Score the rule's own allocation the same way a basket does (lib/baskets.ts's
+    // riskScoreFor, blended bps by asset tier) — this used to be hard-coded to 0, which both
+    // let a rule skip the user's risk ceiling in checkBounds below and signed a fabricated
+    // "zero risk" on-chain inference for whatever it actually bought (review finding #1).
+    assessedRiskBps = riskScoreFor(chain, weights);
     allocation = {
       summary: plan.receipt,
       rationale: plan.receipt,
-      riskScore: 0,
-      allocations: plan.intents.map((i) => ({ symbol: i.symbol, weightPct: (i.usd / spendUsd) * 100, reason: i.reason })),
+      riskScore: assessedRiskBps,
+      allocations: weights.map((w, idx) => {
+        const intent = plan.intents[idx];
+        // Carries the venue a buy_discount intent actually priced (review finding #2) onto the
+        // allocation entry, same shape Vera's own BSC allocations already use (allocation-schema
+        // ts's `venue`/`address`). rulesEngine.ts only ever hands back the asset's own platform
+        // here (anything else is refused before this point), so this is display-accurate, not
+        // yet load-bearing for buildLegs below.
+        const asset = intent.platform ? assetBySymbol(chain, intent.symbol) : undefined;
+        const resolved = asset ? resolveVenueAddress(chain, asset, intent.platform) : null;
+        return {
+          symbol: w.symbol,
+          weightPct: w.weightPct,
+          reason: intent.reason,
+          ...(resolved ? { venue: resolved.platform, address: resolved.address } : {}),
+        };
+      }),
     };
     receiptOverride = plan.receipt;
   } else {
@@ -125,7 +161,7 @@ export async function runAutopilot(
     if (!plan.ok) {
       await log({ assessedRiskBps: plan.assessedRiskBps, status: plan.status, reason: plan.reason });
       if (plan.pause) await pauseAutopilot(working.id);
-      return { ok: false, reason: plan.reason };
+      return { ok: false, reason: plan.reason, retryable: plan.status === "skipped" ? false : undefined };
     }
     allocation = plan.allocation;
     assessedRiskBps = plan.assessedRiskBps;
@@ -138,7 +174,7 @@ export async function runAutopilot(
   const bounds = checkBounds({ ...working, amountUsd: spendUsd }, { availableUsd, assessedRiskBps });
   if (!bounds.ok) {
     await log({ assessedRiskBps, status: "skipped", reason: bounds.reason, amountUsd: spendUsd });
-    return { ok: false, reason: bounds.reason };
+    return { ok: false, reason: bounds.reason, retryable: false };
   }
 
   // 4. Build the plan exactly like /api/invest-plan (net deployed; fee skimmed — BSC skims none).

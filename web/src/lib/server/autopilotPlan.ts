@@ -116,7 +116,12 @@ export async function planAutopilotRun(
   chain: StaxChain = getChain(cfg.chain),
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): Promise<AutopilotPlan | AutopilotRulePlan> {
-  const decoded = decodeRuleGoal(cfg.goal);
+  // Rules other than "buy on a schedule" are BSC-only (file header, review finding #3): decoding
+  // on any chain would let a `goal` crafted or copied onto a Base/Mantle config — both already
+  // `deployed: true` — run today, reading BSC's own catalog/spread data to trade on a different
+  // chain entirely. `/api/autopilot`'s POST already refuses saving one off BSC; this is the
+  // second, independent gate for a row that reached the column some other way.
+  const decoded = chain.key === "bsc" ? decodeRuleGoal(cfg.goal) : null;
   if (!decoded || decoded.rule.type === "schedule_buy") {
     const effectiveGoal = decoded?.displayGoal ?? cfg.goal;
     return planForAutopilot(effectiveGoal === cfg.goal ? cfg : { ...cfg, goal: effectiveGoal }, chain);

@@ -16,6 +16,7 @@ import {
   evaluateEarnings,
   formatRuleReceipt,
   describeRule,
+  RULES_NEEDING_HOLDINGS,
   type Rule,
   type RuleIntent,
 } from "./rules";
@@ -175,6 +176,22 @@ describe("evaluateBuyDiscount", () => {
 
   it("does nothing with no usable gap", () => {
     expect(evaluateBuyDiscount({ symbol: "NVDA", buyable: true, gapPct: null }, 2, 25)).toEqual([]);
+  });
+
+  it("carries the venue's platform onto the intent, so the executor knows which issuer it priced", () => {
+    const intents = evaluateBuyDiscount({ symbol: "NVDA", buyable: true, gapPct: -3, platform: "ondo" }, 2, 25);
+    expect(intents).toEqual([expect.objectContaining({ platform: "ondo" })]);
+  });
+});
+
+describe("RULES_NEEDING_HOLDINGS", () => {
+  it("lists exactly the three rules the engine can't yet act on without a live holdings read", () => {
+    expect(RULES_NEEDING_HOLDINGS).toEqual(["rebalance", "safety_switch", "mix_keeper"]);
+  });
+
+  it("excludes the two rules that already act for real (schedule_buy, buy_discount)", () => {
+    expect(RULES_NEEDING_HOLDINGS).not.toContain("schedule_buy");
+    expect(RULES_NEEDING_HOLDINGS).not.toContain("buy_discount");
   });
 });
 

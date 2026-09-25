@@ -18,6 +18,7 @@
 // existing `AutopilotConfig.goal` text column, the same way autopilotStore.ts already folds a
 // basket's id/name into the `reason` column for a run log row — `encodeRuleGoal`/`decodeRuleGoal`
 // below are that same trick for the config, not a new pattern.
+import type { RwaPlatform } from "./chains";
 
 export type RuleType = "schedule_buy" | "rebalance" | "buy_discount" | "safety_switch" | "mix_keeper" | "earnings";
 
@@ -164,6 +165,19 @@ export interface RuleCard {
   example: string;
 }
 
+/**
+ * Rule types rulesEngine.ts cannot act on for real yet: rebalance, safety_switch and mix_keeper
+ * all need a live per-asset holdings read (see rulesEngine.ts's file header) that isn't wired up
+ * — without it they always resolve to a plain "waiting on your holdings" skip. Shown as "coming
+ * soon" in the picker and refused both where Vera proposes a rule (rulesParser.ts) and where a
+ * user saves one directly (`POST /api/autopilot`), so a card that can never act is never one you
+ * can turn on and quietly get nothing from (review finding #5).
+ */
+export const RULES_NEEDING_HOLDINGS: readonly RuleType[] = ["rebalance", "safety_switch", "mix_keeper"];
+
+export const RULE_COMING_SOON_REASON =
+  "Coming soon: this rule needs to read your current BNB Chain holdings, and that isn't connected yet.";
+
 export const RULE_CARDS: RuleCard[] = [
   {
     type: "schedule_buy",
@@ -208,6 +222,16 @@ export function encodeRuleGoal(rule: Rule, displayGoal: string): string {
 }
 
 /**
+ * True when `goal` already carries (or fakes) the encoding only `encodeRuleGoal` should ever
+ * produce. `/api/autopilot`'s POST is the one place that calls `encodeRuleGoal`, from its own
+ * validated `body.rule` — a plain `goal` field that already looks like this must be refused
+ * there rather than accepted and later decoded as an unvalidated rule (review finding #3).
+ */
+export function looksLikeEncodedRuleGoal(goal: string): boolean {
+  return goal.startsWith(RULE_GOAL_PREFIX);
+}
+
+/**
  * Reads a rule back out of a config's `goal`. Null for a plain goal (no rule was ever saved —
  * every existing Base/Mantle autopilot) or a corrupted encoding; never throws. Re-sanitizes on
  * the way out, so a value that reached the column some other way (a hand-edited row, a future
@@ -236,6 +260,10 @@ export interface RuleIntent {
   action: "buy" | "sell";
   usd: number;
   reason: string;
+  /** BSC only: which issuer this buy actually prices against (review finding #2) — the executor
+   *  resolves the on-chain address from this, and refuses rather than buy the wrong issuer's
+   *  token when it can't. Undefined for a non-RWA symbol or an off-BSC rule. */
+  platform?: RwaPlatform;
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -309,7 +337,7 @@ export function evaluateRebalance(
  * paused) is not a buy signal, same reasoning as `classifySpread`'s discount call in spread.ts.
  */
 export function evaluateBuyDiscount(
-  venue: { symbol: string; buyable: boolean; gapPct: number | null },
+  venue: { symbol: string; buyable: boolean; gapPct: number | null; platform?: RwaPlatform },
   discountPct: number,
   amountUsd: number,
 ): RuleIntent[] {
@@ -320,6 +348,7 @@ export function evaluateBuyDiscount(
       action: "buy",
       usd: amountUsd,
       reason: `${venue.symbol} is trading ${Math.abs(venue.gapPct).toFixed(1)}% below the real share.`,
+      platform: venue.platform,
     },
   ];
 }

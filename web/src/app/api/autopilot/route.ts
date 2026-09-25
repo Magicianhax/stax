@@ -29,7 +29,7 @@ import { getOwnedBasket } from "@/lib/server/basketsStore";
 import { touchUser } from "@/lib/server/users";
 import { curatedBasketById, isBasketShortId, type Basket } from "@/lib/baskets";
 import { getChain, investableAssets, type ChainKey } from "@/lib/chains";
-import { encodeRuleGoal, sanitizeRule, type Rule } from "@/lib/rules";
+import { encodeRuleGoal, looksLikeEncodedRuleGoal, RULES_NEEDING_HOLDINGS, RULE_COMING_SOON_REASON, sanitizeRule, type Rule } from "@/lib/rules";
 import {
   AUTOPILOT_DEFAULTS,
   CADENCE_SECONDS,
@@ -122,6 +122,27 @@ export async function POST(req: NextRequest) {
     if (body.basketId) {
       basket = await basketForUser(chain, body.basketId, user.userId);
       if (!basket) return badRequest("That basket isn't available to invest in.");
+    }
+
+    // Rules other than "buy on a schedule" are BSC-only (file header). Nothing upstream of this
+    // enforced it before — the type union alone can't, since `chain` is a separate field — so a
+    // crafted or pasted request could set up e.g. a buy_discount rule on Base, which is already
+    // `deployed: true` and would run for real today (review finding #3).
+    if (body.rule && body.rule.type !== "schedule_buy" && chain !== "bsc") {
+      return badRequest("Rules other than a schedule are only available on BNB Chain right now.");
+    }
+    // A plain `goal` is stored as-is and re-decoded on every run (lib/rules.ts's
+    // encodeRuleGoal/decodeRoleGoal trick) — only THIS route may ever produce that encoding, via
+    // `body.rule` below, so a hand-typed or pasted goal that already looks like one is refused
+    // rather than silently accepted as a rule nobody validated.
+    if (!body.rule && looksLikeEncodedRuleGoal(body.goal)) {
+      return badRequest("That goal isn't valid.");
+    }
+    // Three of the five rule cards can't act yet — they need a live per-asset holdings read this
+    // stream doesn't own (rulesEngine.ts's header) — so refuse saving one rather than let it sit
+    // there skipping forever with no visible reason (review finding #5).
+    if (body.rule && RULES_NEEDING_HOLDINGS.includes(body.rule.type)) {
+      return badRequest(RULE_COMING_SOON_REASON);
     }
 
     // A rule other than "buy on a schedule" needs a symbol check the type union alone can't do

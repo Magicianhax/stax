@@ -50,6 +50,7 @@ vi.mock("./privySmartAccount", () => ({
 
 import { runAutopilot } from "./autopilotExecutor";
 import { getChain } from "@/lib/chains";
+import { signRiskInference } from "@/lib/eip712";
 import type { AutopilotConfig } from "@/lib/autopilot";
 import type { StaxChain } from "@/lib/chains/types";
 
@@ -89,6 +90,7 @@ beforeEach(() => {
   buildLegsSpy.mockReset();
   sendUserOperationSpy.mockClear();
   waitForReceiptSpy.mockClear();
+  vi.mocked(signRiskInference).mockClear();
 });
 
 describe("runAutopilot: a rule plan that refuses", () => {
@@ -97,7 +99,7 @@ describe("runAutopilot: a rule plan that refuses", () => {
 
     const result = await runAutopilot(cfg(), { nowSeconds: NOW_S }, deployedBsc);
 
-    expect(result).toEqual({ ok: false, reason: "No discount right now." });
+    expect(result).toEqual({ ok: false, reason: "No discount right now.", retryable: false });
     expect(logRunSpy).toHaveBeenCalledWith(expect.objectContaining({ status: "skipped", reason: "No discount right now." }));
     expect(buildLegsSpy).not.toHaveBeenCalled();
   });
@@ -156,5 +158,33 @@ describe("runAutopilot: a rule plan with buy-only intents", () => {
     expect(usdcTotal).toBeGreaterThan(BigInt(0));
     expect(sendUserOperationSpy).toHaveBeenCalledTimes(1);
     expect(logRunSpy).toHaveBeenCalledWith(expect.objectContaining({ status: "success", txHash: "0xtx", reason: expect.stringContaining("NVDA") }));
+    // Review finding #1: a 100% single-stock rule buy must be scored like the basket path
+    // (lib/baskets.ts's riskScoreFor — NVDA is "stock" tier, 6000bps), never the old
+    // hard-coded 0, in both the bounds check above and the signed on-chain inference below.
+    expect(allocation.riskScore).toBe(6000);
+    expect(signRiskInference).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ assessedRisk: 6000 }));
+  });
+});
+
+describe("runAutopilot: a rule plan above the user's risk ceiling", () => {
+  it("skips at the bounds gate and never signs a fabricated zero-risk inference (review finding #1)", async () => {
+    planAutopilotRunSpy.mockResolvedValue({
+      ok: true,
+      kind: "rule",
+      rule: { type: "buy_discount", symbol: "NVDA", discountPct: 2 },
+      intents: [{ symbol: "NVDA", action: "buy", usd: 25, reason: "NVDA is cheap" }],
+      receipt: "Vera bought the discount: bought $25 of NVDA.",
+    });
+
+    // NVDA (stock tier) scores 6000bps; a "Careful" 4000bps ceiling must refuse it, exactly the
+    // regression the reviewer found (the old riskScore: 0 sailed straight through this gate).
+    const result = await runAutopilot(cfg({ riskCeilingBps: 4000 }), { nowSeconds: NOW_S }, deployedBsc);
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/risk ceiling/i);
+    expect(logRunSpy).toHaveBeenCalledWith(expect.objectContaining({ status: "skipped", assessedRiskBps: 6000, reason: expect.stringMatching(/risk ceiling/i) }));
+    expect(buildLegsSpy).not.toHaveBeenCalled();
+    expect(signRiskInference).not.toHaveBeenCalled();
+    expect(sendUserOperationSpy).not.toHaveBeenCalled();
   });
 });

@@ -26,7 +26,11 @@ import {
   type RuleType,
   type TieredHolding,
 } from "@/lib/rules";
+import { classifySpread } from "@/lib/spread";
+import { assetBySymbol } from "@/lib/chains";
+import { resolveVenueAddress } from "@/lib/venues";
 import type { StaxChain } from "@/lib/chains/types";
+import type { RwaTickerView, VenueView } from "@/lib/rwa";
 import { bscCatalogSnapshot } from "./rwaCatalog";
 import { getSpreadHistory } from "./spreadStore";
 
@@ -56,14 +60,44 @@ const ok = (rule: Rule, intents: RuleIntent[], basketName?: string): RulePlanRes
 });
 const skip = (reason: string): RulePlanResult => ({ ok: false, reason });
 
+/**
+ * Which venue actually shows the discount, and whether Vera can buy it. `bestVenue` (the
+ * catalog's own pick) is the buyable venue with the SMALLEST |gap| — the closest to par, i.e.
+ * the LEAST likely to be a discount — so a real -3% on the twin is missed whenever the primary
+ * sits at -0.5%. Every venue is checked instead, through the same classifySpread the issuer
+ * board uses, and the most-negative buyable gap wins (review finding #2). The executor's shared
+ * leg-building pipeline (lib/legBuilder.ts, outside this stream) always buys the asset's own
+ * default address, though — it has no way to route to the twin's — so a discount that only
+ * lives on the twin is refused rather than silently bought at the wrong address.
+ */
+function pickDiscountVenue(ticker: Pick<RwaTickerView, "venues">, discountPct: number): VenueView | null {
+  const discounted = ticker.venues.filter((v) => classifySpread(v, { discountPct }).label === "discount");
+  if (discounted.length === 0) return null;
+  return discounted.reduce((best, v) => ((v.gapPct ?? 0) < (best.gapPct ?? 0) ? v : best));
+}
+
 async function planBuyDiscount(chain: StaxChain, rule: Extract<Rule, { type: "buy_discount" }>, ctx: RuleRunContext): Promise<RulePlanResult> {
   const catalog = await bscCatalogSnapshot(ctx.nowMs);
   const ticker = catalog.tickers.find((t) => t.ticker === rule.symbol);
-  const venue = ticker?.venues.find((v) => v.platform === ticker.bestVenue) ?? ticker?.venues[0];
-  if (!ticker || !venue) {
+  if (!ticker || ticker.venues.length === 0) {
     return skip(`${rule.symbol} isn't listed on ${chain.name} right now.`);
   }
-  const intents = evaluateBuyDiscount({ symbol: rule.symbol, buyable: venue.buyable, gapPct: venue.gapPct }, rule.discountPct, ctx.budgetUsd);
+  const best = pickDiscountVenue(ticker, rule.discountPct);
+  if (!best) return ok(rule, []); // a real, successful check that found no discount right now
+
+  const asset = assetBySymbol(chain, rule.symbol);
+  if (!asset) return skip(`${rule.symbol} isn't listed on ${chain.name} right now.`);
+  const resolved = resolveVenueAddress(chain, asset, best.platform);
+  if (!resolved || resolved.address.toLowerCase() !== asset.address?.toLowerCase()) {
+    // The discount lives on the twin (or an issuer venues.ts can't map at all) — see this
+    // function's header for why that can't be bought yet.
+    return skip(`${rule.symbol} is cheaper via its other issuer right now, which Vera can't buy for this rule yet.`);
+  }
+  const intents = evaluateBuyDiscount(
+    { symbol: rule.symbol, buyable: best.buyable, gapPct: best.gapPct, platform: best.platform },
+    rule.discountPct,
+    ctx.budgetUsd,
+  );
   return ok(rule, intents);
 }
 

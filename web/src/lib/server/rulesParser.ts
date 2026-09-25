@@ -9,7 +9,7 @@ import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
 import { investableAssets } from "@/lib/chains";
 import type { StaxChain } from "@/lib/chains/types";
-import { RULE_BOUNDS, RULE_CARDS, sanitizeRule, type Rule } from "@/lib/rules";
+import { RULE_BOUNDS, RULE_CARDS, RULES_NEEDING_HOLDINGS, RULE_COMING_SOON_REASON, sanitizeRule, type Rule } from "@/lib/rules";
 
 const MODEL = process.env.AI_MODEL || "claude-sonnet-4-6";
 
@@ -101,6 +101,12 @@ export async function parseRuleGoal(chain: StaxChain, goal: string): Promise<{ r
   });
 
   const raw = object.rule as Rule;
+  // Rebalance, safety_switch and mix_keeper can't act yet (rulesEngine.ts's header) — refusing
+  // here keeps Vera and `POST /api/autopilot` (which refuses the same three) in agreement, so
+  // Vera never proposes a rule the save step would then reject (review finding #5).
+  if (RULES_NEEDING_HOLDINGS.includes(raw.type)) {
+    throw new RuleRefusal(RULE_COMING_SOON_REASON);
+  }
   const bad = symbolsIn(raw).find((s) => !universe.includes(s));
   if (bad) {
     throw new RuleRefusal(`${bad} isn't tradeable on ${chain.name} right now, so Vera can't set up that rule for it.`);

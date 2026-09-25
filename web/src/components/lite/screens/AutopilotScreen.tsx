@@ -27,7 +27,7 @@ import {
   type AutopilotConfig,
 } from "@/lib/autopilot";
 import { riskWord, type Basket } from "@/lib/baskets";
-import { RULE_CARDS, RULE_DEFAULTS, decodeRuleGoal, describeRule, type Rule, type RuleType } from "@/lib/rules";
+import { RULE_CARDS, RULE_DEFAULTS, RULES_NEEDING_HOLDINGS, RULE_COMING_SOON_REASON, decodeRuleGoal, describeRule, type Rule, type RuleType } from "@/lib/rules";
 import { useBaskets } from "@/hooks/useBaskets";
 import { BasketRailTile, clusterOf } from "./basketPrimitives";
 import { getChain, explorerTx, type ChainKey } from "@/lib/chains";
@@ -364,6 +364,12 @@ export function AutopilotScreen({
     }
     if (amountNum <= 0) {
       notify("Set an amount", "info");
+      return;
+    }
+    // Belt-and-suspenders: the picker already disables these three cards, so this only matters
+    // for a state the UI didn't anticipate. The server refuses the same three either way.
+    if (isBsc && RULES_NEEDING_HOLDINGS.includes(ruleType)) {
+      notify(RULE_COMING_SOON_REASON, "info");
       return;
     }
     // A rebalance rule needs a target basket exactly like Basket mode does — its target weights
@@ -771,23 +777,49 @@ export function AutopilotScreen({
                   <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
                     {RULE_CARDS.map((card) => {
                       const on = ruleType === card.type;
+                      // Rebalance, safety switch and mix keeper need a live read of what the
+                      // account currently holds, which isn't wired up yet (rulesEngine.ts's
+                      // header) — every run would silently skip. Shown, so people know it's
+                      // coming, but not pickable until it can actually act (review finding #5).
+                      const comingSoon = RULES_NEEDING_HOLDINGS.includes(card.type);
                       return (
                         <button
                           key={card.type}
-                          onClick={() => { haptic.select(); setRuleType(card.type); setActiveTemplate(null); }}
+                          onClick={() => {
+                            if (comingSoon) return;
+                            haptic.select();
+                            setRuleType(card.type);
+                            setActiveTemplate(null);
+                          }}
                           className="tap"
                           aria-pressed={on}
+                          aria-disabled={comingSoon}
+                          disabled={comingSoon}
                           style={{
                             textAlign: "left",
                             padding: "12px 14px",
                             borderRadius: 14,
                             background: on ? "var(--primary-soft)" : "var(--surface-2)",
                             boxShadow: on ? "inset 0 0 0 1.5px var(--primary)" : "none",
+                            opacity: comingSoon ? 0.55 : 1,
+                            cursor: comingSoon ? "default" : undefined,
                           }}
                         >
-                          <div style={{ fontWeight: 700, fontSize: 14, color: on ? "var(--primary)" : "var(--ink)" }}>{card.title}</div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: on ? "var(--primary)" : "var(--ink)" }}>{card.title}</div>
+                            {comingSoon && (
+                              <span
+                                className="label-eyebrow"
+                                style={{ fontSize: 10, background: "var(--line-2)", padding: "2px 6px", borderRadius: 6 }}
+                              >
+                                Coming soon
+                              </span>
+                            )}
+                          </div>
                           <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 3, lineHeight: 1.4 }}>{card.sentence}</div>
-                          <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 4 }}>{card.example}</div>
+                          <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 4 }}>
+                            {comingSoon ? "Needs to read what you currently hold — not connected yet." : card.example}
+                          </div>
                         </button>
                       );
                     })}

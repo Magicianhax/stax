@@ -127,6 +127,23 @@ describe("planAutopilotRun: a real rule", () => {
     expect(generateObjectSpy).not.toHaveBeenCalled();
   });
 
+  it("never decodes a rule off Base/Mantle, even with one encoded in the goal (review finding #3)", async () => {
+    // Mantle is always `deployed: true` (unlike Base, which depends on an env var this test
+    // shouldn't need) — decoding this would run a rule for real today.
+    generateObjectSpy.mockResolvedValue({ object: { summary: "s", rationale: "r", riskScore: 4000, allocations: [{ symbol: "NVDA", weightPct: 100, reason: "why" }] } });
+    const mantle = getChain("mantle");
+    const encoded = cfg({ chain: "mantle", goal: encodeRuleGoal({ type: "buy_discount", symbol: "NVDA", discountPct: 2 }, "Buy NVDA cheap") });
+
+    const plan = await planAutopilotRun(encoded, mantle, NOW_S);
+
+    expect(plan.ok).toBe(true);
+    expect("kind" in plan).toBe(false); // the plain goal/basket plan shape, never the rule-engine one
+    expect(bscCatalogSnapshotSpy).not.toHaveBeenCalled();
+    // The whole encoded string became Vera's goal verbatim — never parsed as a rule.
+    const { prompt } = generateObjectSpy.mock.calls[0][0] as { prompt: string };
+    expect(prompt).toMatch(/stax:rule:v1/);
+  });
+
   it("resolves the config's basket into rebalance targets", async () => {
     const encoded = cfg({
       goal: encodeRuleGoal({ type: "rebalance", driftPct: 10 }, "Keep my basket balanced"),
