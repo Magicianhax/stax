@@ -4,6 +4,9 @@
 // from Vera's real on-chain record (/api/vera-record, public, no auth), each
 // ticking up once. It renders only when the numbers are there; while loading
 // or when the API is unavailable it renders nothing at all (no dashes, no box).
+// The record is Mantle's (where the signed-plan contract has run), so the line
+// says so: on a page that leads with BNB Chain an unlabelled number would read
+// as BNB Chain's.
 //
 // Plain fetch on purpose: `/` renders without a QueryClient when Privy is not
 // configured (see app/providers.tsx), so react-query is not safe here.
@@ -61,7 +64,7 @@ export function ProofWall() {
       </span>
       <span className={s.dot} aria-hidden="true" />
       <span className={s.item}>
-        <NumberTicker value={record.executedCount} format={whole} className={s.n} /> checks passed
+        <NumberTicker value={record.executedCount} format={whole} className={s.n} /> checks passed on {MANTLE.name}
       </span>
     </p>
   );

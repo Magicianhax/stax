@@ -1,16 +1,20 @@
 "use client";
 
 // AXIS: proof as the object. A floating glass slab leans back like a document
-// on a desk and carries Vera's plan (title, four holdings, the risk line, a
-// signature line). The signature draws itself, a terracotta wax seal drops
-// and lands with a small squash (the slab dips on impact), then a faint
-// "Verified on-chain" line fades in. Holds five seconds, then restarts.
+// on a desk and carries an example BNB Chain plan from Vera (title, four
+// holdings from the BNB Chain registry, the risk line, her mark). The mark
+// draws itself, a terracotta wax seal drops and lands with a small squash (the
+// slab dips on impact), then a faint "Checked with Binance" line fades in.
+// Holds five seconds, then restarts. On BNB Chain the plan isn't signed on
+// chain yet (the executor path is off until a funded test), so the caption
+// says "Planned by Vera", not "Signed".
 import { useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { RoundedBox } from "@react-three/drei/core/RoundedBox";
 import gsap from "gsap";
 import { Group, MathUtils, type CanvasTexture } from "three";
 import { displayFor } from "@/lib/displayAssets";
+import { bscName } from "@/lib/site/landing";
 import { Stage, Lights, type SceneProps } from "./Stage";
 import { displayFamily, makeCanvas, monoFamily, roundRect, toTexture, uiFamily } from "./labels";
 import type { Theme } from "./theme";
@@ -24,12 +28,15 @@ const CW = 1024;
 const CH = 640;
 const LEAN = MathUtils.degToRad(-18);
 
+// Real BNB Chain tickers, each well over the $6-per-stock floor on a $100 plan.
 const ROWS = [
   { symbol: "NVDA", pct: 30 },
-  { symbol: "AAPL", pct: 30 },
-  { symbol: "GOOGL", pct: 25 },
-  { symbol: "aUSDC", pct: 15 },
+  { symbol: "MSFT", pct: 25 },
+  { symbol: "SPY", pct: 25 },
+  { symbol: "BTCB", pct: 20 },
 ];
+
+const CHECKED = "Checked with Binance";
 
 // Seal rests over the right end of the signature line.
 const SEAL_X = (820 / CW - 0.5) * DOC_W;
@@ -141,7 +148,7 @@ function drawPlan(ctx: CanvasRenderingContext2D, theme: Theme, sig: number, veri
     ctx.fill();
     ctx.fillStyle = theme.ink;
     ctx.font = `500 32px ${ui}`;
-    ctx.fillText(d.name, 108, y);
+    ctx.fillText(bscName(r.symbol), 108, y);
     ctx.textAlign = "right";
     ctx.font = `500 30px ${mono}`;
     ctx.fillStyle = theme.ink2;
@@ -176,10 +183,10 @@ function drawPlan(ctx: CanvasRenderingContext2D, theme: Theme, sig: number, veri
   ctx.fillRect(64, sy, 560, 2);
   ctx.fillStyle = theme.ink3;
   ctx.font = `500 20px ${ui}`;
-  ctx.fillText("Signed by Vera", 64, sy + 32);
+  ctx.fillText("Planned by Vera", 64, sy + 32);
   drawSignature(ctx, 84, sy - 96, sig, theme.ink);
 
-  // Verified on-chain: a status line under the tag, top right, that fades in
+  // Checked with Binance: a status line under the tag, top right, that fades in
   // after the seal lands (the seal itself owns the bottom right).
   if (verified > 0) {
     ctx.save();
@@ -187,10 +194,10 @@ function drawPlan(ctx: CanvasRenderingContext2D, theme: Theme, sig: number, veri
     ctx.textAlign = "right";
     ctx.font = `400 21px ${mono}`;
     ctx.fillStyle = theme.ink2;
-    ctx.fillText("Verified on-chain", CW - 64, 130);
+    ctx.fillText(CHECKED, CW - 64, 130);
     ctx.fillStyle = theme.accent2;
     ctx.beginPath();
-    ctx.arc(CW - 64 - ctx.measureText("Verified on-chain").width - 18, 123, 6, 0, Math.PI * 2);
+    ctx.arc(CW - 64 - ctx.measureText(CHECKED).width - 18, 123, 6, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }

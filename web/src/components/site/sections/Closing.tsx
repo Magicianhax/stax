@@ -11,6 +11,7 @@ import { Reveal } from "../ui/Reveal";
 import { ShineButton } from "../ui/ShineButton";
 import { BuiltOn } from "./BuiltOn";
 import { isBetaOn } from "@/lib/beta";
+import { CLOSING_LINE, ELIGIBILITY_LINE } from "@/lib/site/landing";
 import l from "../layout.module.css";
 import s from "./Closing.module.css";
 import { appUrl, betaUrl, siteUrl } from "@/lib/urls";
@@ -32,7 +33,7 @@ export function Closing() {
         <div className={l.wrap}>
           <Reveal className={`${l.grid} ${s.bandGrid}`} stagger={0.08}>
             <h2 id="open-title" className={s.line}>
-              Own a piece of what you already believe in.
+              {CLOSING_LINE}
             </h2>
             <div className={s.cta}>
               <ShineButton href={appUrl()} variant="primary">
@@ -76,7 +77,7 @@ export function Closing() {
               </ul>
             </nav>
             <div className={s.legal}>
-              <p className={s.elig}>Stocks are issued by Coinbase on Base and Backed on Mantle for eligible non-US users.</p>
+              <p className={s.elig}>{ELIGIBILITY_LINE}</p>
               <p className={s.copy}>
                 <span>© 2026 Stax</span>
                 <Link href="/privacy" className={s.legalLink}>

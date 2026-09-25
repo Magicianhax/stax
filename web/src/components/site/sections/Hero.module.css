@@ -98,11 +98,23 @@
   font-family: var(--s-display);
   font-optical-sizing: auto;
   font-weight: 500;
-  font-size: clamp(56px, 8vw, 96px);
-  line-height: 0.98;
+  /* Eight words now, not four: a step smaller so it sets in three lines
+     beside the seal instead of five. */
+  font-size: clamp(44px, 6.2vw, 80px);
+  line-height: 1;
   letter-spacing: -0.035em;
   color: var(--s-ink);
   text-wrap: balance;
+}
+
+/* The angle's last word leans: Fraunces' own italic, same weight and ink. */
+.em {
+  font-style: italic;
+  letter-spacing: -0.03em;
+}
+
+.market {
+  margin-top: 18px;
 }
 
 .sub {
@@ -192,7 +204,12 @@
   }
   .sub {
     margin-top: 20px;
+    margin-inline: auto;
     font-size: 17px;
+  }
+  .market {
+    justify-content: center;
+    margin-top: 14px;
   }
   .ctas {
     margin-top: 28px;

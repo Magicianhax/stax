@@ -1,23 +1,24 @@
 "use client";
 
-// What you can own — one quiet marquee line of the logos that are buyable on
-// Base today (same filter as the app: routable, not "coming"). 56px logos, no
-// captions; each carries its name for screen readers. Pauses on hover and
-// stops under reduced motion (the row stays scrollable by hand). One line for
-// Mantle under it, on the grid.
-import { getChain, investableAssets, type Asset } from "@/lib/chains";
+// What you can own — the heading, one line with the real count (42 stocks and
+// funds from bStock and Ondo, plus Bitcoin, Ethereum and BNB, all from the BNB
+// Chain registry through the app's own buyable filter), then one quiet marquee
+// line of their logos. 56px logos, no captions; each carries its name for
+// screen readers. Leveraged funds are left out of the row (the app files them
+// under "Riskier picks" and Vera skips them unless asked). Logos come from
+// displayFor/TokenLogo, the same source the app uses, never a URL typed here;
+// a ticker without a logo yet shows the app's own coloured monogram. Pauses on
+// hover and stops under reduced motion (the row stays scrollable by hand).
+// One line under it for Savings and the other networks.
+import type { Asset } from "@/lib/chains";
 import { displayFor } from "@/lib/displayAssets";
+import { OTHER_NETWORKS_LINE, assetsLine, landingAssetRow } from "@/lib/site/landing";
 import { TokenLogo } from "@/components/lite/TokenLogo";
 import { Marquee } from "../ui/Marquee";
 import l from "../layout.module.css";
 import s from "./Assets.module.css";
 
-const BASE = getChain("base");
-const BUYABLE: Asset[] = investableAssets(BASE);
-
-// The Mantle line names the registry's stocks, never a typed list.
-const MANTLE_NAMES = getChain("mantle").assets.stocks.map((a) => displayFor(a.symbol, a.name).name);
-const MANTLE_LINE = `Also on Mantle: ${MANTLE_NAMES.slice(0, -1).join(", ")} and ${MANTLE_NAMES[MANTLE_NAMES.length - 1]}.`;
+const BUYABLE: Asset[] = landingAssetRow();
 
 // The marquee loops one copy of its children; repeat the set until a single
 // copy is wider than any desktop viewport so the loop never shows a gap.
@@ -43,10 +44,11 @@ export function Assets() {
           <h2 id="own-title" className={l.h2}>
             What you can own.
           </h2>
+          <p className={l.lead}>{assetsLine()}</p>
         </div>
       </div>
 
-      <div className={s.row} aria-label="Buyable on Base today" role="group">
+      <div className={s.row} aria-label="Buyable on BNB Chain today" role="group">
         <Marquee speed={36} className={s.marquee}>
           {LINE.map((a, i) => (
             <Logo key={`${a.symbol}-${i}`} a={a} hidden={i >= BUYABLE.length} />
@@ -56,7 +58,7 @@ export function Assets() {
 
       <div className={l.wrap}>
         <div className={l.grid}>
-          <p className={s.mantle}>{MANTLE_LINE}</p>
+          <p className={s.more}>{OTHER_NETWORKS_LINE}</p>
         </div>
       </div>
     </section>

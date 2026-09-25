@@ -1,1 +1,1 @@
-Stax - own real stocks, just say the goal. An AI broker for tokenized stocks on Base.
+Stax, the broker that knows the market is closed. Tokenized stocks from bStock and Ondo on BNB Chain, planned by Vera, an AI broker.
