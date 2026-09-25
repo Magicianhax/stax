@@ -11,6 +11,11 @@ import { bscCatalogSnapshot } from "@/lib/server/rwaCatalog";
 import { rateLimit, clientIp } from "@/lib/server/rateLimit";
 import { badRequest, serverError, tooManyRequests } from "@/lib/server/respond";
 
+// Binance's Web3 API refuses US traffic ("40304: Service not available due to compliance
+// restriction"), and Vercel runs functions in Washington DC by default, so every route that
+// reaches Binance runs in Frankfurt. The database is in us-east-1: one extra ocean crossing.
+export const preferredRegion = "fra1";
+
 export const revalidate = 0; // we manage caching via Cache-Control below
 
 export async function GET(req: NextRequest) {

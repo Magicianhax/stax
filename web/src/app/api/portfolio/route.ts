@@ -21,6 +21,11 @@ import { getDaySummary } from "@/lib/server/marketData";
 import { rateLimit, clientIp } from "@/lib/server/rateLimit";
 import { badRequest, tooManyRequests, serverError } from "@/lib/server/respond";
 
+// Binance's Web3 API refuses US traffic ("40304: Service not available due to compliance
+// restriction"), and Vercel runs functions in Washington DC by default, so every route that
+// reaches Binance runs in Frankfurt. The database is in us-east-1: one extra ocean crossing.
+export const preferredRegion = "fra1";
+
 export const dynamic = "force-dynamic";
 
 // Prices move slowly relative to page views — share one read per chain across all users.

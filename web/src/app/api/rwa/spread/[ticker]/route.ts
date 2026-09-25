@@ -12,6 +12,11 @@ import { rateLimit, clientIp } from "@/lib/server/rateLimit";
 import { badRequest, jsonError, serverError, tooManyRequests } from "@/lib/server/respond";
 import type { SpreadTickerHistoryResponse } from "@/lib/spread";
 
+// Binance's Web3 API refuses US traffic ("40304: Service not available due to compliance
+// restriction"), and Vercel runs functions in Washington DC by default, so every route that
+// reaches Binance runs in Frankfurt. The database is in us-east-1: one extra ocean crossing.
+export const preferredRegion = "fra1";
+
 export async function GET(req: NextRequest, { params }: { params: Promise<{ ticker: string }> }) {
   const limit = await rateLimit(`rwa-spread-ticker:${clientIp(req)}`, 60, 60_000);
   if (!limit.ok) return tooManyRequests(limit.retryAfter);

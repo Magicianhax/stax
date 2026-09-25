@@ -6,6 +6,11 @@ import { getAutopilot } from "@/lib/server/autopilotStore";
 import { runAutopilot } from "@/lib/server/autopilotExecutor";
 import { unauthorized, badRequest, tooManyRequests, serverError } from "@/lib/server/respond";
 
+// Binance's Web3 API refuses US traffic ("40304: Service not available due to compliance
+// restriction"), and Vercel runs functions in Washington DC by default, so every route that
+// reaches Binance runs in Frankfurt. The database is in us-east-1: one extra ocean crossing.
+export const preferredRegion = "fra1";
+
 // Triggers the caller's own autopilot once, now. Signs + submits a real invest —
 // never cache; allow time for bundler inclusion.
 export const dynamic = "force-dynamic";

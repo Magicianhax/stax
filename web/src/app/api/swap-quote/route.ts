@@ -39,6 +39,11 @@ import { rateLimit } from "@/lib/server/rateLimit";
 import { getSmartAccount } from "@/lib/server/users";
 import { unauthorized, badRequest, tooManyRequests, serverError, jsonError } from "@/lib/server/respond";
 
+// Binance's Web3 API refuses US traffic ("40304: Service not available due to compliance
+// restriction"), and Vercel runs functions in Washington DC by default, so every route that
+// reaches Binance runs in Frankfurt. The database is in us-east-1: one extra ocean crossing.
+export const preferredRegion = "fra1";
+
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
