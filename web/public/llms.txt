@@ -1,22 +1,28 @@
 # Stax
 
-> Stax is a mobile-first app for investing in real companies through tokenized stocks on Base (with Mantle as a second network), guided by Vera, an AI investing assistant. You describe a goal in plain words; Vera turns it into a portfolio of tokenized shares and places it in one tap.
+> Stax is a mobile-first app for buying real tokenized stocks, guided by Vera, an AI broker. It runs on BNB Chain by default: stocks from bStock and Ondo, paid in USDT, plus Bitcoin, Ethereum and BNB. Stax is the broker that knows the market is closed: Vera plans only from stocks you can buy right now and won't buy at a weekend premium.
 
-Stax is built for people who are new to investing and to crypto. There is no seed phrase and no gas: you sign in with email, and Stax covers the fees. Holdings are real tokenized shares, issued one-to-one by Coinbase on Base (and by Backed on Mantle), held in self-custody and recorded on-chain, with settlement in USDC. Every recommendation Vera makes is signed (EIP-712) and checked by a contract before money moves, so her track record is public and can't be edited.
+Stax is built for people who are new to investing and to crypto. You sign in with email or Google, with no seed phrase, and Stax pays the network fees. You describe a goal in plain words; Vera turns it into a plan, you confirm with one tap, and the tokens land in your own account on-chain. Base and Mantle remain available in Settings.
 
 ## Key facts
 
-- Invest by describing a goal in plain language to Vera, an AI investing assistant.
-- Buy fractional, tokenized shares of well-known US companies (for example NVDA, GOOGL, AAPL, META, and SpaceX), plus Bitcoin (cbBTC) and Ether, and "Safe Dollars" (USDC earning a variable rate on Aave).
-- Email login: no seed phrase, no browser extension, no manual wallet setup.
-- Gasless, with fees on us: no gas costs and no account fees. A flat 25 bps on what you invest.
-- Real shares: issued one-to-one by Coinbase on Base and by Backed on Mantle, held in self-custody, recorded on-chain.
-- Eligibility: tokenized stocks are offered by Coinbase on Base and by Backed on Mantle to eligible people outside the United States. People in the US or other restricted regions can try the demo but cannot buy stocks.
-- Accountable AI: Vera signs the risk of every plan and a contract verifies or refuses it before swaps execute; the record is public on-chain.
-- Autopilot: optional automated, recurring investing (dollar-cost averaging).
-- Baskets: ready-made mixes (for example Big Tech, AI & Chips, Safe Growth) you can invest in with one tap, save from a Vera plan, or share as a link; Vera still signs the risk before each invest.
-- Built on Base, Coinbase's Ethereum network; Mantle is kept as a second network for earlier investments. You can start from as little as $1.
-- Built with Privy (email login), Pimlico (gas sponsorship), Chainlink (reference prices), Uniswap (Base markets) and Aave (Safe Dollars).
+- Invest by describing a goal in plain language to Vera, an AI broker. Nothing moves until you confirm.
+- 42 stocks and funds on BNB Chain from bStock and Ondo (for example NVDA, AAPL, MSFT, TSLA, SPY and QQQ), paid in USDT, plus Bitcoin, Ethereum and BNB.
+- Market hours: each stock shows whether its market is open, in your own time. On weekends and US holidays Vera waits and tells you when the market opens; on weekday evenings some stocks can still be bought through Ondo.
+- Price against the real share: each stock shows what its token costs compared with the real share (for example "You pay 0.20% less than the real share").
+- Two issuers: most stocks come from both bStock and Ondo. Stax shows who you buy from and picks the one you can buy now that costs less compared with the real share.
+- Checked with Binance: every BNB Chain trade is tested with Binance first, and a trade Binance says would fail is never sent.
+- Minimum: $6 per stock on BNB Chain, the smallest trade Binance takes. With a small amount, Vera picks fewer stocks.
+- Leveraged funds (such as TQQQ and SOXL) stay out of Vera's plans unless you ask for one.
+- Fees: no Stax fee on BNB Chain; a flat 25 bps on what you invest on Base and Mantle. No network fees: Stax pays them.
+- Email login: no seed phrase, no browser extension, no manual wallet setup. Holdings are in your own account (self-custody) and recorded on-chain.
+- Eligibility: stocks are issued by bStock and Ondo on BNB Chain, Coinbase on Base and Backed on Mantle, not by Stax, for eligible people outside the United States. People in the US or other restricted regions can try the demo but cannot buy stocks.
+- Accountable AI on Mantle: Vera signs each plan (EIP-712) and a contract checks her signature, your risk limit and every cent spent before money moves.
+- Autopilot: rules that invest on a schedule, buy when a stock costs less than the real share, or keep a mix balanced. Rules only ever buy. On BNB Chain, Autopilot is rolling out after a funded test.
+- Baskets: ready-made mixes (for example Chip Makers, Magnificent Seven, Broad Market and Stocks & Bitcoin) you can invest in with one tap, save from a Vera plan, or share as a link.
+- Savings: spare USDT can earn in Venus, a BNB Chain lending app. Gifts stay on Base.
+- Built for the BNB Hack: Tokenized Stocks Edition.
+- Built with the Binance Web3 API (tokenized stock data, quotes and trade checks), BNB Chain, Privy (email login), Pimlico (gas sponsorship), Chainlink (reference prices), Uniswap (Base markets) and Aave (Safe Dollars on Base).
 
 ## Awards
 

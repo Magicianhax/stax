@@ -9,6 +9,7 @@ import { BSC, BASE, MANTLE, assetBySymbol, investableAssets, type Asset, type St
 import { curatedBaskets, type Basket } from "@/lib/baskets";
 import { displayFor } from "@/lib/displayAssets";
 import { BSC_MIN_LEG_USD } from "@/lib/rwa";
+import { SITE_DESCRIPTION } from "@/lib/seo";
 import { formatClosesLocal, formatOpensLocal, nextUsCloseMs, usMarketClock } from "@/lib/marketHours";
 
 /** The network the landing leads with: the app's default. */
@@ -208,8 +209,8 @@ export const FAQ: { q: string; a: string }[] = [
   },
 ];
 
-export const SITE_DESCRIPTION_BSC =
-  "Real tokenized stocks on BNB Chain, from bStock and Ondo. Vera, an AI broker, plans from what’s open and won’t buy at a weekend premium. Email login, no seed phrase, no Stax fee.";
+/** The page's meta description; one copy, in `lib/seo`, so the tags and this list can't drift. */
+export const SITE_DESCRIPTION_BSC = SITE_DESCRIPTION;
 
 export const OG_ALT =
   "Stax, the broker that knows the market is closed. Tokenized stocks from bStock and Ondo on BNB Chain, planned by Vera, an AI broker.";
