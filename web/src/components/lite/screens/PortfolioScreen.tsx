@@ -14,6 +14,8 @@
 // to the holdings' market series blended by current value ("price movement").
 // Each row shows its unrealized gain against cost when the lots are known.
 import { holdingKey } from "@/lib/venues";
+import { useChain } from "@/lib/chains/active";
+import { assetLogo } from "@/lib/assetLogo";
 import { useMemo, useState } from "react";
 import { usePortfolio, type Holding } from "@/hooks/useBalances";
 import { coverageLabel, rangeCovered, usePortfolioHistory } from "@/hooks/usePortfolioHistory";
@@ -54,6 +56,7 @@ export function PortfolioScreen({
   go: (screen: string, params?: Record<string, unknown>) => void;
   loop?: LoopParams;
 }) {
+  const chain = useChain();
   const { address } = useSmartAccount();
   // Cash, invested, and total all arrive pre-computed from /api/portfolio —
   // this screen renders them verbatim (no client-side money math).
@@ -291,11 +294,13 @@ export function PortfolioScreen({
             {holdings.map((h, i) => {
               const base = toTile(h.asset.symbol, h.asset.name);
               // Real 1D market data (from the server) replaces the presentational
-              // tint whenever the asset has a live source.
+              // tint whenever the asset has a live source. On BSC, a twin holding row shows
+              // THIS row's own issuer's logo (h.venue), not the default issuer's.
               const tile = {
                 ...base,
                 day: h.dayChangePct ?? base.day,
                 spark: h.spark ?? base.spark,
+                logo: assetLogo(chain, h.asset.symbol, h.venue),
               };
               const s = series.get(h.asset.symbol);
               const rc = s && s.length > 1 ? changeOf(s) : null;

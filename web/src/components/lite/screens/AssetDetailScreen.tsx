@@ -25,6 +25,7 @@ import { PriceVsRealShare } from "@/components/lite/spread/PriceVsRealShare";
 import { historyStatus } from "@/lib/priceHistoryStatus";
 import { chosenVenueFor } from "@/lib/assetVenuePicker";
 import { useDemo } from "@/components/demo/DemoProvider";
+import { assetLogo } from "@/lib/assetLogo";
 import { displayFor } from "@/lib/displayAssets";
 import { pickHolding, resolveVenueAddress } from "@/lib/venues";
 import { Icon, AssetTile, PriceChart, SectionTitle, Stat, MarketStatus, type PricePoint } from "@/components/design";
@@ -301,7 +302,9 @@ export function AssetDetailScreen({
       <div
         style={{ padding: "12px 22px 0", display: "flex", alignItems: "center", gap: 14 }}
       >
-        <AssetTile asset={d} size={54} />
+        {/* BSC: the currently chosen issuer's own logo (VenuePicker/board/twin position all feed
+            `chosenVenue`); off BSC this is exactly `d.logo`, unchanged. */}
+        <AssetTile asset={{ ...d, logo: assetLogo(chain, asset.symbol, chosenVenue) }} size={54} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <h1 className="serif" style={{ margin: 0, fontSize: 27, letterSpacing: "-.01em", overflowWrap: "anywhere" }}>{d.name}</h1>
           <div style={{ fontSize: 13.5, color: "var(--ink-2)" }}>
@@ -410,7 +413,7 @@ export function AssetDetailScreen({
               it `chosenVenue` so the ring and the Buy button can never disagree. The tradeoff:
               "Best right now" can now tag the tapped/opened venue rather than strictly the
               catalog's smallest-gap venue when the two differ. */}
-          <VenuePicker venues={rwaTicker.venues} bestVenue={rwaTicker.bestVenue} selected={chosenVenue ?? null} onSelect={setPickedVenue} />
+          <VenuePicker ticker={asset.symbol} venues={rwaTicker.venues} bestVenue={rwaTicker.bestVenue} selected={chosenVenue ?? null} onSelect={setPickedVenue} />
           {/* Price vs the real share, for whichever issuer is chosen above — one line chart, a
               plain sentence once we've actually confirmed there's nothing to draw yet, or nothing
               at all while that confirmation is still in flight (never a guess dressed as a fact). */}

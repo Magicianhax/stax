@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Asset } from "@/lib/chains";
 import { useChain } from "@/lib/chains/active";
+import { assetLogo } from "@/lib/assetLogo";
 import { displayFor, type AssetDisplay } from "@/lib/displayAssets";
 import { usePrices } from "@/hooks/usePrices";
 import { useMarketSummary } from "@/hooks/useMarket";
@@ -193,9 +194,10 @@ export function MarketScreen({
           borderBottom: i < list.length - 1 ? "1px solid var(--line-2)" : "none",
         }}
       >
-        {/* dim the tile, never the words — text stays AA on a "coming" row */}
+        {/* dim the tile, never the words — text stays AA on a "coming" row. BSC: the row's own
+            venue (when it has one) picks which issuer's logo shows; otherwise the default issuer. */}
         <span style={{ opacity: coming ? 0.55 : 1, display: "block", flex: "none" }}>
-          <AssetTile asset={d} />
+          <AssetTile asset={{ ...d, logo: assetLogo(chain, asset.symbol, venue?.platform) }} />
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>

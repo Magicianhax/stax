@@ -18,6 +18,7 @@ import { useBaskets } from "@/hooks/useBaskets";
 import { allocationToBasket, shortName, BASKET_NAME_MAX, type Basket } from "@/lib/baskets";
 import { haptic } from "@/lib/haptics";
 import { shareBasket, WeightBar } from "./basketPrimitives";
+import { assetLogo } from "@/lib/assetLogo";
 import { toTile, catFor } from "@/lib/displayAssets";
 import { usd } from "@/lib/format";
 import { assetBySymbol } from "@/lib/chains";
@@ -243,7 +244,8 @@ export function PlanScreen({
           return (
             <div key={a.symbol} className="card" style={{ padding: "14px 16px", marginBottom: 10 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
-                <AssetTile asset={tile} />
+                {/* BSC: the leg's own resolved issuer (`a.venue`) picks the logo; off BSC unchanged. */}
+                <AssetTile asset={{ ...tile, logo: assetLogo(chain, a.symbol, a.venue) }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                     <span style={{ fontWeight: 600, fontSize: 16.5 }}>{tile.name}</span>

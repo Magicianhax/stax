@@ -18,12 +18,15 @@ import type { RwaPlatform } from "@/lib/chains";
 import type { VenueView } from "@/lib/rwa";
 import { usd } from "@/lib/format";
 import { gapWords, stateLabel, venuePickerExplainer } from "@/lib/plainCopy";
+import { TokenLogo } from "@/components/lite/TokenLogo";
 import { MarketStatusBadge } from "./MarketStatusBadge";
 
 /** Display name for an issuer — shared with TradeScreen's "via bStock" / "via Ondo" line. */
 export const PLATFORM_LABEL: Record<RwaPlatform, string> = { bstock: "bStock", ondo: "Ondo" };
 
 export interface VenuePickerProps {
+  /** The human ticker (e.g. "NVDA") — each row shows THIS issuer's own token logo for it. */
+  ticker: string;
   venues: VenueView[];
   bestVenue: RwaPlatform | null;
   /**
@@ -37,7 +40,7 @@ export interface VenuePickerProps {
   style?: CSSProperties;
 }
 
-export function VenuePicker({ venues, bestVenue, selected, onSelect, style }: VenuePickerProps) {
+export function VenuePicker({ ticker, venues, bestVenue, selected, onSelect, style }: VenuePickerProps) {
   // Without `onSelect` a click has nowhere to go: the buy flow (Task 12) is what turns a picked
   // row into a different quote, and until that's wired, letting the ring move on a tap would
   // show a choice the buy ignores — the ring stays locked to whatever the caller says is the
@@ -113,6 +116,8 @@ export function VenuePicker({ venues, bestVenue, selected, onSelect, style }: Ve
               >
                 {on && <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--primary)" }} />}
               </span>
+              {/* This issuer's own branded mint of the ticker — bStock and Ondo look different. */}
+              <TokenLogo symbol={ticker} size={28} venue={v.platform} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <span translate="no" style={{ fontWeight: 600, fontSize: 14.5, color: "var(--ink)" }}>
