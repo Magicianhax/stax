@@ -395,10 +395,16 @@ export function AssetDetailScreen({
         <div style={{ padding: "18px 22px 0" }}>
           {/* Design critique P0 #4: "Venues" named a category, not a decision. */}
           <SectionTitle>Who you buy from</SectionTitle>
-          {/* Tapping a row picks that issuer for Buy (see `chosenVenue` above); the ring still
-              falls back to the catalog's bestVenue until the viewer taps something else, or if
-              their pick stops trading mid-visit. */}
-          <VenuePicker venues={rwaTicker.venues} bestVenue={defaultVenue ?? null} onSelect={setPickedVenue} />
+          {/* Reviewer-found regression: this used to pass `bestVenue={defaultVenue}` — the
+              catalog's smallest-gap pick — so the ring could highlight one issuer (e.g. bStock,
+              the smallest-gap venue) while Buy targeted another (e.g. Ondo, the cheaper-price
+              venue a board row opened this screen with). VenuePicker uses `bestVenue` for both
+              its ring and its "Best right now" tag; until it grows a `selected` prop that can
+              drive the ring independently (wiringNeeded — VenuePicker isn't owned here), we feed
+              it `chosenVenue` so the ring and the Buy button can never disagree. The tradeoff:
+              "Best right now" can now tag the tapped/opened venue rather than strictly the
+              catalog's smallest-gap venue when the two differ. */}
+          <VenuePicker venues={rwaTicker.venues} bestVenue={chosenVenue ?? null} onSelect={setPickedVenue} />
           {/* Price vs the real share, for whichever issuer is chosen above — one line chart, a
               plain sentence once we've actually confirmed there's nothing to draw yet, or nothing
               at all while that confirmation is still in flight (never a guess dressed as a fact). */}
