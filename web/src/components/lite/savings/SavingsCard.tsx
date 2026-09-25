@@ -12,7 +12,7 @@
 import { useState } from "react";
 import { Icon, SectionTitle, BottomSheet } from "@/components/design";
 import { useDemo } from "@/components/demo/DemoProvider";
-import { useSavings, useSavingsRate, DEMO_SAVINGS_RATE } from "@/hooks/useSavings";
+import { useSavings, useSavingsBalance, useSavingsRate, DEMO_SAVINGS_RATE } from "@/hooks/useSavings";
 import { useUsdcBalance } from "@/hooks/useBalances";
 import { usd } from "@/lib/format";
 import { haptic } from "@/lib/haptics";
@@ -24,13 +24,19 @@ export function SavingsCard({ address }: { address?: string }) {
   const demo = useDemo();
   const { data: rate } = useSavingsRate();
   const { data: bal } = useUsdcBalance(address);
+  const { data: savingsBal } = useSavingsBalance(address);
   const savings = useSavings();
   const [sheet, setSheet] = useState<"in" | "out" | null>(null);
   const [amt, setAmt] = useState<number | "custom">(25);
   const [customAmt, setCustomAmt] = useState("");
+  // Snapshot of the balance when "Move money out" opened — so the confirm copy and the success
+  // amount stay put even after moveOut succeeds and useSavingsBalance refetches down to 0.
+  const [outAmount, setOutAmount] = useState(0);
 
   const effectiveRate = demo ? DEMO_SAVINGS_RATE : rate;
   const cash = bal?.value ?? 0;
+  const inSavings = savingsBal ?? 0;
+  const hasSavings = inSavings > 0;
   const amount = amt === "custom" ? Math.floor(parseFloat(customAmt) || 0) : Math.min(amt, Math.floor(cash));
   const canMoveIn = amount > 0 && amount <= cash;
 
@@ -42,8 +48,10 @@ export function SavingsCard({ address }: { address?: string }) {
     setSheet("in");
   };
   const openOut = () => {
+    if (!hasSavings) return;
     haptic.light();
     savings.reset();
+    setOutAmount(inSavings);
     setSheet("out");
   };
   const close = () => {
@@ -93,18 +101,29 @@ export function SavingsCard({ address }: { address?: string }) {
             {!effectiveRate?.available && (
               <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 3 }}>Rate unavailable right now — try again shortly.</div>
             )}
+            {hasSavings && (
+              <div className="tnum" style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)", marginTop: 7 }}>
+                In Savings: {usd(inSavings)}
+              </div>
+            )}
           </div>
         </div>
         <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
           <button type="button" className="btn btn-primary tap" style={{ flex: 1, height: 44, fontSize: 14.5 }} onClick={openIn}>
             Move money in
           </button>
-          <button type="button" className="btn btn-ghost tap" style={{ flex: 1, height: 44, fontSize: 14.5 }} onClick={openOut}>
+          <button
+            type="button"
+            className="btn btn-ghost tap"
+            style={{ flex: 1, height: 44, fontSize: 14.5, opacity: hasSavings ? 1 : 0.45 }}
+            disabled={!hasSavings}
+            onClick={openOut}
+          >
             Move money out
           </button>
         </div>
         <p style={{ fontSize: 11.5, color: "var(--ink-3)", margin: "10px 2px 0", lineHeight: 1.5 }}>
-          The rate moves with the market and isn’t guaranteed — a small risk of any lending app, including this one.
+          The rate changes over time. Your money isn’t insured like a bank account — if Venus has a problem, you could lose some or all of it.
         </p>
       </div>
 
@@ -176,11 +195,13 @@ export function SavingsCard({ address }: { address?: string }) {
       {/* Move money out */}
       <BottomSheet open={sheet === "out"} onClose={close} title="Move money out">
         {savings.phase === "done" ? (
-          <SuccessBody label="Moved back to cash" onDone={close} />
+          <SuccessBody label="Moved back to cash" amount={outAmount > 0 ? outAmount : undefined} onDone={close} />
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: "2px 2px 8px" }}>
             <p style={{ margin: 0, fontSize: 14, color: "var(--ink-2)", lineHeight: 1.5 }}>
-              This takes everything you’ve put into Savings and moves it back to your spendable cash.
+              {outAmount > 0
+                ? `This takes all ${usd(outAmount)} you’ve put into Savings and moves it back to your spendable cash.`
+                : "This takes everything you’ve put into Savings and moves it back to your spendable cash."}
             </p>
             {savings.error && <ErrorLine text={savings.error} />}
             <button

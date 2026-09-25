@@ -6,7 +6,7 @@
 // (lib/execution.ts) checks every recipient against Savings' own pinned allowlist before the
 // wallet is ever asked to sign, and the calls are sent as one sponsored UserOp.
 import { useCallback, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useActiveWallet } from "@/hooks/useActiveWallet";
 import { sendSponsoredCalls } from "@/lib/aa";
 import { asViemProvider } from "@/lib/provider";
@@ -20,6 +20,10 @@ import type { SavingsRateResponse } from "@/app/api/savings/route";
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const DEMO_SAVINGS_TX = ("0x" + "5a7c2b41".repeat(32).slice(0, 64)) as `0x${string}`;
 const DEMO_RATE: SavingsRateResponse = { chain: "bsc", available: true, apyBps: 420, apyDisplay: "4.20%" };
+// A plausible standing balance for demo mode's screenshot wallet — DemoProvider's own `DemoApi`
+// carries no Savings field (nothing there needed one before this card existed), so this is kept
+// local here rather than widening that shared type for a display-only constant.
+const DEMO_SAVINGS_BALANCE_USD = 42.15;
 
 type Phase = "idle" | "moving" | "done" | "error";
 
@@ -42,11 +46,38 @@ export function useSavingsRate() {
   });
 }
 
+/**
+ * The caller's current Savings balance in dollars (BSC only — reads GET /api/savings?address=…,
+ * see getSavingsBalanceUsd's doc comment in lib/server/savings.ts for how it's computed).
+ *
+ * Review fix (wave 5b): before this hook existed, nothing on the client ever read this balance —
+ * a deposit made the money look like it had vanished, since the card showed no line for it at all.
+ */
+export function useSavingsBalance(address?: string) {
+  const demo = useDemo();
+  const chain = useChain();
+  const query = useQuery({
+    queryKey: ["savings-balance-usd", chain.key, address],
+    enabled: !demo && chain.key === "bsc" && Boolean(address),
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+    queryFn: async (): Promise<number | null> => {
+      const res = await fetch(`/api/savings?address=${address}`, { headers: { "x-stax-chain": chain.key } });
+      if (!res.ok) throw new Error("Couldn't load your Savings balance.");
+      const json = (await res.json()) as SavingsRateResponse;
+      return json.balanceUsd ?? null;
+    },
+  });
+  if (demo) return { ...query, data: DEMO_SAVINGS_BALANCE_USD, isLoading: false, isPending: false } as typeof query;
+  return query;
+}
+
 export function useSavings() {
   const activeWallet = useActiveWallet();
   const chain = useChain();
   const demo = useDemo();
   const refreshBalances = useRefreshBalances();
+  const queryClient = useQueryClient();
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [txHash, setTxHash] = useState<`0x${string}` | null>(null);
@@ -91,12 +122,15 @@ export function useSavings() {
         setTxHash(receipt.receipt.transactionHash as `0x${string}`);
         setPhase("done");
         refreshBalances();
+        // useRefreshBalances (useBalances.ts) only knows about cash/portfolio/activity — it has
+        // no idea useSavingsBalance's own query key exists, so that one is invalidated here.
+        void queryClient.invalidateQueries({ queryKey: ["savings-balance-usd"] });
       } catch (e) {
         setError(e instanceof Error ? e.message : "Savings didn't go through.");
         setPhase("error");
       }
     },
-    [activeWallet, chain, demo, refreshBalances],
+    [activeWallet, chain, demo, refreshBalances, queryClient],
   );
 
   const moveIn = useCallback((amountUsd: number, address: string) => run({ action: "deposit", amountUsd }, address as `0x${string}`), [run]);

@@ -26,6 +26,7 @@ const tokenAsset = (addr: string, raw: string) => ({
 });
 
 beforeEach(() => {
+  vi.resetModules();
   mockWeb3Request.mockReset();
 });
 
@@ -101,3 +102,53 @@ function tokenAssetTyped(addr: string, raw: string) {
     isRiskToken: false,
   };
 }
+
+// Review fix (wave 5b): the portfolio route's own 10s cache was shorter than usePortfolio's 30s
+// poll, so every poll missed it anyway and still spent Binance calls. The cache now lives here,
+// at 45s, and `invalidateBscBalanceCache` lets a caller that just confirmed a send landed force
+// the next read fresh instead of waiting out the window.
+describe("cachedBscBalances", () => {
+  const TOKEN = "0xaaa0000000000000000000000000000000000a" as const;
+
+  it("shares one Binance call across repeated reads within the TTL", async () => {
+    vi.useFakeTimers();
+    try {
+      const { cachedBscBalances, BSC_BALANCE_CACHE_TTL_MS } = await import("./wallet");
+      mockWeb3Request.mockResolvedValue([{ tokenAssets: [tokenAsset(TOKEN, "1")] }]);
+
+      await cachedBscBalances(ADDR, [TOKEN]);
+      vi.advanceTimersByTime(BSC_BALANCE_CACHE_TTL_MS - 1000);
+      await cachedBscBalances(ADDR, [TOKEN]);
+
+      expect(mockWeb3Request).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("covers a 30s poll interval with room either side (the regression: TTL used to be 10s)", async () => {
+    const { BSC_BALANCE_CACHE_TTL_MS } = await import("./wallet");
+    expect(BSC_BALANCE_CACHE_TTL_MS).toBeGreaterThanOrEqual(30_000);
+  });
+
+  it("invalidateBscBalanceCache forces the next read to hit Binance again, even inside the TTL", async () => {
+    const { cachedBscBalances, invalidateBscBalanceCache } = await import("./wallet");
+    mockWeb3Request.mockResolvedValue([{ tokenAssets: [tokenAsset(TOKEN, "1")] }]);
+
+    await cachedBscBalances(ADDR, [TOKEN]);
+    invalidateBscBalanceCache(ADDR);
+    await cachedBscBalances(ADDR, [TOKEN]);
+
+    expect(mockWeb3Request).toHaveBeenCalledTimes(2);
+  });
+
+  it("doesn't poison later reads after a failure", async () => {
+    const { cachedBscBalances } = await import("./wallet");
+    mockWeb3Request.mockRejectedValueOnce(new Error("network down"));
+    await expect(cachedBscBalances(ADDR, [TOKEN])).rejects.toThrow("network down");
+
+    mockWeb3Request.mockResolvedValueOnce([{ tokenAssets: [tokenAsset(TOKEN, "1")] }]);
+    const map = await cachedBscBalances(ADDR, [TOKEN]);
+    expect(map.get(TOKEN)).toBe(BigInt(1));
+  });
+});

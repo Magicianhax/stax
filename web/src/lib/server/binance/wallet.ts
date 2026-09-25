@@ -79,3 +79,34 @@ export function rawBalanceMap(assets: TokenAsset[]): Map<string, bigint> {
   for (const a of assets) map.set(a.tokenContractAddress.toLowerCase(), a.rawBalance);
   return map;
 }
+
+/**
+ * Per-address cache for `balancesBatched` + `rawBalanceMap`, so a user re-polling the portfolio
+ * doesn't redraw the shared 5-per-window Binance budget every few seconds.
+ *
+ * Review fix (wave 5b): the TTL used to be 10s, shorter than `usePortfolio`'s 30s
+ * `refetchInterval`, so every poll missed the cache anyway and still spent ~5 calls (plus queue
+ * wait) in front of swap-quote, price checks and dry-runs. 45s covers the poll interval with
+ * margin either side of the tick. `invalidateBscBalanceCache` exists for a caller that just
+ * confirmed a balance-changing send (a trade or a Savings move) landed and wants the NEXT read to
+ * be fresh rather than waiting out the window — this module doesn't call it itself, since it has
+ * no visibility into when a send lands; the executor/swap paths do.
+ */
+export const BSC_BALANCE_CACHE_TTL_MS = 45_000;
+const balanceCache = new Map<string, { at: number; value: Promise<Map<string, bigint>> }>();
+
+export function cachedBscBalances(address: `0x${string}`, tokenAddresses: `0x${string}`[]): Promise<Map<string, bigint>> {
+  const key = address.toLowerCase();
+  const hit = balanceCache.get(key);
+  if (hit && Date.now() - hit.at < BSC_BALANCE_CACHE_TTL_MS) return hit.value;
+  const value = balancesBatched(address, tokenAddresses).then(rawBalanceMap);
+  balanceCache.set(key, { at: Date.now(), value });
+  value.catch(() => balanceCache.delete(key)); // don't let a failure poison later polls
+  return value;
+}
+
+/** Drops one address's cached balances so the next read is forced fresh — call after a send that
+ *  changes it lands (a trade or a Savings deposit/redeem), rather than waiting out the TTL. */
+export function invalidateBscBalanceCache(address: `0x${string}`): void {
+  balanceCache.delete(address.toLowerCase());
+}

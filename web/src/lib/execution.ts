@@ -37,8 +37,10 @@ export function assertExecCallsAreSafe(chain: StaxChain, calls: ExecCall[]): Exe
  * Pinned from a LIVE Binance DeFi API discovery (docs/BINANCE-WEB3.md's DeFi section,
  * 2026-09-25): `investmentDetail`'s `assetTokenList` and a build-deposit call's own `to` /
  * `interactWith.address` all agree on this address for the USDT investment Savings uses.
+ * Exported so savings.ts builds its own calls against the exact same constant this allowlist
+ * checks against, instead of a second copy that could drift.
  */
-const VENUS_VUSDT_ADDRESS = "0xfD5840Cd36d94D7229439859C0112a4185BC0255" as const;
+export const VENUS_VUSDT_ADDRESS = "0xfD5840Cd36d94D7229439859C0112a4185BC0255" as const;
 
 /**
  * `assertExecCallsAreSafe`'s counterpart for the DeFi deposit/redeem path: the same "nothing

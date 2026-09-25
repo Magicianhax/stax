@@ -625,6 +625,27 @@ made it a call not worth spending on a hackathon-scoped Savings feature; worth u
 Savings ever shows a live position balance instead of relying on the wallet's own USDT balance
 delta).
 
+**Reading a Savings balance without spending Binance budget (LIVE, wave 5b "money" stream review
+fix, 2026-09-25):** `data/position/list` above is unverified and 3-address-capped, so the Savings
+card instead reads vUSDT the same way any BEP-20 balance is read — see §6's live NVDAB holder
+check for the same pattern — and converts it with the vUSDT market's own `exchangeRateStored()`,
+a plain contract view call, no Binance request at all. Direct `eth_call`s against
+`0xfD5840Cd36d94D7229439859C0112a4185BC0255` on public BSC RPC:
+
+```
+decimals()             -> 8
+underlying()            -> 0x55d398326f99059fF775485246999027B3197955  (USDT)
+exchangeRateStored()   -> 265149227449423179440324562
+```
+
+This reproduces the `transaction/deposit` preview above: that preview shows 6 USDT minting
+226.3005974 vUSDT, and `226.3005974e8 (vUSDT raw) * 265149227449423179440324562 / 1e18 ≈
+6.0007e18` (raw USDT) — a few thousandths above 6 because the rate quoted here was read later,
+after further interest accrual. **The formula is exactly Compound's own documented scaling,
+`underlyingRaw = vTokenRaw * exchangeRateStored / 1e18`** — the 8-vs-18 decimal difference
+between vUSDT and USDT is already folded into the reported rate, nothing separate to adjust for.
+Implemented as `vUsdtRawToUnderlyingRaw` in `lib/server/savings.ts`.
+
 ---
 
 ## 6. Wallet API and Address Portfolio, prefix `/api/v1/dex`
@@ -695,6 +716,30 @@ portfolio route (`app/api/portfolio/route.ts`) is the one that decides a missing
 "not held" (0n), not `rawBalanceMap` itself, so a genuinely-dropped stock address and a real zero
 balance end up rendering identically without the wallet module having to guess which one Binance
 meant.
+
+### `POST /balance/token-balances-by-address` against a REAL bStock holder (LIVE, wave 5b "money"
+stream review fix, 2026-09-25) — the open question the hot-wallet check above left unanswered:
+does Binance report a tokenized-stock balance AT ALL, for a wallet that actually holds one?
+
+The hot wallet above holds none of the 42 curated stocks, so it couldn't answer this. Found a real
+NVDAB holder from live on-chain `Transfer` logs (public BSC RPC, `bsc.publicnode.com`, last 500
+blocks — no Binance budget spent finding it): `0x8a08D98CBB218fceB318Ecf3aBc1BA43D8A7aB0E`, on-chain
+`balanceOf` **1511599147075935408761** raw. Queried USDT + NVDAB + NVDAon for that address:
+
+```json
+{ "data": [{ "tokenAssets": [
+  { "symbol": "USDT", "rawBalance": "72022571494006720207761", "tokenPrice": "0.9997249774007718", "isRiskToken": false },
+  { "symbol": "NVDAB", "rawBalance": "1511599147075935408761", "tokenPrice": "226.10582409247188093945000000", "isRiskToken": false }
+] }] }
+```
+
+**Binance's `rawBalance` for NVDAB matches the on-chain `balanceOf` exactly** — the Wallet API does
+correctly index and report a real bStock holding, resolving the open question. NVDAon was dropped
+again, consistent with the earlier finding: this holder simply doesn't hold NVDAon, and Binance
+omits an untouched address rather than returning a zero row (§6 above). Still open: whether the
+same holds for a fresh position (this holder's been active a while) and for an Ondo-issued token
+specifically (only bStock verified here) — worth another live check if Ondo balances ever look
+wrong in production.
 
 ---
 

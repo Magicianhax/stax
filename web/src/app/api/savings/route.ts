@@ -11,7 +11,7 @@ import type { NextRequest } from "next/server";
 import { isAddress } from "viem";
 import { z } from "zod";
 import { chainFromRequest } from "@/lib/server/chain";
-import { buildSavingsDeposit, buildSavingsRedeem, getSavingsRate, SavingsRefusal } from "@/lib/server/savings";
+import { buildSavingsDeposit, buildSavingsRedeem, getSavingsBalanceUsd, getSavingsRate, SavingsRefusal } from "@/lib/server/savings";
 import { requireApproved } from "@/lib/server/admin";
 import { verifyRequest } from "@/lib/server/privyAuth";
 import { rateLimit } from "@/lib/server/rateLimit";
@@ -26,21 +26,35 @@ export interface SavingsRateResponse {
   available: boolean;
   apyBps?: number;
   apyDisplay?: string;
+  /** The caller's current Savings balance in dollars, only when `?address=` was a valid address on
+   *  BSC — `null` for "no savings yet" or a read failure, `undefined` when no address was given at
+   *  all (so the shared, cacheable rate response for every OTHER viewer never carries a stale
+   *  per-address number by accident). */
+  balanceUsd?: number | null;
 }
 
 export async function GET(req: NextRequest) {
   const chain = chainFromRequest(req);
+  const address = req.nextUrl.searchParams.get("address");
+  const validAddress = address && isAddress(address) ? (address as `0x${string}`) : null;
+
   if (chain.key !== "bsc") {
     return Response.json({ chain: chain.key, available: false } satisfies SavingsRateResponse, {
       headers: { "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300" },
     });
   }
-  const rate = await getSavingsRate();
-  const result: SavingsRateResponse = rate
-    ? { chain: chain.key, available: true, apyBps: rate.apyBps, apyDisplay: rate.apyDisplay }
-    : { chain: chain.key, available: false };
-  // Short cache: an APY, not a balance — fine to be a few seconds stale for every viewer.
-  return Response.json(result, { headers: { "Cache-Control": "public, s-maxage=30, stale-while-revalidate=120" } });
+  const [rate, balanceUsd] = await Promise.all([getSavingsRate(), validAddress ? getSavingsBalanceUsd(chain, validAddress) : Promise.resolve(undefined)]);
+  const result: SavingsRateResponse = {
+    chain: chain.key,
+    ...(rate ? { available: true, apyBps: rate.apyBps, apyDisplay: rate.apyDisplay } : { available: false }),
+    ...(validAddress ? { balanceUsd } : {}),
+  };
+  // A per-address balance is never shared across viewers — no-store whenever one was requested;
+  // the address-less rate-only response stays cacheable exactly as it was before.
+  const headers = validAddress
+    ? { "Cache-Control": "no-store" }
+    : { "Cache-Control": "public, s-maxage=30, stale-while-revalidate=120" };
+  return Response.json(result, { headers });
 }
 
 const SavingsRequestSchema = z.discriminatedUnion("action", [
