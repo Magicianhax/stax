@@ -11,7 +11,7 @@ vi.mock("@ai-sdk/anthropic", () => ({ anthropic: () => "mock-model" }));
 
 import { parseRuleGoal, RuleRefusal } from "./rulesParser";
 import { getChain } from "@/lib/chains";
-import { RULE_BOUNDS, RULE_COMING_SOON_REASON } from "@/lib/rules";
+import { RULE_BOUNDS } from "@/lib/rules";
 
 const bsc = getChain("bsc");
 
@@ -66,7 +66,7 @@ describe("parseRuleGoal", () => {
   });
 
   it.each(["rebalance", "safety_switch", "mix_keeper"] as const)(
-    "refuses a %s rule as coming soon — it can't act without a live holdings read yet",
+    "accepts a %s rule now that it can act (buy-only) on a real holdings read",
     async (type) => {
       const ruleByType: Record<string, Record<string, unknown>> = {
         rebalance: { type: "rebalance", driftPct: 10 },
@@ -75,9 +75,8 @@ describe("parseRuleGoal", () => {
       };
       generateObjectSpy.mockResolvedValue(objectResult(ruleByType[type]));
 
-      const promise = parseRuleGoal(bsc, "anything");
-      await expect(promise).rejects.toBeInstanceOf(RuleRefusal);
-      await expect(promise).rejects.toThrow(RULE_COMING_SOON_REASON);
+      const { rule } = await parseRuleGoal(bsc, "anything");
+      expect(rule).toEqual(ruleByType[type]);
     },
   );
 });

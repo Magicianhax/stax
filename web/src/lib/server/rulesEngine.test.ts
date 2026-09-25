@@ -125,7 +125,7 @@ describe("planRuleForAutopilot: rebalance", () => {
     expect(plan).toEqual({ ok: false, reason: expect.stringContaining("basket") });
   });
 
-  it("produces sell/buy intents and a receipt naming the basket once holdings and targets are both known", async () => {
+  it("buys the underweight name with new cash and a receipt naming the basket — never sells the overweight one (the BSC executor can't sell)", async () => {
     const plan = await planRuleForAutopilot(bsc, rule, {
       nowMs: NOW,
       budgetUsd: 1000,
@@ -141,8 +141,30 @@ describe("planRuleForAutopilot: rebalance", () => {
     });
     expect(plan.ok).toBe(true);
     if (plan.ok) {
-      expect(plan.intents.length).toBeGreaterThan(0);
-      expect(plan.receipt).toBe("Vera rebalanced your AI chips basket: sold $15 of NVDA, bought $15 of AMD.");
+      expect(plan.intents.every((i) => i.action === "buy")).toBe(true);
+      expect(plan.intents).toEqual([{ symbol: "AMD", action: "buy", usd: 15, reason: expect.stringContaining("AMD") }]);
+      expect(plan.receipt).toBe("Vera rebalanced your AI chips basket: bought $15 of AMD.");
+    }
+  });
+
+  it("caps the buy at the period's real budget, never at the (unfundable) sell side", async () => {
+    // NVDA is 90% overweight (would "fund" a $40 move if it could sell); the real cash budget is
+    // only $10, so the buy must be capped there, not at whatever the overweight side could sell.
+    const plan = await planRuleForAutopilot(bsc, rule, {
+      nowMs: NOW,
+      budgetUsd: 10,
+      holdings: [
+        { symbol: "NVDA", usdValue: 90, tier: "stock" },
+        { symbol: "AMD", usdValue: 10, tier: "stock" },
+      ],
+      targets: [
+        { symbol: "NVDA", weightPct: 50 },
+        { symbol: "AMD", weightPct: 50 },
+      ],
+    });
+    expect(plan.ok).toBe(true);
+    if (plan.ok) {
+      expect(plan.intents).toEqual([{ symbol: "AMD", action: "buy", usd: 10, reason: expect.any(String) }]);
     }
   });
 });
@@ -174,13 +196,29 @@ describe("planRuleForAutopilot: safety_switch", () => {
     expect(plan).toEqual({ ok: true, intents: [], receipt: expect.stringContaining("nothing to do") });
   });
 
-  it("moves money into the safer list once SPY's reference price has dropped past the threshold", async () => {
+  it("buys into the safer list with new cash once SPY's reference price has dropped past the threshold — never sells the at-risk holding (the BSC executor can't sell)", async () => {
     spyHistory([{ t: NOW - DAY, referencePrice: 500 }, { t: NOW, referencePrice: 460 }]); // -8%
     const plan = await planRuleForAutopilot(bsc, rule, { nowMs: NOW, budgetUsd: 1000, holdings: [{ symbol: "NVDA", usdValue: 100, tier: "stock" }] });
     expect(plan.ok).toBe(true);
     if (plan.ok) {
-      expect(plan.intents.some((i) => i.symbol === "NVDA" && i.action === "sell")).toBe(true);
-      expect(plan.intents.some((i) => i.action === "buy")).toBe(true);
+      expect(plan.intents.every((i) => i.action === "buy")).toBe(true);
+      expect(plan.intents.some((i) => i.symbol === "NVDA")).toBe(false);
+      expect(plan.intents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ symbol: "SPY", action: "buy", usd: 25 }),
+          expect.objectContaining({ symbol: "QQQ", action: "buy", usd: 25 }),
+        ]),
+      );
+    }
+  });
+
+  it("caps the safety buy at the period's real budget", async () => {
+    spyHistory([{ t: NOW - DAY, referencePrice: 500 }, { t: NOW, referencePrice: 460 }]); // -8%, wants to move $50
+    const plan = await planRuleForAutopilot(bsc, rule, { nowMs: NOW, budgetUsd: 10, holdings: [{ symbol: "NVDA", usdValue: 100, tier: "stock" }] });
+    expect(plan.ok).toBe(true);
+    if (plan.ok) {
+      const total = plan.intents.reduce((s, i) => s + i.usd, 0);
+      expect(total).toBeCloseTo(10, 5);
     }
   });
 });
@@ -191,7 +229,7 @@ describe("planRuleForAutopilot: mix_keeper", () => {
     expect(plan).toEqual({ ok: false, reason: expect.stringContaining("holdings") });
   });
 
-  it("keeps the mix once holdings are known", async () => {
+  it("buys the underweight side with new cash to keep the mix — never sells the overweight side (the BSC executor can't sell)", async () => {
     const plan = await planRuleForAutopilot(bsc, { type: "mix_keeper", stockPct: 80 }, {
       nowMs: NOW,
       budgetUsd: 1000,
@@ -201,7 +239,22 @@ describe("planRuleForAutopilot: mix_keeper", () => {
       ],
     });
     expect(plan.ok).toBe(true);
-    if (plan.ok) expect(plan.intents.length).toBeGreaterThan(0);
+    if (plan.ok) {
+      expect(plan.intents).toEqual([{ symbol: "NVDA", action: "buy", usd: 20, reason: expect.any(String) }]);
+    }
+  });
+
+  it("caps the mix-keeping buy at the period's real budget", async () => {
+    const plan = await planRuleForAutopilot(bsc, { type: "mix_keeper", stockPct: 80 }, {
+      nowMs: NOW,
+      budgetUsd: 5, // wants to move $20
+      holdings: [
+        { symbol: "NVDA", usdValue: 60, tier: "stock" },
+        { symbol: "BTCB", usdValue: 40, tier: "crypto" },
+      ],
+    });
+    expect(plan.ok).toBe(true);
+    if (plan.ok) expect(plan.intents).toEqual([{ symbol: "NVDA", action: "buy", usd: 5, reason: expect.any(String) }]);
   });
 });
 

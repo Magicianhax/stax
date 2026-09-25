@@ -1,7 +1,8 @@
 // POST /api/autopilot's rule guards (review findings #3 and #5): a rule other than
 // "buy on a schedule" is BSC-only, a raw `goal` can't fake the encoding only this route should
-// ever produce, and a rule that needs holdings this stream can't read yet can't be saved. Auth,
-// rate-limit and storage are mocked out so this exercises only the POST handler's own checks.
+// ever produce, and RULES_NEEDING_HOLDINGS (still checked here, now empty) would refuse any rule
+// type that named itself there. Auth, rate-limit and storage are mocked out so this exercises
+// only the POST handler's own checks.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
@@ -72,23 +73,19 @@ describe("POST /api/autopilot: a goal can't fake the rule encoding", () => {
   });
 });
 
-describe("POST /api/autopilot: rules that need holdings Vera can't read yet", () => {
-  it.each(["rebalance", "safety_switch", "mix_keeper"] as const)("refuses saving a %s rule as coming soon", async (type) => {
-    const ruleByType: Record<string, Record<string, unknown>> = {
-      rebalance: { type: "rebalance", driftPct: 10 },
-      safety_switch: { type: "safety_switch", dropPct: 5, movePct: 50 },
-      mix_keeper: { type: "mix_keeper", stockPct: 80 },
-    };
-    const res = await POST(req(body({ rule: ruleByType[type] })));
-    expect(res.status).toBe(400);
-    const json = await res.json();
-    expect(json.error).toMatch(/coming soon/i);
-    expect(upsertAutopilotSpy).not.toHaveBeenCalled();
-  });
-
-  it("still allows buy_discount (the one rule that's fully wired)", async () => {
-    const res = await POST(req(body({ rule: { type: "buy_discount", symbol: "NVDA", discountPct: 2 } })));
-    expect(res.status).toBe(200);
-    expect(upsertAutopilotSpy).toHaveBeenCalled();
-  });
+describe("POST /api/autopilot: rules that read live holdings (rebalance, safety_switch, mix_keeper)", () => {
+  it.each(["rebalance", "safety_switch", "mix_keeper", "buy_discount"] as const)(
+    "allows saving a %s rule — RULES_NEEDING_HOLDINGS is empty now that bscHoldings.ts is wired up",
+    async (type) => {
+      const ruleByType: Record<string, Record<string, unknown>> = {
+        rebalance: { type: "rebalance", driftPct: 10 },
+        safety_switch: { type: "safety_switch", dropPct: 5, movePct: 50 },
+        mix_keeper: { type: "mix_keeper", stockPct: 80 },
+        buy_discount: { type: "buy_discount", symbol: "NVDA", discountPct: 2 },
+      };
+      const res = await POST(req(body({ rule: ruleByType[type] })));
+      expect(res.status).toBe(200);
+      expect(upsertAutopilotSpy).toHaveBeenCalled();
+    },
+  );
 });

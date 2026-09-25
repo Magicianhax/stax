@@ -101,9 +101,9 @@ export async function parseRuleGoal(chain: StaxChain, goal: string): Promise<{ r
   });
 
   const raw = object.rule as Rule;
-  // Rebalance, safety_switch and mix_keeper can't act yet (rulesEngine.ts's header) — refusing
-  // here keeps Vera and `POST /api/autopilot` (which refuses the same three) in agreement, so
-  // Vera never proposes a rule the save step would then reject (review finding #5).
+  // RULES_NEEDING_HOLDINGS is empty today (every rule type can act) — this stays as the shared
+  // gate so a future rule type that can't act yet has one place to list itself, and Vera never
+  // proposes a rule `POST /api/autopilot` would then reject (review finding #5).
   if (RULES_NEEDING_HOLDINGS.includes(raw.type)) {
     throw new RuleRefusal(RULE_COMING_SOON_REASON);
   }
