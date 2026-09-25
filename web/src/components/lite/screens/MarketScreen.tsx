@@ -8,17 +8,47 @@
 // with no liquid market yet are listed with a quiet "Coming soon" tag (the buy is
 // disabled on the asset page, with the reason). Searching or picking a category
 // flattens the groups into one list.
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Asset } from "@/lib/chains";
 import { useChain } from "@/lib/chains/active";
+import { assetLogo } from "@/lib/assetLogo";
 import { displayFor, type AssetDisplay } from "@/lib/displayAssets";
 import { usePrices } from "@/hooks/usePrices";
 import { useMarketSummary } from "@/hooks/useMarket";
 import { usePortfolio } from "@/hooks/useBalances";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
+import { useRwa, primaryVenue } from "@/hooks/useRwa";
 import { Icon, AssetTile, Sparkline, SectionTitle, MarketStatus } from "@/components/design";
+import { MarketStatusBadge } from "@/components/lite/rwa/MarketStatusBadge";
 import { Reveal } from "@/components/motion";
 import { usd, tokenQty } from "@/lib/format";
+import { usMarketClock, type UsMarketClock } from "@/lib/marketHours";
+import { marketHeaderLine } from "@/lib/homeToday";
+import { riskLine, shortGapLine } from "@/lib/plainCopy";
+import { platformLabel } from "@/lib/spread";
+import type { Holding } from "@/hooks/useBalances";
+
+const CLOCK_TICK_MS = 30_000;
+
+/**
+ * BSC's header clock — `usMarketClock` fed to the same `stateLabel` wording every row badge on
+ * this screen already uses, so the header and the rows can never disagree (design critique P0
+ * #1). Before this the header rendered `<MarketStatus />`, which speaks ET through its own
+ * `describeNextChange`. Hydration-safe the same way `useMarketStatus` is: null until mounted.
+ */
+function useBscMarketClock(): (UsMarketClock & { nowMs: number }) | null {
+  const [clock, setClock] = useState<(UsMarketClock & { nowMs: number }) | null>(null);
+  useEffect(() => {
+    const tick = () => {
+      const nowMs = Date.now();
+      setClock({ ...usMarketClock(nowMs), nowMs });
+    };
+    tick();
+    const id = setInterval(tick, CLOCK_TICK_MS);
+    return () => clearInterval(id);
+  }, []);
+  return clock;
+}
 
 const CATS = ["All", "Big tech", "Funds", "Safer", "Crypto", "More"] as const;
 type Cat = (typeof CATS)[number];
@@ -28,10 +58,15 @@ interface Row {
   d: AssetDisplay;
 }
 
-/** Tier groups in display order. Funds only exist on Mantle; empty groups are skipped. */
+/**
+ * Tier groups in display order. Funds only exist on Mantle; empty groups are skipped. Riskier
+ * listings (3x leveraged funds, pre-IPO private companies — `asset.risk`, BSC) get their own
+ * group at the end of the stocks so they never sit among household names (design critique P1 #6).
+ */
 const GROUPS: { key: string; title: string; pick: (r: Row) => boolean }[] = [
-  { key: "stocks", title: "Stocks", pick: (r) => r.asset.tier === "stock" && r.d.kind !== "fund" },
-  { key: "funds", title: "Funds", pick: (r) => r.d.kind === "fund" },
+  { key: "stocks", title: "Stocks", pick: (r) => r.asset.tier === "stock" && r.d.kind !== "fund" && !r.asset.risk },
+  { key: "funds", title: "Funds", pick: (r) => r.d.kind === "fund" && !r.asset.risk },
+  { key: "risky", title: "Riskier picks", pick: (r) => Boolean(r.asset.risk) },
   { key: "safe", title: "Safe dollars", pick: (r) => r.asset.tier === "safe" },
   { key: "crypto", title: "Crypto", pick: (r) => r.asset.tier === "crypto" },
 ];
@@ -57,7 +92,37 @@ export function MarketScreen({
   // What the user already holds, so owned rows carry a quiet "Owned · qty" tag.
   const { address } = useSmartAccount();
   const { data: port } = usePortfolio(address ?? undefined);
-  const owned = useMemo(() => new Map((port?.holdings ?? []).map((h) => [h.asset.symbol, h])), [port]);
+  // Design critique P1 #9: keyed by symbol alone, this used to keep only the LAST holding a
+  // ticker had — a twin position (bStock + Ondo mints of the same stock) silently dropped one
+  // issuer's shares from the "Owned · qty" tag. Both venues' quantities are summed into one row
+  // instead; which venue's display fields (price, spark) ride along doesn't matter here since
+  // the row only ever reads `raw`/`qty` off it.
+  const owned = useMemo(() => {
+    const m = new Map<string, Holding>();
+    for (const h of port?.holdings ?? []) {
+      const prev = m.get(h.asset.symbol);
+      m.set(h.asset.symbol, prev ? { ...prev, raw: prev.raw + h.raw, qty: prev.qty + h.qty } : h);
+    }
+    return m;
+  }, [port]);
+  // BSC only: each row's on-chain price sits next to its issuer, so the venue's own state and
+  // its gap vs the real share replace the day-change sparkline other chains show (BSC has no
+  // live intraday history source yet, and a demo sparkline would be a lie about a real venue).
+  const { data: rwa } = useRwa();
+  const rwaByTicker = useMemo(() => new Map((rwa?.tickers ?? []).map((t) => [t.ticker, t])), [rwa]);
+  // Design critique P1 #9: the header's own clock (the BSC header chip below, off BSC
+  // `<MarketStatus />`) already says whether the US market is open — a row only needs its own
+  // badge when this venue's answer actually differs from that, so most rows during a normal
+  // trading day carry no badge at all. `bscClock` is the SAME computation the header chip reads,
+  // so a row is never marked "different from the header" by two clocks quietly disagreeing.
+  const bscClock = useBscMarketClock();
+  const usMarketOpen = bscClock?.buyable;
+  // Issuers still filling orders right now, for the header's "some stocks still trade through
+  // Ondo" clause (it only shows while the US market is shut — see marketHeaderLine).
+  const openIssuers = useMemo(() => {
+    const live = new Set((rwa?.tickers ?? []).flatMap((t) => t.venues.filter((v) => v.buyable).map((v) => v.platform)));
+    return (["bstock", "ondo"] as const).filter((p) => live.has(p)).map(platformLabel);
+  }, [rwa]);
 
   // Every asset on this chain with its display record; "coming" ones sink to the
   // bottom of their group (stable sort keeps the registry order otherwise).
@@ -90,11 +155,28 @@ export function MarketScreen({
     const up = day >= 0;
     // Real venue spot when available; fall back to the indicative reference.
     const p = prices?.prices[asset.symbol];
-    const shownPrice = p?.priceUsd ?? d.price;
+    let shownPrice = p?.priceUsd ?? d.price;
     const coming = Boolean(asset.coming || d.coming);
     const safe = asset.tier === "safe";
     const sub = safe ? yieldLine(p?.apy, d.apy, true) ?? (d.ticker ?? asset.symbol) : (d.ticker ?? asset.symbol);
     const held = owned.get(asset.symbol);
+    // BSC: the venue's own open/paused state and its gap vs the real share, not a day-change
+    // figure BSC has no live source for yet.
+    const bsc = chain.key === "bsc";
+    const rwaTicker = bsc ? rwaByTicker.get(asset.symbol) : undefined;
+    const venue = rwaTicker ? primaryVenue(rwaTicker) : undefined;
+    // Design critique P1 #5: the row's price is the price of the issuer the row describes (the
+    // one a buy would use), never the generic prices feed, which could name a third number.
+    if (venue) shownPrice = venue.tokenPrice;
+    // A gap only earns a line when it's worth noticing (|gap| >= 0.5%); the full sentence lives
+    // on Asset detail. A riskier listing says its risk instead — that matters more than a gap.
+    const risk = bsc ? riskLine(asset.risk) : "";
+    const gapLine = venue && !held && !risk ? shortGapLine(venue.gapPct) : "";
+    // Design critique P1 #9: the row only earns its own badge when this venue's answer differs
+    // from the header's clock — Ondo trading overnight while the US market is closed, or a
+    // pause mid-session while the US market is open. Undefined `usMarketOpen` (not mounted yet)
+    // never shows a badge it can't yet compare.
+    const showVenueBadge = Boolean(venue) && !held && usMarketOpen !== undefined && venue!.buyable !== usMarketOpen;
     return (
       <button
         key={asset.symbol}
@@ -112,9 +194,10 @@ export function MarketScreen({
           borderBottom: i < list.length - 1 ? "1px solid var(--line-2)" : "none",
         }}
       >
-        {/* dim the tile, never the words — text stays AA on a "coming" row */}
+        {/* dim the tile, never the words — text stays AA on a "coming" row. BSC: the row's own
+            venue (when it has one) picks which issuer's logo shows; otherwise the default issuer. */}
         <span style={{ opacity: coming ? 0.55 : 1, display: "block", flex: "none" }}>
-          <AssetTile asset={d} />
+          <AssetTile asset={{ ...d, logo: assetLogo(chain, asset.symbol, venue?.platform) }} />
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
@@ -133,28 +216,53 @@ export function MarketScreen({
             {coming && <ComingTag />}
           </div>
           {/* owned rows swap the ticker line for a quiet "Owned · qty" tag — the
-              name keeps its room; the ticker sits after the quantity */}
-          <div
-            className={safe || held ? "tnum" : "mono"}
-            style={{
-              fontSize: safe || held ? 12.5 : 12,
-              color: held ? "var(--primary)" : "var(--ink-2)",
-              fontWeight: held ? 600 : undefined,
-              marginTop: 1,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {held ? `Owned · ${tokenQty(held.raw, held.asset.decimals ?? 18)}` : sub}
+              name keeps its room; the ticker sits after the quantity. BSC also
+              gets the venue's live state beside it (bStock/Ondo can differ). */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, marginTop: showVenueBadge ? 3 : 0 }}>
+            {/* When the row carries its own status ("Open now through Ondo"), that line replaces
+                the ticker: the name and logo already say which company it is, and the two side by
+                side squeezed each other (design critique P1 #5). */}
+            {showVenueBadge ? (
+              <MarketStatusBadge state={venue!.state} nextOpenMs={venue!.nextOpenMs} buyable={venue!.buyable} platform={venue!.platform} nested />
+            ) : (
+              <span
+                className={safe || held ? "tnum" : "mono"}
+                style={{
+                  fontSize: safe || held ? 12.5 : 12,
+                  color: held ? "var(--primary)" : "var(--ink-2)",
+                  fontWeight: held ? 600 : undefined,
+                  marginTop: 1,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  minWidth: 0,
+                }}
+              >
+                {held ? `Owned · ${tokenQty(held.raw, held.asset.decimals ?? 18)}` : sub}
+              </span>
+            )}
           </div>
+          {/* BSC only: the risk line for a riskier listing, else a short gap clause when the gap
+              is worth noticing. Most rows show neither (design critique P1 #5 — every row used to
+              repeat a two-line gap sentence). */}
+          {(risk || gapLine) && (
+            <div className="tnum" style={{ marginTop: 3, fontSize: 12.5, fontWeight: 600, lineHeight: 1.4, color: "var(--ink-2)" }}>
+              {risk || gapLine}
+            </div>
+          )}
+          {/* Crypto isn't in the RWA catalog (no issuer, no closed market) — a plain "trades any
+              time" line replaces the gap/badge row above so a crypto row never reads as blank
+              next to a stock row that has one. */}
+          {bsc && asset.tier === "crypto" && (
+            <div style={{ marginTop: 3, fontSize: 12.5, fontWeight: 600, color: "var(--ink-2)" }}>Trades any time</div>
+          )}
         </div>
-        {!coming && !safe && <Sparkline data={spark} color={up ? "var(--pos)" : "var(--neg)"} />}
+        {!coming && !safe && !bsc && <Sparkline data={spark} color={up ? "var(--pos)" : "var(--neg)"} />}
         <div style={{ textAlign: "right", minWidth: 70 }}>
           <div className="tnum" style={{ fontWeight: 600, fontSize: 15.5, color: coming ? "var(--ink-2)" : "var(--ink)" }}>
             {shownPrice !== undefined ? usd(shownPrice) : "—"}
           </div>
-          {!coming && !safe && (
+          {!coming && !safe && !bsc && (
             <div
               className="tnum"
               style={{ fontSize: 12.5, fontWeight: 600, color: up ? "var(--pos)" : "var(--neg)" }}
@@ -171,17 +279,38 @@ export function MarketScreen({
 
   return (
     <div className="screen screen-pad-top" style={{ paddingBottom: 96 }}>
-      {/* title + the stock-market clock on one line (the pill shrinks, the
-          title never does); the issuer and the Baskets entry share the subline. */}
+      {/* title + the stock-market clock. Off BSC the NYSE pill shares the title's line; on BSC
+          the clock is a sentence ("US market closed · opens 6:30 PM your time · some stocks still
+          trade through Ondo") that needs its own line, and it says the same thing Home does. */}
       <div style={{ padding: "12px 22px 0", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
         <h1 className="serif" style={{ margin: 0, fontSize: 32, letterSpacing: "-.015em", flex: "none" }}>Market</h1>
-        <div style={{ minWidth: 0, display: "flex", justifyContent: "flex-end" }}>
-          <MarketStatus />
-        </div>
+        {chain.key !== "bsc" && (
+          <div style={{ minWidth: 0, display: "flex", justifyContent: "flex-end" }}>
+            <MarketStatus />
+          </div>
+        )}
       </div>
+      {chain.key === "bsc" && (
+        <div style={{ padding: "8px 22px 0", minHeight: 30, flexShrink: 0 }}>
+          {/* Design critique P0 #2: the header used to say "Closed" while Ondo rows said "Open
+              now". It now names the US market, and — only while it's shut — who still trades.
+              `nested` keeps it a plain chip (each row badge has its own "what this means" sheet). */}
+          {bscClock && (
+            <MarketStatusBadge
+              state={bscClock.state}
+              nextOpenMs={bscClock.nextOpenMs}
+              buyable={bscClock.buyable}
+              label={marketHeaderLine(bscClock.nowMs, openIssuers)}
+              nested
+            />
+          )}
+        </div>
+      )}
       <div style={{ padding: "2px 22px 0", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
         <span style={{ fontSize: 13, color: "var(--ink-2)", fontWeight: 500, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {chain.issuer}
+          {/* Design critique P1 #6: the registry's full disclosure sentence truncates at 402px;
+              this subline just needs to say who issues these, in one short clause. */}
+          {chain.key === "bsc" ? "Stocks from bStock and Ondo" : chain.issuer}
         </span>
         {/* Baskets entry: ready-made mixes live one tap from the asset list. */}
         <button
@@ -196,6 +325,49 @@ export function MarketScreen({
           </span>
         </button>
       </div>
+
+      {/* "Which is cheaper?" entry — BSC only: some stocks here have two versions (bStock and
+          Ondo). A dedicated card, not a category chip, because it's a comparison across the
+          whole list, not a filter of it. */}
+      {chain.key === "bsc" && (
+        <div style={{ padding: "14px 22px 0" }}>
+          <button
+            type="button"
+            className="card tap"
+            onClick={() => go("issuers")}
+            style={{
+              width: "100%",
+              textAlign: "left",
+              padding: "14px 16px",
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              background: "none",
+              border: 0,
+            }}
+          >
+            <span
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 11,
+                flex: "none",
+                display: "grid",
+                placeItems: "center",
+                background: "var(--surface-2)",
+                color: "var(--accent)",
+              }}
+            >
+              <Icon name="trend" size={19} stroke={2} />
+            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: 15, letterSpacing: "-.01em" }}>Same stock, two prices</div>
+              <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 1 }}>See which is cheaper right now</div>
+            </div>
+            <Icon name="chevR" size={18} style={{ color: "var(--ink-3)", flex: "none" }} />
+          </button>
+        </div>
+      )}
 
       {/* search */}
       <div style={{ padding: "14px 22px 0" }}>

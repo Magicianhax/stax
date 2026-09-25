@@ -5,7 +5,7 @@
 //
 // The demo shows the Base universe (Coinbase tokenized stocks + Aave safe dollars).
 import { parseUnits } from "viem";
-import { getChain, type Asset } from "@/lib/chains";
+import { type ChainKey, getChain, type Asset } from "@/lib/chains";
 import { displayFor } from "@/lib/displayAssets";
 import type { Holding } from "@/hooks/useBalances";
 import type { ActivityRow, VeraRecord } from "@/lib/onchainHistory";
@@ -191,7 +191,7 @@ export function demoSuccess(alloc: Allocation, amountUsd: number): InvestSuccess
 // deterministic history series per symbol (scaled from the display spark) so the
 // performance chips + sparklines work offline. Demo numbers, demo screens only.
 
-export function demoSeedBaskets(chain: "base" | "mantle"): Basket[] {
+export function demoSeedBaskets(chain: ChainKey): Basket[] {
   if (chain !== "base") return [];
   const items = [
     { symbol: "NVDA", weightPct: 30, reason: "Leads the AI boom." },

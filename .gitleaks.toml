@@ -1,0 +1,11 @@
+# Extends gitleaks' default rules. Stax's Binance fixtures and tests are full of public token
+# contract addresses in fields named `tokenContractAddress`, `fromToken`, `toToken`, which the
+# generic-api-key rule flags because of the word "token". A bare 20-byte EVM address is public
+# on-chain data, never a secret, so it is allowlisted; everything else is still scanned.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Public EVM addresses (0x + 40 hex) are on-chain data, not secrets"
+regexTarget = "match"
+regexes = ['''(?i)(token\w*|address)["']?\s*[:=]\s*["']0x[0-9a-f]{40}["']''']

@@ -6,8 +6,8 @@ import * as Sentry from "@sentry/nextjs";
 // a generic message (closes the "raw err.message forwarded to client" leak,
 // which could otherwise surface key material or stack traces).
 
-export function jsonError(status: number, message: string, headers?: HeadersInit): Response {
-  return Response.json({ error: message }, { status, headers });
+export function jsonError(status: number, message: string, headers?: HeadersInit, extra?: Record<string, unknown>): Response {
+  return Response.json({ ...extra, error: message }, { status, headers });
 }
 
 export const unauthorized = () => jsonError(401, "Please sign in to continue.");
@@ -15,7 +15,7 @@ export const unauthorized = () => jsonError(401, "Please sign in to continue.");
 export const badRequest = (message = "Invalid request.") => jsonError(400, message);
 
 export const tooManyRequests = (retryAfter: number) =>
-  jsonError(429, "Too many requests. Please slow down a moment.", { "Retry-After": String(retryAfter) });
+  jsonError(429, "Too many requests. Please slow down a moment.", { "Retry-After": String(retryAfter) }, { code: "rate_limited" });
 
 /**
  * Log the real error server-side (with a scope tag) and return a generic,

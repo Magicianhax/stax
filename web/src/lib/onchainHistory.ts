@@ -14,6 +14,7 @@
 import type { PublicClient } from "viem";
 import { parseAbiItem } from "viem";
 import type { StaxChain } from "./chains/types";
+import { rawToUsd } from "./units";
 
 export const RECOMMENDATION_COMMITTED = parseAbiItem(
   "event RecommendationCommitted(bytes32 indexed planId, address indexed user, bytes32 recHash, uint16 riskScore, uint256 agentId)",
@@ -35,7 +36,7 @@ export interface RecommendationRow {
 export interface ExecutionRow {
   planId: `0x${string}`;
   user: `0x${string}`;
-  usdcSpent: number; // dollars (6dp -> number)
+  usdcSpent: number; // dollars, converted from this chain's own cash decimals
   legCount: number;
   txHash: `0x${string}`;
   blockNumber: bigint;
@@ -90,8 +91,14 @@ export interface ActivityRow {
   legs?: ActivityLeg[];
 }
 
-function usdcToNumber(raw: bigint): number {
-  return Number(raw) / 1e6;
+/**
+ * Raw cash amount off an executor event (AllocationExecuted.usdcSpent) to dollars, in
+ * THIS chain's own decimals -- 6 on Base/Mantle, 18 on BSC's USDT. Exported so both the
+ * live-RPC reader here and the indexed-Postgres reader in server/executorLogs.ts share
+ * one conversion, and so the fix is pinned by a test that doesn't need a database.
+ */
+export function usdcToNumber(chain: Pick<StaxChain, "usdc">, raw: bigint): number {
+  return rawToUsd(chain, raw);
 }
 
 /** Read all RecommendationCommitted logs (optionally for one user). */
@@ -132,7 +139,7 @@ async function readExecutions(
   return logs.map((l) => ({
     planId: l.args.planId as `0x${string}`,
     user: l.args.user as `0x${string}`,
-    usdcSpent: usdcToNumber(l.args.usdcSpent ?? BigInt(0)),
+    usdcSpent: usdcToNumber(chain, l.args.usdcSpent ?? BigInt(0)),
     legCount: Number(l.args.legCount ?? 0),
     txHash: l.transactionHash as `0x${string}`,
     blockNumber: l.blockNumber ?? BigInt(0),

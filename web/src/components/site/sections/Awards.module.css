@@ -115,3 +115,14 @@
     white-space: normal;
   }
 }
+
+/* An entry, not a win: body size, ink-2, centred under the pair. */
+.hack {
+  margin: 32px auto 0;
+  max-width: 60ch;
+  font-size: 15px;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--s-ink-2);
+  text-wrap: balance;
+}

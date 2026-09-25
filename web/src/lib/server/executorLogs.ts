@@ -30,6 +30,7 @@ import {
   type ExecutionRow,
   type VeraRecord,
   type ActivityRow,
+  usdcToNumber,
 } from "@/lib/onchainHistory";
 import { IDENTITY_REGISTRY_ABI } from "@/lib/abis";
 
@@ -53,6 +54,8 @@ const CHUNK_BACKOFF_MS = 600;
 const LOG_RPC_FALLBACKS: Record<ChainKey, string[]> = {
   base: ["https://mainnet.base.org"],
   mantle: ["https://mantle-rpc.publicnode.com"],
+  // No executor on BSC yet (ADR-0005), so nothing to scan; add a keyless getLogs RPC with the deploy.
+  bsc: [],
 };
 /** Etherscan pages per event per fetch (1000 logs each). */
 const MAX_ETHERSCAN_PAGES = 5;
@@ -309,9 +312,10 @@ function unixSeconds(d: Date): number {
   return Math.floor(d.getTime() / 1000);
 }
 
-function usdcToNumber(raw: unknown): number {
+/** The indexed row's `usdcSpent` string -> dollars, in the row's own chain's decimals. */
+function usdcAmountToNumber(chain: StaxChain, raw: unknown): number {
   try {
-    return Number(BigInt(String(raw ?? "0"))) / 1e6;
+    return usdcToNumber(chain, BigInt(String(raw ?? "0")));
   } catch {
     return 0;
   }
@@ -353,7 +357,7 @@ export async function legsByTx(chain: StaxChain, txHashes: string[]): Promise<Ma
     const list = out.get(l.txHash) ?? [];
     list.push({
       symbol: asset.symbol,
-      usdcIn: usdcToNumber(d.usdcIn),
+      usdcIn: usdcAmountToNumber(chain, d.usdcIn),
       qty: unitsToNumber(d.received, asset.decimals),
     });
     out.set(l.txHash, list);
@@ -375,7 +379,7 @@ async function readExecutionRows(chain: StaxChain, user?: `0x${string}`): Promis
   return rows.map((r) => ({
     planId: (r.planId ?? "0x") as `0x${string}`,
     user: (r.user ?? "0x") as `0x${string}`,
-    usdcSpent: usdcToNumber(dataOf(r).usdcSpent),
+    usdcSpent: usdcAmountToNumber(chain, dataOf(r).usdcSpent),
     legCount: Number(dataOf(r).legCount ?? 0),
     txHash: r.txHash as `0x${string}`,
     blockNumber: BigInt(r.blockNumber),

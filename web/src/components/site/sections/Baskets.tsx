@@ -1,16 +1,16 @@
 "use client";
 
-// Baskets — "One tap, a whole mix." The curated Base baskets, filtered the same
-// way the app filters them (every holding routable today), with their real
-// weights. Cards on 3×4 columns at equal height; the whole card is the link.
+// Baskets — "One tap, a whole mix." Six curated BNB Chain baskets (AI chips,
+// Magnificent 7, index funds, Buffett-style, pre-IPO, stocks + Bitcoin),
+// filtered the same way the app filters them (every holding buyable), with
+// their real weights (lib/site/landing `landingBaskets`). Cards on 3×4 columns at equal height; the whole card is the link.
 // One gesture: the weight bars extend from zero the first time the row shows
 // (a clip-path on each bar, ScrollTrigger once; drawn by default without JS
 // or under reduced motion).
 import { useRef } from "react";
 import Link from "next/link";
-import { getChain } from "@/lib/chains";
-import { curatedBaskets, encodeBasketLink, riskWord, type Basket } from "@/lib/baskets";
-import { displayFor } from "@/lib/displayAssets";
+import { encodeBasketLink, riskWord } from "@/lib/baskets";
+import { basketHoldingsLine as holdingsLine, landingBaskets } from "@/lib/site/landing";
 import { WeightBar } from "@/components/WeightBar";
 import { BasketIconGlyph } from "@/components/BasketIcon";
 import { gsap, useGSAP, MOTION_OK } from "../ui/gsap";
@@ -19,12 +19,7 @@ import { Reveal } from "../ui/Reveal";
 import l from "../layout.module.css";
 import s from "./Baskets.module.css";
 
-const BASE = getChain("base");
-const BASKETS = curatedBaskets(BASE);
-
-function holdingsLine(b: Basket): string {
-  return b.items.map((i) => displayFor(i.symbol).name).join(" · ");
-}
+const BASKETS = landingBaskets();
 
 export function Baskets() {
   const scope = useRef<HTMLElement>(null);

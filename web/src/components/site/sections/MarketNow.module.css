@@ -1,0 +1,40 @@
+/* A quiet status line, not a badge: dot + ink-2 words. The dot is sage with a
+   soft halo while the US market is open, ink-3 while it is shut. No red, no
+   motion. Hidden (but sized) until the client knows the visitor's time. */
+.line {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 24px;
+  margin: 18px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--s-ink-2);
+  font-variant-numeric: tabular-nums;
+  visibility: hidden;
+}
+
+.line[data-ready="1"] {
+  visibility: visible;
+}
+
+.dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--s-ink-3);
+}
+
+.line[data-open="1"] .dot {
+  background: var(--s-pos);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--s-pos) 22%, transparent);
+}
+
+@media (max-width: 767px) {
+  .line {
+    font-size: 14px;
+    text-align: left;
+  }
+}

@@ -1,5 +1,6 @@
 "use client";
 import type { ActivityLeg } from "@/lib/onchainHistory";
+import type { RwaPlatform } from "@/lib/chains";
 
 // Stax app shell — a small screen router that mirrors the design's go(screen,
 // params) orchestrator (app.jsx) while wiring the REAL hooks end to end.
@@ -25,6 +26,8 @@ import { useInvest } from "@/hooks/useInvest";
 import { useSwap } from "@/hooks/useSwap";
 import { usePortfolio } from "@/hooks/useBalances";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
+import { useChainKey } from "@/lib/chains/active";
+import { giftContractFor } from "@/lib/gifts";
 import { haptic } from "@/lib/haptics";
 import { TabBar, type TabId, useToast } from "@/components/design";
 import { InstallPrompt } from "@/components/app/InstallPrompt";
@@ -52,6 +55,7 @@ import { SendScreen } from "./screens/SendScreen";
 import { AutopilotScreen } from "./screens/AutopilotScreen";
 import { BasketsScreen } from "./screens/BasketsScreen";
 import { BasketDetailScreen } from "./screens/BasketDetailScreen";
+import { IssuerBoardScreen } from "./screens/IssuerBoardScreen";
 // ── gift-ui ─────────────────────────────────────────────────────────────────
 import { GiftScreen } from "./screens/GiftScreen";
 import { GiftViewScreen } from "./screens/GiftViewScreen";
@@ -67,6 +71,7 @@ type Screen =
   | "hub"
   | "baskets"
   | "basket"
+  | "issuers"
   // ── gift-ui: give a basket ("gift") and your gifts ("gifts") ──────────────
   | "gift"
   | "gifts"
@@ -126,6 +131,8 @@ export interface TradeOrder {
   feeUsd: number;
   /** Buy: total paid (fee included). Sell: what lands in cash. */
   amountUsd: number;
+  /** BSC buys: the issuer this trade used, so "Buy more" reopens Trade on the same one. */
+  venue?: RwaPlatform;
 }
 
 /** Trade form state restored when a trade bounces back with an error. */
@@ -180,6 +187,15 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
 
   const [stack, setStack] = useState<Route[]>([{ screen: "home", params: {} }]);
   const current = stack[stack.length - 1];
+
+  // Gifts live on Base only (ADR-0010), while BNB Chain is the default. Opening a gift screen, or
+  // a `?gift=` link, on a chain without the gift contract switches to the one that has it.
+  const [activeChainKey, setActiveChain] = useChainKey();
+  useEffect(() => {
+    if (current.screen !== "gift" && current.screen !== "gifts") return;
+    if (giftContractFor(activeChainKey) || !giftContractFor("base")) return;
+    setActiveChain("base");
+  }, [current.screen, activeChainKey, setActiveChain]);
   const { screen, params } = current;
 
   const [goal, setGoal] = useState("");
@@ -548,6 +564,7 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
       hub: "Invest",
       baskets: "Baskets",
       basket: "Basket",
+      issuers: "Which is cheaper?",
       // gift-ui
       gift: "Give a basket",
       gifts: "Gifts",
@@ -661,6 +678,9 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
         />
       );
       break;
+    case "issuers":
+      view = <IssuerBoardScreen go={go} />;
+      break;
     // ── gift-ui ───────────────────────────────────────────────────────────────
     case "gift":
       view = <GiftScreen go={go} basketId={params.basketId as string | undefined} />;
@@ -678,6 +698,7 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
           tone={tone}
           rethinking={rethinking}
           busy={invest.busy}
+          dryRuns={invest.dryRuns}
           onNudge={onNudge}
           onInvest={onInvest}
           basket={basketPlan?.basket}
@@ -710,7 +731,14 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
       view = <MarketScreen go={go} />;
       break;
     case "asset":
-      view = <AssetDetailScreen go={go} symbol={String(params.symbol ?? "")} loop={params.loop as LoopParams | undefined} />;
+      view = (
+        <AssetDetailScreen
+          go={go}
+          symbol={String(params.symbol ?? "")}
+          loop={params.loop as LoopParams | undefined}
+          venue={params.venue === "bstock" || params.venue === "ondo" ? params.venue : undefined}
+        />
+      );
       break;
     case "trade":
       view = (
@@ -720,6 +748,7 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
           initialSide={params.side === "sell" ? "sell" : "buy"}
           swap={swap}
           draft={params.draft as TradeDraft | undefined}
+          venue={params.venue === "bstock" || params.venue === "ondo" ? params.venue : undefined}
         />
       );
       break;

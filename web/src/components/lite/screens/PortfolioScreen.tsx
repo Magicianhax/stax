@@ -13,6 +13,9 @@
 // (2026-09-06) it says "since Sep 6", and with no history at all it falls back
 // to the holdings' market series blended by current value ("price movement").
 // Each row shows its unrealized gain against cost when the lots are known.
+import { holdingKey } from "@/lib/venues";
+import { useChain } from "@/lib/chains/active";
+import { assetLogo } from "@/lib/assetLogo";
 import { useMemo, useState } from "react";
 import { usePortfolio, type Holding } from "@/hooks/useBalances";
 import { coverageLabel, rangeCovered, usePortfolioHistory } from "@/hooks/usePortfolioHistory";
@@ -30,6 +33,7 @@ import {
 import { Money, Reveal, formatMoney } from "@/components/motion";
 import { toTile } from "@/lib/displayAssets";
 import { usd, tokenQty } from "@/lib/format";
+import { PLATFORM_LABEL } from "@/components/lite/rwa/VenuePicker";
 import { rampColor } from "./basketPrimitives";
 import { changeOf, readoutDate, useSymbolSeries, type MarketRange } from "./useRangeSeries";
 import type { LoopParams } from "../LiteApp";
@@ -52,6 +56,7 @@ export function PortfolioScreen({
   go: (screen: string, params?: Record<string, unknown>) => void;
   loop?: LoopParams;
 }) {
+  const chain = useChain();
   const { address } = useSmartAccount();
   // Cash, invested, and total all arrive pre-computed from /api/portfolio —
   // this screen renders them verbatim (no client-side money math).
@@ -59,6 +64,13 @@ export function PortfolioScreen({
 
   const cash = port?.cashUsd ?? 0;
   const holdings: Holding[] = port?.holdings ?? [];
+  // Design critique P1 #10: a twin holding (bStock's and Ondo's mint of the same stock) used to
+  // render as two rows with the same name, tile and ticker — nothing said why there were two.
+  const twinSymbols = new Set(
+    [...holdings.reduce((m, h) => m.set(h.asset.symbol, (m.get(h.asset.symbol) ?? 0) + 1), new Map<string, number>())]
+      .filter(([, count]) => count > 1)
+      .map(([symbol]) => symbol),
+  );
   const invested = port?.investedUsd ?? 0;
   // Only holdings we could price contribute to the chart/donut.
   const priced = holdings.filter((h) => h.valueUsd !== undefined && h.valueUsd > 0);
@@ -282,11 +294,13 @@ export function PortfolioScreen({
             {holdings.map((h, i) => {
               const base = toTile(h.asset.symbol, h.asset.name);
               // Real 1D market data (from the server) replaces the presentational
-              // tint whenever the asset has a live source.
+              // tint whenever the asset has a live source. On BSC, a twin holding row shows
+              // THIS row's own issuer's logo (h.venue), not the default issuer's.
               const tile = {
                 ...base,
                 day: h.dayChangePct ?? base.day,
                 spark: h.spark ?? base.spark,
+                logo: assetLogo(chain, h.asset.symbol, h.venue),
               };
               const s = series.get(h.asset.symbol);
               const rc = s && s.length > 1 ? changeOf(s) : null;
@@ -302,15 +316,16 @@ export function PortfolioScreen({
               const flashed = loop?.flash.includes(h.asset.symbol);
               return (
                 <div
-                  key={h.asset.symbol}
+                  key={holdingKey(h)}
                   style={{ borderBottom: i < holdings.length - 1 ? "1px solid var(--line-2)" : "none" }}
                 >
                   <HoldingRow
                     asset={tile}
                     qty={qty}
                     symbol={h.asset.symbol}
+                    sub={twinSymbols.has(h.asset.symbol) && h.venue ? `${qty} ${h.asset.symbol} · from ${PLATFORM_LABEL[h.venue]}` : undefined}
                     showSpark={false}
-                    onClick={() => go("asset", { symbol: h.asset.symbol })}
+                    onClick={() => go("asset", { symbol: h.asset.symbol, venue: h.venue })}
                     value={h.valueUsd !== undefined ? usd(h.valueUsd) : qty}
                     change={
                       gain ??

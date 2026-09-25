@@ -29,7 +29,7 @@ export function GoalScreen({
   go: (screen: string, params?: Record<string, unknown>) => void;
 }) {
   const { address } = useSmartAccount();
-  const { chain, ready } = useChainReady();
+  const { chain, investable: ready } = useChainReady();
   const { data: bal } = useUsdcBalance(address ?? undefined);
   const balance = bal?.value ?? 0;
 

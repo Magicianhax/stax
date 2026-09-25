@@ -41,7 +41,7 @@ export function SendScreen({
   // Sendable assets: cash (USDC) first, then every held token.
   const assets: Sendable[] = useMemo(() => {
     const cash: Sendable = {
-      symbol: "USDC",
+      symbol: chain.usdc.symbol,
       name: "US Dollar",
       address: chain.usdc.address,
       decimals: chain.usdc.decimals,

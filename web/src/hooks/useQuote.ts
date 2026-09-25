@@ -14,11 +14,13 @@
 // amountOutMinimum (and Kyber's own minReturn) is the real protection.
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { isRoutable, reverseRoute, type Asset } from "@/lib/chains";
+import { isRoutable, reverseRoute, type Asset, type RwaPlatform } from "@/lib/chains";
 import { useChain } from "@/lib/chains/active";
 import { fromUnits } from "@/lib/format";
 import { quoteAlongRoute, quoteSingleHop } from "@/lib/swapRouting";
 import { fetchSwapQuote, usesAggregator } from "@/lib/swapQuote";
+import type { DryRun } from "@/lib/dryRun";
+import { usdToRaw } from "@/lib/units";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 
 const AGGREGATOR_DEBOUNCE_MS = 400;
@@ -40,6 +42,8 @@ export interface Quote {
   pricePerToken: number; // USDC per whole token
   /** Aggregator quotes: the floor Kyber will enforce at the default slippage (raw). */
   minOutRaw?: bigint;
+  /** BSC only, and only on a build=true quote: the Binance check this trade would face. */
+  dryRun?: DryRun;
 }
 
 /**
@@ -47,7 +51,7 @@ export interface Quote {
  * rounded amount (plus a 400ms input debounce on aggregator chains); keyed by chain
  * so a network switch re-quotes. Returns no data while disabled/loading.
  */
-export function useQuote(asset: Asset | null, amountUsd: number) {
+export function useQuote(asset: Asset | null, amountUsd: number, venue?: RwaPlatform) {
   const chain = useChain();
   const { address } = useSmartAccount();
   const aggregator = usesAggregator(chain, asset);
@@ -59,16 +63,23 @@ export function useQuote(asset: Asset | null, amountUsd: number) {
   const canQuote = aggregator ? Boolean(address) || Boolean(asset?.pool) : true;
   const enabled = Boolean(asset && asset.decimals && cents > 0 && isRoutable(chain, asset.symbol) && canQuote);
   return useQuery({
-    queryKey: ["quote", chain.key, asset?.symbol, "buy", cents, aggregator ? address : null],
+    queryKey: ["quote", chain.key, asset?.symbol, "buy", cents, aggregator ? address : null, venue ?? null],
     enabled,
     staleTime: 10_000,
     refetchInterval: 15_000,
+    // A refusal (closed market, sub-$6) is the server's final word, not a transient failure —
+    // retrying it burns another call against Binance's 5-per-window budget for the same answer.
+    retry: false,
     queryFn: async (): Promise<Quote> => {
       const a = asset!;
-      const amountInRaw = BigInt(cents) * BigInt(10_000);
+      // Chain-aware: `10_000` * cents is only correct on 6-decimal USDC. BSC's cash is
+      // 18-decimal USDT, and usesAggregator() routes it through this same aggregator branch
+      // (see swapQuote.ts), so a hardcoded multiply under-quoted every BSC buy by 10^12x.
+      const amountInRaw = usdToRaw(chain, cents / 100);
       const route = chain.routes[a.symbol];
       let expectedOutRaw: bigint;
       let minOutRaw: bigint | undefined;
+      let dryRun: DryRun | undefined;
       if (a.via === "aave_v3") {
         expectedOutRaw = amountInRaw; // supply(USDC) mints aUSDC 1:1
       } else if (aggregator && address) {
@@ -79,9 +90,11 @@ export function useQuote(asset: Asset | null, amountUsd: number) {
             amountIn: amountInRaw,
             sender: address,
             recipient: address,
+            venue,
           });
           expectedOutRaw = q.amountOut;
           minOutRaw = q.minOut;
+          dryRun = q.dryRun;
         } catch (e) {
           if (!a.pool) throw e;
           expectedOutRaw = await quoteSingleHop(
@@ -101,7 +114,14 @@ export function useQuote(asset: Asset | null, amountUsd: number) {
       }
       const expectedOutQty = fromUnits(expectedOutRaw, a.decimals!);
       const pricePerToken = expectedOutQty > 0 ? cents / 100 / expectedOutQty : 0;
-      return { amountInRaw, expectedOutRaw, expectedOutQty, pricePerToken, ...(minOutRaw !== undefined ? { minOutRaw } : {}) };
+      return {
+        amountInRaw,
+        expectedOutRaw,
+        expectedOutQty,
+        pricePerToken,
+        ...(minOutRaw !== undefined ? { minOutRaw } : {}),
+        ...(dryRun ? { dryRun } : {}),
+      };
     },
   });
 }
@@ -112,6 +132,8 @@ export interface SellQuote {
   expectedUsd: number;
   /** Aggregator quotes: the USDC floor Kyber will enforce at the default slippage (raw). */
   minUsdcRaw?: bigint;
+  /** BSC only, and only on a build=true quote: the Binance check this trade would face. */
+  dryRun?: DryRun;
 }
 
 /**
@@ -119,7 +141,7 @@ export interface SellQuote {
  * their route in REVERSE (asset -> ... -> USDC). Returns no data while
  * disabled/loading.
  */
-export function useSellQuote(asset: Asset | null, tokenQtyRaw: bigint) {
+export function useSellQuote(asset: Asset | null, tokenQtyRaw: bigint, venue?: RwaPlatform) {
   const chain = useChain();
   const { address } = useSmartAccount();
   const aggregator = usesAggregator(chain, asset);
@@ -129,16 +151,19 @@ export function useSellQuote(asset: Asset | null, tokenQtyRaw: bigint) {
   const canQuote = aggregator ? Boolean(address) || Boolean(asset?.pool) : true;
   const enabled = Boolean(asset && asset.decimals && qtyKey !== "0" && isRoutable(chain, asset.symbol) && canQuote);
   return useQuery({
-    queryKey: ["sell-quote", chain.key, asset?.symbol, "sell", qtyKey, aggregator ? address : null],
+    queryKey: ["sell-quote", chain.key, asset?.symbol, "sell", qtyKey, aggregator ? address : null, venue ?? null],
     enabled,
     staleTime: 10_000,
     refetchInterval: 15_000,
+    // Same reasoning as useQuote: a refusal is final, so retrying just doubles the Binance call.
+    retry: false,
     queryFn: async (): Promise<SellQuote> => {
       const a = asset!;
       const amountInRaw = BigInt(qtyKey);
       const route = chain.routes[a.symbol];
       let expectedUsdcRaw: bigint;
       let minUsdcRaw: bigint | undefined;
+      let dryRun: DryRun | undefined;
       if (a.via === "aave_v3") {
         expectedUsdcRaw = amountInRaw; // withdraw returns USDC 1:1
       } else if (aggregator && address) {
@@ -149,9 +174,11 @@ export function useSellQuote(asset: Asset | null, tokenQtyRaw: bigint) {
             amountIn: amountInRaw,
             sender: address,
             recipient: address,
+            venue,
           });
           expectedUsdcRaw = q.amountOut;
           minUsdcRaw = q.minOut;
+          dryRun = q.dryRun;
         } catch (e) {
           if (!a.pool) throw e;
           expectedUsdcRaw = await quoteSingleHop(
@@ -170,7 +197,13 @@ export function useSellQuote(asset: Asset | null, tokenQtyRaw: bigint) {
         );
       }
       const expectedUsd = fromUnits(expectedUsdcRaw, chain.usdc.decimals);
-      return { amountInRaw, expectedUsdcRaw, expectedUsd, ...(minUsdcRaw !== undefined ? { minUsdcRaw } : {}) };
+      return {
+        amountInRaw,
+        expectedUsdcRaw,
+        expectedUsd,
+        ...(minUsdcRaw !== undefined ? { minUsdcRaw } : {}),
+        ...(dryRun ? { dryRun } : {}),
+      };
     },
   });
 }

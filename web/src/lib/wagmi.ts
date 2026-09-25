@@ -1,18 +1,21 @@
-// Multi-chain wagmi + viem wiring. Base (8453) is default; Mantle (5000) is the legacy mode.
+// Multi-chain wagmi + viem wiring. Base (8453) is default; Mantle (5000) is the legacy mode;
+// BSC (56) is the BNB Hack chain.
 // Privy owns the embedded wallet + signing; wagmi here is read-only chain context.
 // For chain-aware reads use `getPublicClient(chain)`.
 import { createConfig } from "wagmi";
 import { createPublicClient, type PublicClient } from "viem";
-import { BASE, MANTLE, CHAINS, chainTransport, type ChainKey, type StaxChain } from "./chains";
+import { BASE, BSC, MANTLE, CHAINS, chainTransport, type ChainKey, type StaxChain } from "./chains";
 
 export const base = BASE.chain;
 export const mantle = MANTLE.chain;
+export const bsc = BSC.chain;
 
 export const wagmiConfig = createConfig({
-  chains: [base, mantle],
+  chains: [base, mantle, bsc],
   transports: {
     [base.id]: chainTransport(BASE),
     [mantle.id]: chainTransport(MANTLE),
+    [bsc.id]: chainTransport(BSC),
   },
   ssr: true,
 });

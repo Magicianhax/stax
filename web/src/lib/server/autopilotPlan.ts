@@ -7,12 +7,19 @@ import "server-only";
 //   resolveAutopilotBasket(chain, id) — curated id first, then a stored short id
 //   planForAutopilot(cfg)             — basket: fixed weights + ceiling check, no Vera;
 //                                       goal: Vera's allocation for the saved goal
+//   planAutopilotRun(cfg)             — the entry point autopilotExecutor.ts calls: unwraps a
+//                                       rule encoded in `goal` (lib/rules.ts) and routes it to
+//                                       the rule engine, or falls through to planForAutopilot
+//                                       unchanged for every plain goal/basket autopilot
 import { checkBasketCeiling, type AutopilotConfig } from "@/lib/autopilot";
 import type { Allocation } from "@/lib/allocation-schema";
 import { basketToAllocation, curatedBasketById, isBasketInvestable, isBasketShortId, type Basket } from "@/lib/baskets";
 import { getChain, type StaxChain } from "@/lib/chains";
+import { decodeRuleGoal, HOLDINGS_RULE_TYPES, type Rule, type RuleIntent } from "@/lib/rules";
 import { buildAllocation } from "@/lib/server/allocate";
 import { getBasket } from "@/lib/server/basketsStore";
+import { getBscHoldings } from "@/lib/server/bscHoldings";
+import { planRuleForAutopilot, type EvaluableRule } from "@/lib/server/rulesEngine";
 
 const RISK_CEILING_BPS = 10000;
 const clampRisk = (bps: number) => Math.max(0, Math.min(RISK_CEILING_BPS, Math.round(bps)));
@@ -64,6 +71,15 @@ export type AutopilotPlan =
  * risk is gated later by checkBounds with the balance in hand.
  */
 export async function planForAutopilot(cfg: AutopilotConfig, chain: StaxChain = getChain(cfg.chain)): Promise<AutopilotPlan> {
+  // BSC (ADR-0005): the direct smart-account path autopilot uses for a one-tap invest is a
+  // user-present flow (they're holding the wallet). A scheduled run has no one watching, so a
+  // sizing mistake there would repeat silently every period — Autopilot on BSC stays off until
+  // the executor (with its on-chain risk gate) is deployed. `runAutopilot` already checks this
+  // before it ever calls here; this mirrors it so nothing that calls `planForAutopilot`
+  // directly (a future preview endpoint, a test) can skip the gate by accident.
+  if (!chain.contracts.deployed) {
+    return { ok: false, status: "skipped", reason: `Stax is not deployed on ${chain.name} yet.` };
+  }
   if (cfg.basketId) {
     const found = await resolveAutopilotBasket(chain, cfg.basketId);
     if (found.kind === "missing") return { ok: false, status: "error", reason: BASKET_GONE, pause: true };
@@ -79,4 +95,65 @@ export async function planForAutopilot(cfg: AutopilotConfig, chain: StaxChain = 
   }
   const allocation = await buildAllocation(chain, cfg.goal, cfg.amountUsd);
   return { ok: true, allocation, assessedRiskBps: clampRisk(allocation.riskScore) };
+}
+
+/** What one rule-based run produced — the shape `planForAutopilot` can't return (buy/sell legs
+ *  and a plain receipt, not an `Allocation`). See planAutopilotRun. */
+export type AutopilotRulePlan =
+  | { ok: true; kind: "rule"; rule: Rule; intents: RuleIntent[]; receipt: string }
+  | { ok: false; kind: "rule"; status: "skipped" | "error"; reason: string; pause?: boolean };
+
+/**
+ * The entry point autopilotExecutor.ts calls instead of `planForAutopilot` directly. Every
+ * existing autopilot's `goal` is plain text — `decodeRuleGoal` returns null for it, and this
+ * falls straight through to `planForAutopilot`, unchanged. A config whose goal carries an
+ * encoded rule (lib/rules.ts, saved by /api/autopilot) is routed to the rule engine instead,
+ * except `schedule_buy` — that rule type IS today's goal/basket plan, so it just unwraps back to
+ * the human-readable goal and runs the normal path. Same `chain.contracts.deployed` gate as
+ * `planForAutopilot`: a rule never evaluates while the BSC executor is off.
+ */
+export async function planAutopilotRun(
+  cfg: AutopilotConfig,
+  chain: StaxChain = getChain(cfg.chain),
+  nowSeconds: number = Math.floor(Date.now() / 1000),
+): Promise<AutopilotPlan | AutopilotRulePlan> {
+  // Rules other than "buy on a schedule" are BSC-only (file header, review finding #3): decoding
+  // on any chain would let a `goal` crafted or copied onto a Base/Mantle config — both already
+  // `deployed: true` — run today, reading BSC's own catalog/spread data to trade on a different
+  // chain entirely. `/api/autopilot`'s POST already refuses saving one off BSC; this is the
+  // second, independent gate for a row that reached the column some other way.
+  const decoded = chain.key === "bsc" ? decodeRuleGoal(cfg.goal) : null;
+  if (!decoded || decoded.rule.type === "schedule_buy") {
+    const effectiveGoal = decoded?.displayGoal ?? cfg.goal;
+    return planForAutopilot(effectiveGoal === cfg.goal ? cfg : { ...cfg, goal: effectiveGoal }, chain);
+  }
+
+  if (!chain.contracts.deployed) {
+    return { ok: false, kind: "rule", status: "skipped", reason: `Stax is not deployed on ${chain.name} yet.` };
+  }
+
+  let targets: { symbol: string; weightPct: number }[] | undefined;
+  let basketName: string | undefined;
+  if (cfg.basketId) {
+    const found = await resolveAutopilotBasket(chain, cfg.basketId);
+    if (found.kind === "missing") return { ok: false, kind: "rule", status: "error", reason: BASKET_GONE, pause: true };
+    if (found.kind === "found") {
+      targets = found.basket.items.map((i) => ({ symbol: i.symbol, weightPct: i.weightPct }));
+      basketName = found.basket.name;
+    }
+    // "uninvestable" falls through with no targets: the rule engine's own "pick a basket" /
+    // holdings message still applies, and this stays a skip rather than a pause (the basket
+    // itself is fine, just not tradeable on this chain right this moment).
+  }
+
+  const rule = decoded.rule as EvaluableRule;
+  // Only the three holdings-based rule types ever look at ctx.holdings (rulesEngine.ts) — a live
+  // BSC balance read is a Wallet API call plus a fresh RWA catalog pull, so it's only worth paying
+  // for when the rule actually needs it (buy_discount and earnings never do).
+  const holdings = HOLDINGS_RULE_TYPES.includes(rule.type)
+    ? ((await getBscHoldings(chain, cfg.smartAccount, nowSeconds * 1000)) ?? undefined)
+    : undefined;
+  const result = await planRuleForAutopilot(chain, rule, { nowMs: nowSeconds * 1000, budgetUsd: cfg.amountUsd, targets, basketName, holdings });
+  if (!result.ok) return { ok: false, kind: "rule", status: "skipped", reason: result.reason };
+  return { ok: true, kind: "rule", rule, intents: result.intents, receipt: result.receipt };
 }

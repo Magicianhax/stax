@@ -24,6 +24,8 @@ import { usd, shortAddress, txUrl } from "@/lib/format";
 import { useChain } from "@/lib/chains/active";
 import { haptic } from "@/lib/haptics";
 import { ONRAMP_PRESETS, offrampUrl, onrampEnabled, onrampSupported, onrampUrl } from "@/lib/onramp";
+import { SavingsCard } from "@/components/lite/savings/SavingsCard";
+import { useSavingsBalance } from "@/hooks/useSavings";
 import type { WalletTx } from "@/lib/walletTx";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { DEMO_TRANSACTIONS } from "@/lib/demo/demoData";
@@ -41,8 +43,8 @@ function txDate(sec?: number): string {
   return `${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })} · ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
 }
 
-/** Net USDC per week (in +, out −) for the last `n` weeks ending at `nowMs`, oldest first. */
-function weeklyCashFlow(txs: WalletTx[], nowMs: number, n = 8): { label: string; value: number; in: number; out: number }[] {
+/** Net cash (the chain's dollar token) per week (in +, out −) for the last `n` weeks ending at `nowMs`, oldest first. */
+function weeklyCashFlow(txs: WalletTx[], cash: string, nowMs: number, n = 8): { label: string; value: number; in: number; out: number }[] {
   const end = nowMs + 1; // inclusive of "now"
   const start = end - n * WEEK;
   const weeks = Array.from({ length: n }, (_, i) => ({
@@ -52,7 +54,7 @@ function weeklyCashFlow(txs: WalletTx[], nowMs: number, n = 8): { label: string;
     out: 0,
   }));
   for (const t of txs) {
-    if (t.symbol !== "USDC" || !t.timestamp) continue;
+    if (t.symbol !== cash || !t.timestamp) continue;
     const ms = t.timestamp * 1000;
     if (ms < start || ms >= end) continue;
     const w = weeks[Math.min(n - 1, Math.floor((ms - start) / WEEK))];
@@ -94,6 +96,7 @@ export function WalletScreen({
   const chain = useChain();
   const { user } = usePrivy();
   const { data: bal, isLoading: balLoading } = useUsdcBalance(address ?? undefined);
+  const { data: savingsBal } = useSavingsBalance(address ?? undefined);
   const { data: port, isLoading: portLoading } = usePortfolio(address ?? undefined);
   const { data: txs, isLoading: txLoading } = useTransactions(address ?? undefined);
   const { data: activity } = useActivity(address ?? undefined);
@@ -138,7 +141,10 @@ export function WalletScreen({
 
   const cash = bal?.value ?? 0;
   const invested = port?.investedUsd ?? 0;
-  const total = cash + invested;
+  // BSC Savings (Venus) isn't a portfolio holding, so it's added here: the parts under the
+  // total must add up to it (design critique P1 #12).
+  const inSavings = chain.key === "bsc" ? (savingsBal ?? 0) : 0;
+  const total = cash + invested + inSavings;
 
   // Transactions, 10 per page. The demo mirrors Home's activity (same plans,
   // same hashes) so the two screens never contradict each other.
@@ -150,7 +156,7 @@ export function WalletScreen({
   // Cash flow by week, straight from the transfer list (nothing invented).
   // "Now" is fixed for the life of the screen; the demo anchors to DEMO_NOW.
   const [nowMs] = useState(() => (demo ? DEMO_NOW : Date.now()));
-  const weeks = useMemo(() => weeklyCashFlow(txList, nowMs), [txList, nowMs]);
+  const weeks = useMemo(() => weeklyCashFlow(txList, chain.usdc.symbol, nowMs), [txList, chain.usdc.symbol, nowMs]);
   const flowIn = weeks.reduce((s, w) => s + w.in, 0);
   const flowOut = weeks.reduce((s, w) => s + w.out, 0);
 
@@ -213,13 +219,18 @@ export function WalletScreen({
               </div>
             )}
           </div>
-          <div style={{ display: "flex", gap: 16, marginTop: 10 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", columnGap: 16, rowGap: 4, marginTop: 10 }}>
             <span style={{ fontSize: 13, color: "var(--ink-2)" }}>
               Cash <b className="tnum" style={{ color: "var(--ink)" }}>{hide ? DOTS : usd(cash)}</b>
             </span>
             <span style={{ fontSize: 13, color: "var(--ink-2)" }}>
               Invested <b className="tnum" style={{ color: "var(--ink)" }}>{hide ? DOTS : usd(invested)}</b>
             </span>
+            {inSavings > 0 && (
+              <span style={{ fontSize: 13, color: "var(--ink-2)" }}>
+                Savings <b className="tnum" style={{ color: "var(--ink)" }}>{hide ? DOTS : usd(inSavings)}</b>
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -237,13 +248,13 @@ export function WalletScreen({
         <SectionTitle>Cash</SectionTitle>
         <button
           className="card row tap"
-          onClick={() => go("send", { symbol: "USDC" })}
+          onClick={() => go("send", { symbol: chain.usdc.symbol })}
           style={{ width: "100%", padding: "14px 16px", display: "flex", alignItems: "center", gap: 13, textAlign: "left" }}
         >
-          <TokenLogo symbol="USDC" size={38} />
+          <TokenLogo symbol={chain.usdc.symbol} size={38} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: 600, fontSize: 15.5, letterSpacing: "-.01em" }}>US Dollar</div>
-            <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 2 }}>USDC · spendable cash</div>
+            <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 2 }}>{chain.usdc.symbol} · spendable cash</div>
           </div>
           <div className="tnum" style={{ fontWeight: 700, fontSize: 16 }}>{hide ? DOTS : usd(cash)}</div>
         </button>
@@ -284,6 +295,9 @@ export function WalletScreen({
           <Icon name="chevR" size={18} style={{ color: "var(--ink-3)", flex: "none" }} />
         </button>
       </div>
+
+      {/* savings — BSC only, right under cash */}
+      {chain.key === "bsc" && <SavingsCard address={address ?? undefined} />}
 
       {/* cash flow — net in/out by week, from the same transfers listed below */}
       {txList.length > 0 && (
@@ -441,7 +455,7 @@ export function WalletScreen({
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: "2px 2px 8px" }}>
             <p style={{ margin: 0, fontSize: 14.5, color: "var(--ink-2)", lineHeight: 1.55 }}>
-              Add money with a card or bank is available on Base. On {chain.name}, send USDC to your address
+              Add money with a card or bank is available on Base. On {chain.name}, send {chain.usdc.symbol} to your address
               instead. It arrives in under a minute.
             </p>
             <button
@@ -469,7 +483,7 @@ export function WalletScreen({
       <BottomSheet open={receiveOpen} onClose={() => setReceiveOpen(false)} title="Receive">
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16, padding: "4px 4px 8px" }}>
           <p style={{ margin: 0, fontSize: 14, color: "var(--ink-2)", textAlign: "center", lineHeight: 1.5 }}>
-            Send <b style={{ color: "var(--ink)" }}>USDC on {chain.name}</b> to this address. It arrives in under a minute.
+            Send <b style={{ color: "var(--ink)" }}>{chain.usdc.symbol} on {chain.name}</b> to this address. It arrives in under a minute.
           </p>
           {addrLoading || !address ? (
             <div style={{ width: 196, height: 196, display: "grid", placeItems: "center" }}><Spinner /></div>
@@ -485,7 +499,15 @@ export function WalletScreen({
           <button onClick={copyAddress} disabled={!address} className="btn btn-primary btn-block tap" style={{ height: 50 }}>Copy address</button>
           <div style={{ display: "flex", alignItems: "flex-start", gap: 9, padding: "11px 13px", borderRadius: 14, background: "var(--accent-soft)", color: "var(--ink-2)", fontSize: 12.5, lineHeight: 1.5 }}>
             <Icon name="info" size={16} stroke={2} style={{ flex: "none", marginTop: 1, color: "var(--accent)" }} />
-            <span>Only send <b style={{ color: "var(--ink)" }}>USDC</b> on the <b style={{ color: "var(--ink)" }}>{chain.name}</b> network. Other tokens or networks may be lost.</span>
+            <span>
+              Only send <b style={{ color: "var(--ink)" }}>{chain.usdc.symbol}</b> on the{" "}
+              <b style={{ color: "var(--ink)" }}>{chain.name}</b> network. Other tokens or networks may be lost.
+              {/* Design critique P1 #13: name Binance's own network label for the one exchange a
+                  first-time investor is most likely funding this from. */}
+              {chain.key === "bsc"
+                ? " On Binance, choose the BNB Smart Chain (BEP20) network. USDT sent on another network can't be recovered."
+                : ""}
+            </span>
           </div>
         </div>
       </BottomSheet>

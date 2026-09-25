@@ -10,15 +10,20 @@
 //
 // Note on P&L: we don't track cost basis on-chain, so the only gain shown is
 // today's move (real 1D market data per holding), never an invented "all time".
-import { useState } from "react";
+import { holdingKey } from "@/lib/venues";
+import { useEffect, useState } from "react";
 import { usePortfolio, type Holding } from "@/hooks/useBalances";
 import { useActivity } from "@/hooks/useActivity";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
+import { useSavingsBalance } from "@/hooks/useSavings";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { Icon, HoldingRow, LogoCluster, SectionTitle, Sparkline, VerifiedBadge, NetworkChip } from "@/components/design";
 import { Money, Reveal } from "@/components/motion";
+import { assetLogo } from "@/lib/assetLogo";
 import { toTile, catFor } from "@/lib/displayAssets";
+import { PLATFORM_LABEL } from "@/components/lite/rwa/VenuePicker";
 import { usd, tokenQty } from "@/lib/format";
+import { todayMarketLine } from "@/lib/homeToday";
 import { portfolioSeries } from "@/lib/demoSeries";
 import { iconBtn } from "./primitives";
 import { useChainReady } from "../useChainReady";
@@ -30,6 +35,20 @@ import type { LoopParams } from "../LiteApp";
 const DOTS = "••••••";
 const TOP_HOLDINGS = 4;
 const RECENT = 3;
+const TODAY_LINE_TICK_MS = 60_000;
+
+/** Home's "Today" line, on a slow tick. Null until mounted (same hydration-safe idiom
+ *  MarketScreen's `useBscMarketClock` uses) so the server and first client paint agree. */
+function useTodayLine(): string | null {
+  const [line, setLine] = useState<string | null>(null);
+  useEffect(() => {
+    const tick = () => setLine(todayMarketLine(Date.now()));
+    tick();
+    const id = setInterval(tick, TODAY_LINE_TICK_MS);
+    return () => clearInterval(id);
+  }, []);
+  return line;
+}
 
 function dayLabel(unixSec?: number): string | undefined {
   if (!unixSec) return undefined;
@@ -87,10 +106,13 @@ export function HomeScreen({
   const balance = port?.cashUsd ?? 0;
   const holdings: Holding[] = port?.holdings ?? [];
   const invested = port?.investedUsd ?? 0;
-  const total = port?.totalUsd ?? 0;
+  // Savings (Venus, BSC) isn't in the portfolio total; add it so Home and Wallet agree.
+  const { data: savingsBal } = useSavingsBalance(address ?? undefined);
+  const total = (port?.totalUsd ?? 0) + (chain.key === "bsc" ? (savingsBal ?? 0) : 0);
 
-  const today = todayChange(holdings, total);
+  const today = todayChange(holdings, port?.totalUsd ?? 0);
   const up = (today?.abs ?? 0) >= 0;
+  const todayLine = useTodayLine();
   // Demo: the deterministic portfolio series (stable screenshots). Real: the
   // holdings' 1D sparklines, blended by value.
   const spark = demo ? portfolioSeries("1D", total).map((p) => p.v) : todaySpark(holdings, balance);
@@ -106,6 +128,15 @@ export function HomeScreen({
   // person who just bought Safe Dollars should see them without "See all".
   const top = holdings.slice(0, TOP_HOLDINGS);
   const shown = [...top, ...holdings.slice(TOP_HOLDINGS).filter((h) => h.asset.tier === "safe")];
+  // Design critique P1 #10: a twin holding (bStock's and Ondo's mint of the same stock) used to
+  // render as two rows with the same name, tile and ticker — nothing said why there were two.
+  // Counted across the FULL list, not just `shown`, so a twin split by TOP_HOLDINGS still
+  // recognises itself.
+  const twinSymbols = new Set(
+    [...holdings.reduce((m, h) => m.set(h.asset.symbol, (m.get(h.asset.symbol) ?? 0) + 1), new Map<string, number>())]
+      .filter(([, count]) => count > 1)
+      .map(([symbol]) => symbol),
+  );
   const recent = (activity ?? []).slice(0, RECENT);
 
   return (
@@ -226,6 +257,12 @@ export function HomeScreen({
               )}
             </button>
           </div>
+          {/* BSC: a single, simple line under the balance — is the US market (the reference
+              every tokenized stock here tracks) open right now. Off BSC there's no such
+              reference to speak of. */}
+          {chain.key === "bsc" && todayLine && (
+            <div style={{ padding: "10px 0 0", fontSize: 13, fontWeight: 600, color: "var(--ink-2)" }}>{todayLine}</div>
+          )}
         </div>
 
         {/* balance split row */}
@@ -327,27 +364,35 @@ export function HomeScreen({
               {shown.map((h, i) => {
                 const base = toTile(h.asset.symbol, h.asset.name);
                 // Real 1D market data (from the server) replaces the presentational
-                // tint whenever the asset has a live source.
+                // tint whenever the asset has a live source. On BSC, a twin holding row shows
+                // THIS row's own issuer's logo (h.venue), not the default issuer's.
                 const tile = {
                   ...base,
                   day: h.dayChangePct ?? base.day,
                   spark: h.spark ?? base.spark,
+                  logo: assetLogo(chain, h.asset.symbol, h.venue),
                 };
                 const day = h.dayChangePct;
                 const qty = tokenQty(h.raw, h.asset.decimals ?? 18);
                 const flashed = loop?.flash.includes(h.asset.symbol);
                 return (
                   <div
-                    key={h.asset.symbol}
+                    key={holdingKey(h)}
                     style={{ borderBottom: i < shown.length - 1 ? "1px solid var(--line-2)" : "none" }}
                   >
                     <HoldingRow
                       asset={tile}
                       qty={qty}
                       symbol={h.asset.symbol}
-                      sub={hideBalance ? catFor(h.asset.symbol, h.asset.name) : undefined}
+                      sub={
+                        hideBalance
+                          ? catFor(h.asset.symbol, h.asset.name)
+                          : twinSymbols.has(h.asset.symbol) && h.venue
+                            ? `${qty} ${h.asset.symbol} · from ${PLATFORM_LABEL[h.venue]}`
+                            : undefined
+                      }
                       showSpark
-                      onClick={() => go("asset", { symbol: h.asset.symbol })}
+                      onClick={() => go("asset", { symbol: h.asset.symbol, venue: h.venue })}
                       value={hideBalance ? DOTS : h.valueUsd !== undefined ? usd(h.valueUsd) : qty}
                       change={day !== undefined ? { pct: day, label: "today" } : undefined}
                       flashKey={flashed && loop ? `${h.asset.symbol}:${loop.txHash}` : undefined}

@@ -18,10 +18,17 @@ import { useBaskets } from "@/hooks/useBaskets";
 import { allocationToBasket, shortName, BASKET_NAME_MAX, type Basket } from "@/lib/baskets";
 import { haptic } from "@/lib/haptics";
 import { shareBasket, WeightBar } from "./basketPrimitives";
+import { assetLogo } from "@/lib/assetLogo";
 import { toTile, catFor } from "@/lib/displayAssets";
 import { usd } from "@/lib/format";
 import { assetBySymbol } from "@/lib/chains";
 import { STAX_FEE_LABEL, feeUsd } from "@/lib/fees";
+import { planCheckFailedMessage, planDryRunView } from "@/lib/planDryRuns";
+import { gapToRealShare, planOpenIssuerNote } from "@/lib/plainCopy";
+import { platformLabel } from "@/lib/spread";
+import { usMarketClock } from "@/lib/marketHours";
+import { useRwa } from "@/hooks/useRwa";
+import type { DryRun } from "@/lib/dryRun";
 import type { AllocateResult } from "@/lib/invest-types";
 import { iconBtn, Spinner, ThinkingDots, YieldTag } from "./primitives";
 import { useChainReady } from "../useChainReady";
@@ -56,6 +63,7 @@ export function PlanScreen({
   onInvest,
   basket,
   goal,
+  dryRuns,
 }: {
   go: (screen: string, params?: Record<string, unknown>) => void;
   allocation: AllocateResult;
@@ -69,9 +77,31 @@ export function PlanScreen({
   basket?: Basket;
   /** The goal that produced this plan (kept on a saved basket as its origin). */
   goal?: string;
+  /**
+   * Binance Transaction API dry runs from the last hold (InvestPlanResult.dryRuns), each tagged
+   * with its leg's symbol — matched by symbol, never position (lib/planDryRuns.ts). A "failed"
+   * leg stops that attempt and is named here; Hold stays enabled, because the server re-checks
+   * on every hold. Undefined before the first hold renders exactly what this screen already did.
+   */
+  dryRuns?: DryRun[];
 }) {
   const risk = riskMeta(allocation.riskScore);
-  const { chain, ready } = useChainReady();
+  const { chain, investable } = useChainReady();
+  const dryRunView = planDryRunView(allocation.allocations, dryRuns, (s) => assetBySymbol(chain, s)?.decimals ?? 18);
+  const failedMessage = planCheckFailedMessage(
+    dryRunView.failedSymbols.map((sym) => toTile(sym).name),
+    !basket,
+  );
+  // BSC: which issuer each stock is bought from, and how its price compares with the real share
+  // (design critique P1 #10). The allocation carries the venue bscPlan picked; the live catalog
+  // carries that venue's current gap.
+  const bsc = chain.key === "bsc";
+  const { data: rwa } = useRwa();
+  const venueFor = (symbol: string, platform: "bstock" | "ondo" | undefined) =>
+    platform ? rwa?.tickers.find((t) => t.ticker === symbol)?.venues.find((v) => v.platform === platform) : undefined;
+  // Read once per mount: this screen is only ever reached by navigation, never server-rendered.
+  const [usMarketOpen] = useState(() => usMarketClock(Date.now()).buyable);
+  const openIssuerNote = bsc ? planOpenIssuerNote(usMarketOpen, allocation.allocations.map((a) => a.venue)) : "";
   const { save } = useBaskets();
   const { notify } = useToast();
   const [saveOpen, setSaveOpen] = useState(false);
@@ -167,6 +197,14 @@ export function PlanScreen({
         </div>
       </div>
 
+      {/* Why a plan can still buy while the US market is shut (P1 #10). */}
+      {openIssuerNote && (
+        <div style={{ ...recompose, flexShrink: 0, display: "flex", gap: 7, alignItems: "flex-start", padding: "10px 22px 0 68px", fontSize: 13, lineHeight: 1.45, color: "var(--ink-2)" }}>
+          <Icon name="clock" size={14} style={{ flex: "none", marginTop: 2 }} />
+          <span>{openIssuerNote}</span>
+        </div>
+      )}
+
       {/* nudge chips — talk back to Vera (a basket's weights are fixed, so none) */}
       {!basket && (
       <div style={{ display: "flex", gap: 8, padding: "14px 22px 0", overflowX: "auto", flexShrink: 0 }}>
@@ -200,10 +238,14 @@ export function PlanScreen({
         {allocation.allocations.map((a) => {
           const tile = toTile(a.symbol);
           const dollars = (amount * a.weightPct) / 100;
+          const check = dryRunView.legs.find((l) => l.symbol === a.symbol);
+          const vv = bsc ? venueFor(a.symbol, a.venue) : undefined;
+          const fromLine = bsc && a.venue ? [`From ${platformLabel(a.venue)}`, vv ? gapToRealShare(vv.gapPct) : ""].filter(Boolean).join(" · ") : "";
           return (
             <div key={a.symbol} className="card" style={{ padding: "14px 16px", marginBottom: 10 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
-                <AssetTile asset={tile} />
+                {/* BSC: the leg's own resolved issuer (`a.venue`) picks the logo; off BSC unchanged. */}
+                <AssetTile asset={{ ...tile, logo: assetLogo(chain, a.symbol, a.venue) }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                     <span style={{ fontWeight: 600, fontSize: 16.5 }}>{tile.name}</span>
@@ -215,7 +257,7 @@ export function PlanScreen({
                     {assetBySymbol(chain, a.symbol)?.tier === "safe" ? (
                       <YieldTag symbol={a.symbol} />
                     ) : (
-                      <span style={{ fontSize: 13, color: "var(--ink-2)" }}>{catFor(a.symbol)}</span>
+                      <span style={{ fontSize: 13, color: "var(--ink-2)" }}>{fromLine || catFor(a.symbol)}</span>
                     )}
                     <span className="tnum" style={{ fontSize: 12.5, color: "var(--ink-2)", fontWeight: 600 }}>
                       {Math.round(a.weightPct)}%
@@ -236,6 +278,34 @@ export function PlanScreen({
                 <Icon name="info" size={15} style={{ flex: "none", marginTop: 1, color: "var(--accent)" }} />
                 {a.reason}
               </div>
+              {/* Binance's own pre-trade check on this leg, in plain words — never claims a
+                  check that didn't run (design decision in lib/plainCopy.ts's dryRunLine, matched
+                  here for the "not checked yet" case that screen deliberately stays silent on). */}
+              {check && (
+                <div
+                  className="tnum"
+                  style={{
+                    display: "flex",
+                    gap: 6,
+                    alignItems: "flex-start",
+                    fontSize: 12.5,
+                    // Design critique P1 #10/#13: a failed check reads in --ink with an icon, never
+                    // a --neg wash across the card; the other states are --ink-2 (AA on white).
+                    color: check.status === "failed" ? "var(--ink)" : "var(--ink-2)",
+                    fontWeight: check.status === "failed" ? 600 : 500,
+                    marginTop: 8,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  <Icon
+                    name={check.status === "checked" ? "check" : check.status === "failed" ? "info" : "clock"}
+                    size={14}
+                    stroke={2.2}
+                    style={{ flex: "none", marginTop: 1, color: check.status === "failed" ? "var(--neg)" : check.status === "checked" ? "var(--pos)" : "var(--ink-2)" }}
+                  />
+                  <span>{check.text}</span>
+                </div>
+              )}
             </div>
           );
         })}
@@ -251,7 +321,7 @@ export function PlanScreen({
             <span style={{ fontSize: 13.5, fontWeight: 700, color: "var(--accent)" }}>{risk.label}</span>
           </div>
           <RiskMeter level={risk.level} />
-          <p style={{ fontSize: 13, color: "var(--ink-3)", margin: "10px 0 0", lineHeight: 1.5 }}>
+          <p style={{ fontSize: 13, color: "var(--ink-2)", margin: "10px 0 0", lineHeight: 1.5 }}>
             Some ups and downs are normal. Stocks can go down too, so only invest what you can leave
             for a while.
           </p>
@@ -317,9 +387,21 @@ export function PlanScreen({
           background: "linear-gradient(to top, var(--paper), var(--paper) 62%, transparent)",
         }}
       >
-        {ready ? (
+        {/* After a failed check: which part, and the two ways forward (P0 #1). Hold stays live. */}
+        {failedMessage && !busy && (
+          <div
+            role="status"
+            style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 10, padding: "10px 12px", borderRadius: 14, background: "var(--surface)", boxShadow: "var(--shadow)", fontSize: 13.5, lineHeight: 1.45, color: "var(--ink)" }}
+          >
+            <Icon name="info" size={16} stroke={2.2} style={{ flex: "none", marginTop: 1, color: "var(--neg)" }} />
+            <span>{failedMessage}</span>
+          </div>
+        )}
+        {investable ? (
           <div style={{ textAlign: "center", fontSize: 12.5, color: "var(--ink-2)", marginBottom: 10 }}>
-            {STAX_FEE_LABEL} fee ({usd(feeUsd(amount))}) · gas on us
+            {/* Design critique P2 #14: "gas" is jargon a first-time investor shouldn't need —
+                matches the wording TradeScreen already uses for the same fact. */}
+            {chain.key === "bsc" ? "No fee" : `${STAX_FEE_LABEL} fee (${usd(feeUsd(amount, chain.key))})`} · no network cost
           </div>
         ) : (
           <div style={{ marginBottom: 10 }}>
@@ -336,7 +418,7 @@ export function PlanScreen({
             </span>
           </button>
         ) : (
-          <HoldButton onComplete={onInvest} disabled={rethinking || busy || !ready} className="btn-lg">
+          <HoldButton onComplete={onInvest} disabled={rethinking || busy || !investable} className="btn-lg">
             {`Hold to invest ${usd(amount)}`}
           </HoldButton>
         )}

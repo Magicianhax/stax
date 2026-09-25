@@ -28,6 +28,7 @@ import { useUsdcBalance } from "@/hooks/useBalances";
 import { getChain } from "@/lib/chains";
 import { setActiveChainKey } from "@/lib/chains/active";
 import { basketToAllocation, isBasketInvestable, reasonFor, riskWord, type Basket } from "@/lib/baskets";
+import { assetLogo } from "@/lib/assetLogo";
 import { toTile, catFor } from "@/lib/displayAssets";
 import { usd } from "@/lib/format";
 import { haptic } from "@/lib/haptics";
@@ -52,7 +53,7 @@ export function BasketDetailScreen({
   /** A basket decoded from a share link (not in storage yet). */
   shared?: Basket;
 }) {
-  const { chain, ready } = useChainReady();
+  const { chain, investable: ready } = useChainReady();
   const { byId, mine, save, remove, publish } = useBaskets();
   const { notify } = useToast();
   const giftsOn = useGiftsEnabled(); // gift-ui
@@ -295,7 +296,9 @@ export function BasketDetailScreen({
                 style={{ padding: "12px 0", borderBottom: i < basket.items.length - 1 ? "1px solid var(--line-2)" : "none" }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <AssetTile asset={tile} size={40} />
+                  {/* Basket items carry no venue choice, so this is the default issuer's logo on
+                      BSC (unchanged off BSC). */}
+                  <AssetTile asset={{ ...tile, logo: assetLogo(chain, it.symbol) }} size={40} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
                       <span style={{ fontWeight: 600, fontSize: 15.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>

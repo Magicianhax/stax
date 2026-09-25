@@ -4,9 +4,11 @@
 // 6+6 cards. Each card is one link to the announcement post: the award row
 // (rosette, name, event), then the post itself with verbatim text from
 // @Mantle_Official on July 10, 2026, clamped to five lines with the full text
-// in the title attribute.
+// in the title attribute. Under them, one quiet line that Stax on BNB Chain is
+// built for the BNB Hack: Tokenized Stocks Edition, an entry, not a win.
 import { Reveal } from "@/components/site/ui/Reveal";
 import L from "@/components/site/layout.module.css";
+import { HACK_LINE } from "@/lib/site/landing";
 import s from "./Awards.module.css";
 
 export const AWARD_EVENT = "Mantle Turing Test Hackathon 2026";
@@ -116,6 +118,7 @@ export function Awards() {
             );
           })}
         </Reveal>
+        <p className={s.hack}>{HACK_LINE}</p>
       </div>
     </section>
   );

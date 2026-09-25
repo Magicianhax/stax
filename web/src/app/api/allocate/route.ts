@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { AllocateRequestSchema } from "@/lib/allocation-schema";
-import { buildAllocation, ALLOCATE_MODEL } from "@/lib/server/allocate";
+import { buildAllocation, ALLOCATE_MODEL, AllocationRefusal } from "@/lib/server/allocate";
 import { chainFromRequest } from "@/lib/server/chain";
 import { requireApproved } from "@/lib/server/admin";
 import { verifyRequest } from "@/lib/server/privyAuth";
@@ -48,6 +48,10 @@ export async function POST(req: NextRequest) {
     };
     return Response.json(result);
   } catch (err) {
+    // BSC's own refusals (market closed, can't clear the $6-per-leg floor) are written for
+    // the user and belong on a 4xx; anything else is an unexpected fault (Review Focus #1/#3 —
+    // these used to fall through to serverError's generic "Something went wrong" 500).
+    if (err instanceof AllocationRefusal) return badRequest(err.message);
     return serverError("allocate", err);
   }
 }

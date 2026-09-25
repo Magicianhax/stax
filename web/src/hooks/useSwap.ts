@@ -26,11 +26,14 @@ import { asViemProvider } from "@/lib/provider";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { useRefreshBalances } from "@/hooks/useBalances";
 import { AAVE_POOL_ABI, AGNI_ROUTER_ABI, ERC20_ABI, FLUXION_ROUTER_ABI, UNISWAP_ROUTER02_ABI } from "@/lib/abis";
-import { isRoutable, reverseRoute, type Asset, type RouteHop, type StaxChain } from "@/lib/chains";
+import { isRoutable, reverseRoute, type Asset, type RouteHop, type RwaPlatform, type StaxChain } from "@/lib/chains";
+import type { DryRun } from "@/lib/dryRun";
 import { useChain } from "@/lib/chains/active";
 import { encodeV3Path, singleHopSqrtLimit } from "@/lib/swapRouting";
-import { fetchSwapQuote, usesAggregator } from "@/lib/swapQuote";
+import { aggregatorRouterFor, assertDryRunAllowsSend, fetchSwapQuote, usesAggregator } from "@/lib/swapQuote";
 import { feeOf, STAX_TREASURY } from "@/lib/fees";
+import { usdToRaw } from "@/lib/units";
+import { resolveVenueAddress } from "@/lib/venues";
 
 type Phase = "idle" | "swapping" | "done" | "error";
 
@@ -105,35 +108,59 @@ function singleHopSwapCall(
 }
 
 /**
- * Aggregator swap: [ approve(kyberRouter, amountIn), router.swap(data) ]. The calldata is
- * built server-side for sender = recipient = `account` and is only good for ~10s, so this
- * runs immediately before sendSponsoredCalls. The router must be the one the chain config
- * (and the executor whitelist) names — anything else is refused.
+ * Aggregator swap: [ approve(router, amountIn), router.swap(data) ]. `asset.via` picks the
+ * router (KyberSwap on Base, the Binance Web3 aggregator on BSC — `aggregatorRouterFor`). The
+ * calldata is built server-side for sender = recipient = `account` and is only good for ~10s,
+ * so this runs immediately before sendSponsoredCalls. The returned router must match the one
+ * the chain config (and the executor whitelist, once deployed) names — anything else is
+ * refused, mirroring `assertWhitelistedRouter` server-side.
  */
 async function aggregatorCalls(
   chain: StaxChain,
-  p: { symbol: string; side: "buy" | "sell"; tokenIn: `0x${string}`; amountIn: bigint; account: `0x${string}`; slippageBps: number },
-): Promise<{ calls: Call[]; minOut: bigint }> {
+  p: {
+    asset: Asset;
+    side: "buy" | "sell";
+    tokenIn: `0x${string}`;
+    amountIn: bigint;
+    account: `0x${string}`;
+    slippageBps: number;
+    venue?: RwaPlatform;
+  },
+): Promise<{ calls: Call[]; minOut: bigint; dryRun?: DryRun }> {
   const q = await fetchSwapQuote({
-    symbol: p.symbol,
+    symbol: p.asset.symbol,
     side: p.side,
     amountIn: p.amountIn,
     sender: p.account,
     recipient: p.account,
     slippageBps: p.slippageBps,
     build: true,
+    venue: p.venue,
   });
-  const router = chain.routers.kyber!;
-  if (q.router.toLowerCase() !== router.toLowerCase() || !q.data) {
+  const router = aggregatorRouterFor(chain, p.asset);
+  if (!router || q.router.toLowerCase() !== router.toLowerCase() || !q.data) {
     throw new Error("The swap route didn't match this network. Please try again.");
   }
   if (q.amountIn !== p.amountIn) throw new Error("The swap amount changed. Please try again.");
-  // Reset the allowance after the swap (mirrors the executor) so a partially consumed
-  // approval never lingers on the public router.
-  return {
-    calls: [approve(p.tokenIn, router, p.amountIn), { to: router, data: q.data }, approve(p.tokenIn, router, BigInt(0))],
-    minOut: q.minOut,
-  };
+  // Binance's own check on this exact trade (BSC only) is the final word when it ran and
+  // says the trade would revert — never sent in that case. A "skipped" check (this wallet
+  // hasn't sent its first on-chain trade yet, so there's nothing deployed to simulate
+  // against) or no check at all (every other chain) both fall through normally.
+  assertDryRunAllowsSend(q.dryRun);
+  // Belt-and-suspenders for the twin-venue bug this guards against elsewhere (TradeScreen's
+  // holding lookup, resolveVenueAddress): the approve below is built from OUR resolved
+  // `p.tokenIn`, so if the server's quote ever disagreed about which token this trade means,
+  // approving `p.tokenIn` while the router pulls a different one would silently move the wrong
+  // token. Catch that here instead of letting a UserOp revert (or worse, half-succeed) explain it.
+  if (q.tokenIn.toLowerCase() !== p.tokenIn.toLowerCase()) {
+    throw new Error("The swap route didn't match the selected venue. Please try again.");
+  }
+  // Kyber: reset the allowance to 0 after the swap (mirrors the executor) so a partially
+  // consumed approval never lingers on the public router. Binance: the approve is already
+  // exact-amount and single-use, and its router expects no such reset — skip the third call.
+  const calls = [approve(p.tokenIn, router, p.amountIn), { to: router, data: q.data }];
+  if (router.toLowerCase() === chain.routers.kyber?.toLowerCase()) calls.push(approve(p.tokenIn, router, BigInt(0)));
+  return { calls, minOut: q.minOut, dryRun: q.dryRun };
 }
 
 export interface SwapResult {
@@ -142,6 +169,8 @@ export interface SwapResult {
   amountUsd: number;
   /** "buy" (USDC -> asset) or "sell" (asset -> USDC). */
   side: "buy" | "sell";
+  /** BSC only: the Binance check this trade passed (or was skipped) before signing. */
+  dryRun?: DryRun;
 }
 
 export function useSwap() {
@@ -153,11 +182,15 @@ export function useSwap() {
   const refreshBalances = useRefreshBalances();
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
+  // The thrown value behind `error`, so Trade can re-word a swap-quote refusal (a
+  // SwapQuoteError from the build-time quote) instead of showing server text (P0 #3).
+  const [errorCause, setErrorCause] = useState<unknown>(null);
   const [result, setResult] = useState<SwapResult | null>(null);
 
   const reset = useCallback(() => {
     setPhase("idle");
     setError(null);
+    setErrorCause(null);
     setResult(null);
   }, []);
 
@@ -172,10 +205,13 @@ export function useSwap() {
       expectedOutRaw: bigint;
       slippageBps: number;
       recipient: string;
+      /** BSC only: the issuer this quote was built against. Ignored elsewhere. */
+      venue?: RwaPlatform;
     }) => {
-      const { asset, amountUsd, expectedOutRaw, slippageBps, recipient: rcpt } = params;
+      const { asset, amountUsd, expectedOutRaw, slippageBps, recipient: rcpt, venue } = params;
       const recipient = rcpt as `0x${string}`;
       setError(null);
+      setErrorCause(null);
       setResult(null);
       // Demo mode: simulate a successful buy without ever touching the chain.
       if (demo) {
@@ -193,17 +229,18 @@ export function useSwap() {
         }
 
         const usdc = chain.usdc.address;
-        const amountIn = BigInt(Math.round(amountUsd * 1_000_000));
+        const amountIn = usdToRaw(chain, amountUsd);
         if (amountIn <= BigInt(0)) throw new Error("Enter an amount first.");
         // Platform fee skimmed to the treasury (gasless, batched below); the rest
         // is what we actually swap. expectedOutRaw was quoted for the gross amount,
         // so scale it down to the net before deriving the slippage floor.
-        const feeRaw = feeOf(amountIn);
+        const feeRaw = feeOf(amountIn, chain.key);
         const netIn = amountIn - feeRaw;
         const expectedNet = (expectedOutRaw * netIn) / amountIn;
         const minOut = (expectedNet * (BPS - BigInt(slippageBps))) / BPS;
 
         let calls: Call[];
+        let dryRun: DryRun | undefined;
         const route = chain.routes[asset.symbol];
         if (asset.via === "aave_v3") {
           // Safe dollars: supply USDC to Aave, aUSDC lands in the user's account 1:1.
@@ -219,17 +256,19 @@ export function useSwap() {
           // Kyber builds the swap for the NET amount; its minReturn + our quote floor both
           // derive from the user's slippage pick. Fee transfer is prepended below as usual.
           const agg = await aggregatorCalls(chain, {
-            symbol: asset.symbol,
+            asset,
             side: "buy",
             tokenIn: usdc,
             amountIn: netIn,
             account: recipient,
             slippageBps,
+            venue,
           });
           if (agg.minOut < minOut / BigInt(2)) {
             throw new Error("The price moved too much since your quote. Please try again.");
           }
           calls = agg.calls;
+          dryRun = agg.dryRun;
         } else if (route) {
           // Multi-hop exactInput(path) has no per-hop price limit; minOut guards it alone.
           calls = [approve(usdc, route.router, netIn), routeSwapCall(chain, asset.symbol, route.hops, recipient, netIn, minOut)];
@@ -266,11 +305,13 @@ export function useSwap() {
           asset,
           amountUsd,
           side: "buy",
+          ...(dryRun ? { dryRun } : {}),
         });
         setPhase("done");
         refreshBalances(); // cash + holdings refetch now
       } catch (e) {
         setError(e instanceof Error ? e.message : "The buy didn't go through.");
+        setErrorCause(e);
         setPhase("error");
       }
     },
@@ -292,11 +333,15 @@ export function useSwap() {
       recipient: string;
       /** Slippage the aggregator should enforce (Base); defaults to 1%. */
       slippageBps?: number;
+      /** BSC only: which issuer actually holds this position (a twin holding sells its own
+       *  token, not the ticker's default address). Ignored elsewhere. */
+      venue?: RwaPlatform;
     }) => {
-      const { asset, amountIn, minUsdcOut, estUsdcValue, recipient: rcpt } = params;
+      const { asset, amountIn, minUsdcOut, estUsdcValue, recipient: rcpt, venue } = params;
       const slippageBps = params.slippageBps ?? 100;
       const recipient = rcpt as `0x${string}`;
       setError(null);
+      setErrorCause(null);
       setResult(null);
       // Demo mode: simulate a successful sell without ever touching the chain.
       if (demo) {
@@ -315,9 +360,15 @@ export function useSwap() {
           asset.address && (asset.via === "aave_v3" ? Boolean(chain.routers.aavePool) : aggregator || asset.pool || route);
         if (!sellable) throw new Error(`${asset.symbol} can't be sold here yet.`);
         if (amountIn <= BigInt(0)) throw new Error("Nothing to sell.");
+        // A twin holding (e.g. NVDAon when the default is bStock's NVDAB) sells its OWN token,
+        // never the ticker's default address — resolveVenueAddress is the same rule the
+        // portfolio rows and the buy quote use, so a sell can't approve the wrong contract.
+        const venueToken = resolveVenueAddress(chain, asset, venue);
+        if (!venueToken) throw new Error(`Couldn't find ${asset.symbol} for that venue.`);
 
         const usdc = chain.usdc.address;
         let calls: Call[];
+        let dryRun: DryRun | undefined;
         if (asset.via === "aave_v3") {
           // aUSDC balance is the USDC amount (1:1, 6 dec); withdraw burns it from the caller.
           calls = [
@@ -328,17 +379,19 @@ export function useSwap() {
           ];
         } else if (aggregator) {
           const agg = await aggregatorCalls(chain, {
-            symbol: asset.symbol,
+            asset,
             side: "sell",
-            tokenIn: asset.address!,
+            tokenIn: venueToken.address,
             amountIn,
             account: recipient,
             slippageBps,
+            venue,
           });
           if (agg.minOut < minUsdcOut / BigInt(2)) {
             throw new Error("The price moved too much since your quote. Please try again.");
           }
           calls = agg.calls;
+          dryRun = agg.dryRun;
         } else if (route) {
           calls = [
             approve(asset.address!, route.router, amountIn),
@@ -368,16 +421,18 @@ export function useSwap() {
           asset,
           amountUsd: estUsdcValue,
           side: "sell",
+          ...(dryRun ? { dryRun } : {}),
         });
         setPhase("done");
         refreshBalances(); // cash + holdings refetch now
       } catch (e) {
         setError(e instanceof Error ? e.message : "The sell didn't go through.");
+        setErrorCause(e);
         setPhase("error");
       }
     },
     [activeWallet, chain, demo, refreshBalances],
   );
 
-  return { phase, error, result, busy: phase === "swapping", buy, sell, reset };
+  return { phase, error, errorCause, result, busy: phase === "swapping", buy, sell, reset };
 }

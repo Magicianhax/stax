@@ -6,10 +6,10 @@ import { Providers } from "./providers";
 import {
   SITE_URL,
   SITE_NAME,
-  SITE_DESCRIPTION,
   TWITTER_HANDLE,
   GITHUB_URL,
   AWARDS,
+  SITE_DESCRIPTION,
 } from "@/lib/seo";
 
 // Stax "Soft" theme fonts (see globals.css):
@@ -55,9 +55,13 @@ export const metadata: Metadata = {
     "invest with AI",
     "AI investing assistant",
     "buy stocks crypto",
+    "BNB Chain",
+    "tokenized stocks on BNB Chain",
+    "bStock",
+    "Ondo tokenized stocks",
+    "BNB Hack: Tokenized Stocks Edition",
     "Base",
     "Coinbase tokenized stocks",
-    "tokenized stocks on Base",
     "no seed phrase wallet",
     "gift stocks",
     "fractional shares",

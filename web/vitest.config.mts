@@ -13,6 +13,18 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
+    // Tests must never reach real services. Vercel runs this suite inside `npm run build` with the
+    // project's env loaded, so without this a test would read and write the shared production
+    // Redis (and see keys left by an earlier build). Blank values make every module take its
+    // documented in-memory / not-configured path, exactly as locally and in CI.
+    env: {
+      UPSTASH_REDIS_REST_URL: "",
+      UPSTASH_REDIS_REST_TOKEN: "",
+      KV_REST_API_URL: "",
+      KV_REST_API_TOKEN: "",
+      WEB3_API_KEY: "",
+      WEB3_SECRET_KEY: "",
+    },
   },
   resolve: {
     alias: [

@@ -1,6 +1,7 @@
-// Receive on Base — the client-safe half of docs/RECEIVE.md: the JSON shapes the Receive
-// sheet and the server share, plus the per-VM refund-address patterns the sheet validates
-// with before it asks the server. No server imports here.
+// Receive — the client-safe half of docs/RECEIVE.md: the JSON shapes the Receive sheet and
+// the server share, plus the per-VM refund-address patterns the sheet validates with before
+// it asks the server. Works on whichever chain is active (Base's USDC or BSC's USDT is the
+// destination cash asset); the shapes below don't hardcode either one. No server imports here.
 //
 // Timestamps are unix SECONDS (the app's convention, see lib/autopilot.ts).
 
@@ -54,7 +55,8 @@ export interface DepositAddressResponse {
   feeUsd: number;
   /** Open addresses accept any amount and stay valid for the same route. */
   reusable: true;
-  /** Base + USDC: this is the account itself, nothing is bridged. */
+  /** The chain's own cash asset landing on the chain itself (Base + USDC, BSC + USDT):
+   *  this is the account itself, nothing is bridged. */
   ownAddress: boolean;
 }
 

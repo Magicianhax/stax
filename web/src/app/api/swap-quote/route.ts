@@ -1,25 +1,38 @@
-// POST /api/swap-quote — KyberSwap aggregator quote (and optionally calldata) for the Pro
-// manual buy/sell panel on aggregator chains (Base).
+// POST /api/swap-quote — aggregator quote (and optionally calldata) for the Pro manual
+// buy/sell panel: KyberSwap on Base, the Binance Web3 DEX aggregator on BSC.
 //
 //   body     { symbol, side: "buy" | "sell", amountIn: string (raw units of tokenIn),
 //              sender, recipient, slippageBps?: number (default 100), build?: boolean }
-//   buy      USDC -> asset      sell  asset -> USDC
+//   buy      cash -> asset      sell  asset -> cash
 //   response { router, tokenIn, tokenOut, amountIn, amountOut, minOut, data?, expiresAt }
 //            amounts are raw-unit decimal strings; `data` (router calldata) only when build=true;
-//            `expiresAt` is unix ms — Kyber routes are good for ~10s, so the client fetches with
+//            `expiresAt` is unix ms — routes are good for ~10s, so the client fetches with
 //            build=true immediately before sending the UserOp.
-//   errors   400 unknown / coming / non-routable symbol or bad body · 404 no route · 502 Kyber down
+//   errors   400 unknown / coming / non-routable symbol, sub-$6 BSC leg, or bad body ·
+//            404 no Kyber route · 409 BSC token isn't buyable right now (Review Focus #1) ·
+//            429 per-user limit · 502 aggregator down
+//            Refusals meant for the person carry `code` ("closed" + nextOpenMs, "min_trade",
+//            "rate_limited"); the client (lib/swapQuote.ts quoteProblemText) shows its own plain
+//            words for everything uncoded instead of echoing this route's text.
 //
-// The client's sponsored UserOp is [ fee → treasury (buys), ERC20.approve(router, amountIn),
-// { to: router, data } ]. `sender` = `recipient` = the user's smart account, so the router pulls
-// tokenIn from the account and delivers tokenOut back to it. Stax's platform fee stays the
-// existing treasury transfer — Kyber's extraFee is never used.
+// The client's sponsored UserOp is [ fee → treasury (buys, Base/Mantle only — ADR-0007 makes
+// BSC fee-free), ERC20.approve(router, amountIn), { to: router, data } ]. `sender` = `recipient`
+// = the user's smart account, so the router pulls tokenIn from the account and delivers tokenOut
+// back to it. On BSC that "delivers back to it" is Binance's own msg.sender-only behaviour
+// (docs/BINANCE-WEB3.md §10) rather than an explicit recipient argument — either way the account
+// that calls the router is the one that receives the output.
 import type { NextRequest } from "next/server";
 import { isAddress } from "viem";
 import { z } from "zod";
 import { assetBySymbol, isRoutable } from "@/lib/chains";
-import { chainFromRequest } from "@/lib/server/chain";
 import { KyberError, KyberNoRoute, kyberBuild, kyberRoute } from "@/lib/server/kyber";
+import { BinanceLegError, BinanceLegRefusal, bscLegUsdValue, buildBinanceLeg, checkBscBuyable, cryptoLegUsdValue } from "@/lib/server/binanceLegs";
+import { priceAsset } from "@/lib/prices";
+import { chainFromRequest, serverClient } from "@/lib/server/chain";
+import { getBinanceWeb3 } from "@/lib/server/binance";
+import { dryRunBscSwap } from "@/lib/server/dryRun";
+import type { DryRun } from "@/lib/dryRun";
+import { resolveVenueAddress } from "@/lib/venues";
 import { requireApproved } from "@/lib/server/admin";
 import { verifyRequest } from "@/lib/server/privyAuth";
 import { rateLimit } from "@/lib/server/rateLimit";
@@ -46,6 +59,8 @@ const SwapQuoteRequestSchema = z.object({
   recipient: z.string().refine((a) => isAddress(a), "Invalid recipient."), // must equal sender (checked below)
   slippageBps: z.number().int().min(0).max(2000).optional(),
   build: z.boolean().optional(),
+  /** BSC only: which issuer to trade (bStock vs Ondo). Ignored off BSC. */
+  venue: z.enum(["bstock", "ondo"]).optional(),
 });
 
 export interface SwapQuoteResponse {
@@ -59,6 +74,13 @@ export interface SwapQuoteResponse {
   data?: `0x${string}`;
   /** Unix ms after which the client should re-quote. */
   expiresAt: number;
+  /**
+   * BSC only, present only when build=true: a Binance Transaction API dry run of this exact
+   * swap, run right before the client is expected to sign it. Never claims a check that
+   * didn't run (see lib/dryRun.ts and lib/server/dryRun.ts) — a "failed" status means the
+   * client must not send this trade.
+   */
+  dryRun?: DryRun;
 }
 
 export async function POST(req: NextRequest) {
@@ -73,7 +95,16 @@ export async function POST(req: NextRequest) {
   if (!limit.ok) return tooManyRequests(limit.retryAfter);
 
   const chain = chainFromRequest(req);
-  if (!chain.routers.kyber) return badRequest(`Aggregator quotes are not available on ${chain.name}.`);
+  // BSC quotes spend Binance's shared 5-per-window budget (security review 2026-09-25): one
+  // user may not take more than one live quote every few seconds, so a busy screen can't starve
+  // everyone else's trades. Repeat price checks are also shared for 15s in buildBinanceLeg.
+  if (chain.routers.binance) {
+    const bscLimit = await rateLimit(`swap-quote:bsc:${user.userId}`, 20, 60_000);
+    if (!bscLimit.ok) return tooManyRequests(bscLimit.retryAfter);
+  }
+  if (!chain.routers.kyber && !chain.routers.binance) {
+    return badRequest(`Aggregator quotes are not available on ${chain.name}.`);
+  }
 
   let body: z.infer<typeof SwapQuoteRequestSchema>;
   try {
@@ -89,9 +120,17 @@ export async function POST(req: NextRequest) {
   const amountIn = BigInt(body.amountIn);
   if (amountIn <= BigInt(0)) return badRequest("Amount too small.");
 
+  // `venue` only matters on BSC (resolveVenueAddress ignores it everywhere else): the asset's
+  // own address by default, the twin's when the caller names it, 400 for a venue this ticker
+  // doesn't have. Every check below — the buyable gate, the $6 floor, the quote itself — uses
+  // this RESOLVED address, never `asset.address`, so a chosen Ondo trade can't accidentally
+  // price or gate against bStock's token.
+  const resolved = resolveVenueAddress(chain, asset, body.venue);
+  if (!resolved) return badRequest(`${asset.symbol} isn't offered by ${body.venue === "ondo" ? "Ondo" : "bStock"} on ${chain.name}.`);
+
   const usdc = chain.usdc.address;
-  const tokenIn = body.side === "buy" ? usdc : asset.address;
-  const tokenOut = body.side === "buy" ? asset.address : usdc;
+  const tokenIn = body.side === "buy" ? usdc : resolved.address;
+  const tokenOut = body.side === "buy" ? resolved.address : usdc;
   const slippageBps = body.slippageBps ?? DEFAULT_SLIPPAGE_BPS;
   const sender = body.sender as `0x${string}`;
   const recipient = body.recipient as `0x${string}`;
@@ -111,6 +150,93 @@ export async function POST(req: NextRequest) {
   } else if (!warnedNoAccount.has(user.userId)) {
     warnedNoAccount.add(user.userId);
     console.warn(`[swap-quote] no smart_accounts row for user ${user.userId} on ${chain.key}; sender unverified`);
+  }
+
+  const binanceVenue = Boolean(chain.routers.binance && asset.via === "binance");
+
+  if (binanceVenue) {
+    // Review Focus #1: refuse before ever asking Binance for a quote when the issuer isn't
+    // trading this token right now (fails closed if the catalog doesn't even list it).
+    // Crypto (BTCB, ETH, BNB) has no RWA row and no market hours: it trades whenever the
+    // aggregator quotes it, so it skips the closed-market gate on both sides.
+    let usdValue: number;
+    if (asset.tier === "crypto") {
+      const priceUsd = body.side === "sell" ? (await priceAsset(chain, serverClient(chain), asset)).priceUsd : undefined;
+      usdValue = cryptoLegUsdValue(body.side, chain, amountIn, asset, priceUsd);
+    } else {
+      let tokens: Awaited<ReturnType<ReturnType<typeof getBinanceWeb3>["rwaTokens"]>>;
+      try {
+        tokens = await getBinanceWeb3().rwaTokens();
+      } catch (err) {
+        return serverError("swap-quote", err);
+      }
+      const gate = checkBscBuyable(tokens, resolved.address, asset.symbol, Date.now());
+      // `code: "closed"` only with a real reopen instant — the client re-says it in the viewer's
+      // own clock; an unlisted token (no instant) gets the client's plain generic sentence.
+      if (!gate.ok) {
+        return Response.json(
+          { error: gate.message, nextOpenMs: gate.nextOpenMs ?? null, ...(gate.nextOpenMs ? { code: "closed" } : {}) },
+          { status: 409 },
+        );
+      }
+      usdValue = bscLegUsdValue(body.side, chain, amountIn, asset, gate.row);
+    }
+
+    try {
+      const leg = await buildBinanceLeg({
+        chain,
+        symbol: asset.symbol,
+        tokenIn,
+        tokenOut,
+        amountIn,
+        taker: sender,
+        slippageBps,
+        usdValue,
+        build: Boolean(body.build),
+      });
+      // Dry run only when there is a real swap to check (build=true — right before the user
+      // signs), never on the price-only quotes TradeScreen polls every 15s: that would spend
+      // the shared 5-per-window Binance budget on a check nobody is about to act on.
+      let dryRun: DryRun | undefined;
+      if (body.build) {
+        dryRun = await dryRunBscSwap({
+          chain,
+          taker: sender,
+          router: leg.router,
+          tokenIn,
+          tokenOut,
+          amountIn,
+          swapData: leg.swapData,
+        });
+      }
+      const result: SwapQuoteResponse = {
+        router: leg.router,
+        tokenIn,
+        tokenOut,
+        amountIn: amountIn.toString(),
+        amountOut: leg.expectedOut.toString(),
+        minOut: leg.minOut.toString(),
+        ...(body.build ? { data: leg.swapData } : {}),
+        ...(dryRun ? { dryRun } : {}),
+        expiresAt: Date.now() + QUOTE_TTL_MS,
+      };
+      return Response.json(result, { headers: { "Cache-Control": "no-store" } });
+    } catch (err) {
+      if (err instanceof BinanceLegError) {
+        console.error("[swap-quote]", err.message);
+        return jsonError(502, "We couldn't get a price just now. Try again in a moment.");
+      }
+      if (err instanceof BinanceLegRefusal) {
+        // Design critique P0 #3: a "route" refusal (RFQ, unexpected router, changed amount) is
+        // real, but its words are for the log — the client shows its own plain sentence.
+        if (err.code === "route") {
+          console.error("[swap-quote]", err.message);
+          return jsonError(502, "We couldn't get a price just now. Try again in a moment.");
+        }
+        return jsonError(400, err.message, undefined, err.code ? { code: err.code } : undefined);
+      }
+      return serverError("swap-quote", err);
+    }
   }
 
   try {
@@ -148,7 +274,7 @@ export async function POST(req: NextRequest) {
     if (err instanceof KyberNoRoute) return jsonError(404, `No swap route for ${asset.symbol} on ${chain.name} right now.`);
     if (err instanceof KyberError) {
       console.error("[swap-quote]", err.message);
-      return jsonError(502, "The swap aggregator is unavailable right now. Please try again.");
+      return jsonError(502, "We couldn't get a price just now. Try again in a moment.");
     }
     return serverError("swap-quote", err);
   }

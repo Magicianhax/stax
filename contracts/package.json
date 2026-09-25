@@ -8,6 +8,9 @@
     "deploy:base": "hardhat run scripts/deploy-base.js --network base",
     "deploy:base-sepolia": "hardhat run scripts/deploy-base.js --network baseSepolia",
     "enable:base": "hardhat run scripts/enable-assets-base.js --network base",
+    "check:bsc": "node scripts/check-bsc.js",
+    "deploy:bsc": "hardhat run scripts/deploy-bsc.js --network bsc",
+    "enable:bsc": "hardhat run scripts/enable-assets-bsc.js --network bsc",
     "deploy:gift-base": "hardhat run scripts/deploy-gift-base.js --network base",
     "deploy:gift-base-sepolia": "hardhat run scripts/deploy-gift-base.js --network baseSepolia",
     "deploy:mantle": "hardhat run scripts/deploy.js --network mantle",
@@ -24,5 +27,14 @@
     "ts-node": "^10.9.2",
     "typescript": "^6.0.3",
     "viem": "^2.51.3"
+  },
+  "overrides": {
+    "undici": "^6.28.0",
+    "adm-zip": "^0.6.1",
+    "tmp": "^0.2.6",
+    "serialize-javascript": "^7.0.5",
+    "cookie": "^0.7.0",
+    "uuid": "^11.1.1",
+    "diff": "^8.0.3"
   }
 }

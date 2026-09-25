@@ -22,6 +22,64 @@ An AI agent that turns plain-language goals into risk-managed, verifiable RWA po
 
 ---
 
+## Stax on BNB Chain — the broker that knows the market is closed
+
+Built for the **BNB Hack: Tokenized Stocks Edition**. On BNB Chain (BSC mainnet, chain 56) Stax
+trades **bStock** and **Ondo** tokenized stocks with USDT, and Vera plans around three things
+only the Binance RWA Data API tells her:
+
+- **Is the real market open?** Each token carries its issuer's trading status and the US
+  session. When NVDA's issuers aren't trading, the buy button says "Market closed · opens …" in
+  your own time zone, the server refuses the quote, and Vera leaves NVDA out of a plan and tells
+  you why.
+- **How far is the token from the real share?** Every stock page shows the on-chain price next
+  to the reference share price, and the gap between them.
+- **Which issuer is closer?** 40 of the 42 stocks are listed by both bStock and Ondo. Stax shows
+  both side by side and buys the one that is trading and closest to the real share, unless you
+  pick the other.
+
+Every leg is at least $6, because Binance won't quote less than that; Vera sizes plans to fit.
+Trades go from your own smart account straight to the Binance aggregator in one sponsored,
+gasless transaction (exact-amount approval, then the swap), and there is no Stax fee on BSC.
+
+**Also on BNB Chain**
+
+- **Which is cheaper?** A board ranks the 40 stocks both companies issue by which one costs less
+  right now, and each stock page charts its price against the real share over time.
+- **Stocks and crypto together.** BTC, ETH and BNB sit next to the stocks, and Vera follows a mix
+  like "80% stocks, 20% crypto". Themed baskets: AI chips, Magnificent 7, index funds, Buffett-style,
+  pre-IPO, stocks + Bitcoin. Riskier funds (3× leveraged, pre-IPO) are labelled and left out of
+  Vera's plans unless you ask.
+- **Rules Vera runs for you** (Autopilot): invest on a schedule, buy a stock when it's cheaper than
+  the real share, keep a basket balanced, a safety switch after a market drop, keep a stocks/crypto
+  mix, and buy a few days before a company reports results. Rules only buy (ADR-0013).
+- **Checked with Binance before you sign.** Every trade from an existing account is simulated by the
+  Binance Transaction API first; a trade Binance says would fail is never sent.
+- **Savings.** Spare USDT can be lent through Venus, a BNB Chain lending app, from the Wallet screen.
+
+**Binance Web3 API, and where Stax uses it**
+
+| Module | Endpoint | Used for | Code |
+|---|---|---|---|
+| RWA Data | `/market/rwa/tokens` | catalog, market status, prices, gaps, best issuer, closed-market refusals | `web/src/lib/server/rwaCatalog.ts`, `app/api/rwa`, `app/api/swap-quote` |
+| RWA Data | `/market/rwa/underlying-profile` | company details on the stock page | `app/api/rwa/[ticker]` |
+| Market | `/market/candles` | the stock page chart | `app/api/rwa/[ticker]` |
+| Trading | `/aggregator/quote`, `/aggregator/swap` | every BSC buy and sell, manual or Vera's | `web/src/lib/server/binanceLegs.ts` |
+| Transaction | `/pre-transaction/simulate` | the check before every trade you sign | `web/src/lib/server/dryRun.ts` |
+| Wallet | `/balance/token-balances-by-address` | your BSC portfolio balances | `web/src/lib/server/bscBalances.ts` |
+| DeFi | `/defi/investment/*`, `/defi/transaction/deposit`, `/redeem` | Savings in Venus USDT | `web/src/lib/server/savings.ts` | All requests are signed on the
+server, rate-limited to Binance's budget and cached; the key never reaches the browser.
+
+**Contracts on BNB Chain** (verified on BscScan): StaxExecutor
+[`0xc8b10b6b…b133`](https://bscscan.com/address/0xc8b10b6be1ce78df53d2e3159d83dca113e4b133#code),
+InferenceVerifier [`0xc1efb92d…f4d8`](https://bscscan.com/address/0xc1efb92d4cdf6e2249038c7186ebc12cf42ef4d8#code),
+IdentityRegistry [`0xb94a10cf…b77c`](https://bscscan.com/address/0xb94a10cf369a0e83f102a6facd318497a338b77c#code),
+with Vera registered as agent 1. Manual trades and Vera's plans run directly from your account
+today; the executor path (and Autopilot on BNB Chain) switches on after its first funded test.
+
+**Try it:** [app.stax.best](https://app.stax.best) → Settings → Network → **BNB Chain**. Stax is
+in private beta; judges get in with the invite link in the submission form.
+
 ## What makes it different — verifiable AI, on-chain
 
 Most "AI × crypto" entries are a chatbot wrapped around a static product. Stax puts the AI
@@ -102,9 +160,9 @@ Mantle, added to Stax once they're buyable without paperwork.
 
 ## Revenue
 
-A flat **25 bps (0.25%)** on capital deployed (buys + AI invests), taken as a gasless USDC
+On Base and Mantle, a flat **25 bps (0.25%)** on capital deployed (buys + AI invests), taken as a gasless USDC
 transfer to the treasury batched into the same UserOp. Gas stays on us. No spreads, no
-subscription. (`web/src/lib/fees.ts`, configurable via `NEXT_PUBLIC_STAX_FEE_BPS`.)
+subscription. (`web/src/lib/fees.ts`, configurable via `NEXT_PUBLIC_STAX_FEE_BPS`.) No fee on BNB Chain during the hackathon (ADR-0007).
 
 ## Tech
 

@@ -8,7 +8,7 @@
 //                  contracts aren't deployed yet (no spinner, no jargon)
 //
 // The blockchain is the engine, never the dashboard: these render the network as a
-// plain product setting ("Base is the default. Mantle holds your earlier
+// plain product setting ("BNB Chain is the default. Mantle holds older
 // investments."), never as a wallet-style chain picker.
 import type { CSSProperties, ReactNode } from "react";
 import { CHAIN_KEYS, CHAINS, type ChainKey, type StaxChain } from "@/lib/chains";

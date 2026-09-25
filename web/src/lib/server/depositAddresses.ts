@@ -3,8 +3,9 @@ import "server-only";
 // Deposit-address store (Postgres) for "Receive from any network" — contract: docs/RECEIVE.md.
 //   getOrCreateDepositAddress()  find-or-create one OPEN Relay address per
 //                                (user, chain, originChainId, originCurrency); a repeat call returns
-//                                the stored row without calling Relay. Base + Base USDC returns the
-//                                user's own account and stores nothing.
+//                                the stored row without calling Relay. The destination chain's own
+//                                cash asset (Base + USDC, BSC + USDT) returns the user's own account
+//                                on that chain and stores nothing.
 //   findOwnedDepositAddress()    the row for an address IF it belongs to the caller (status route).
 //
 // Trust: `recipient` is never taken from the client — it is the caller's smart account
@@ -13,8 +14,7 @@ import "server-only";
 // can only shape-check it (Relay validates for real and rejects with a 4xx we turn into a 400).
 import { randomBytes } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
-import type { ChainKey } from "@/lib/chains";
-import { USDC_ADDR as BASE_USDC } from "@/lib/chains/base";
+import { getChain, type ChainKey } from "@/lib/chains";
 import { db, depositAddresses, type DepositAddressRow } from "@/lib/db";
 import {
   isValidRefundAddress,
@@ -29,7 +29,6 @@ import { fetchPrivyWallets, type PrivyWallet } from "@/lib/server/privyAuth";
 import { curatedNetworks, relay, RelayRejected, sameCurrency, type RelayClient } from "@/lib/server/relay";
 import { getSmartAccount, touchUser } from "@/lib/server/users";
 
-const BASE_CHAIN_ID = 8453;
 const MIN_USD_FLOOR = 5;
 
 /** A 4xx the client may show verbatim. */
@@ -124,7 +123,7 @@ function toResponse(row: DepositAddressRow): DepositAddressResponse {
 
 export interface DepositAddressInput {
   userId: string;
-  /** Destination chain — only 'base' bridges. */
+  /** Destination chain — only 'base' and 'bsc' bridge (each has its own smart account + cash asset). */
   chain: ChainKey;
   originChainId: number;
   originCurrency: string;
@@ -136,7 +135,10 @@ export async function getOrCreateDepositAddress(
   input: DepositAddressInput,
   deps: ReceiveDeps = defaultDeps,
 ): Promise<DepositAddressResponse> {
-  if (input.chain !== "base") throw new ReceiveInputError("Receiving from other networks works on Base.");
+  if (input.chain !== "base" && input.chain !== "bsc") {
+    throw new ReceiveInputError("Receiving from other networks works on Base or BNB Chain.");
+  }
+  const destination = getChain(input.chain);
 
   const networks = curatedNetworks(await deps.relay.getChains(), { hasApiKey: deps.hasApiKey });
   const route = findRoute(networks, input.originChainId, input.originCurrency);
@@ -147,8 +149,9 @@ export async function getOrCreateDepositAddress(
   const recipient = await recipientFor(input.userId, input.chain, deps);
   if (!recipient) throw new ReceiveInputError("Open the app once so your account exists.");
 
-  // Base USDC is the account itself — nothing to bridge, nothing to store.
-  if (network.id === BASE_CHAIN_ID && sameCurrency("evm", token.address, BASE_USDC)) {
+  // The chain's own cash asset, on the chain itself, is the account itself — nothing to
+  // bridge, nothing to store. (Base + USDC, BSC + USDT.)
+  if (network.id === destination.id && sameCurrency("evm", token.address, destination.usdc.address)) {
     return {
       address: recipient,
       originChainId: network.id,
@@ -196,8 +199,8 @@ export async function getOrCreateDepositAddress(
       amount: representativeAmount(token),
       recipient,
       refundTo,
-      destinationChainId: BASE_CHAIN_ID,
-      destinationCurrency: BASE_USDC,
+      destinationChainId: destination.id,
+      destinationCurrency: destination.usdc.address,
     });
   } catch (e) {
     // Relay's 4xx (bad refund address, blocked address, unsupported pair) is the user's to fix.
