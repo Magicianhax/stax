@@ -12,6 +12,7 @@ import { AssetTile, Icon, LogoCluster, Seal, useToast } from "@/components/desig
 import { DrawCheck, Money, Reveal } from "@/components/motion";
 import { toTile } from "@/lib/displayAssets";
 import { usd, txUrl } from "@/lib/format";
+import { showsFeeRow } from "@/lib/feeCopy";
 import { useChain } from "@/lib/chains/active";
 import { haptic } from "@/lib/haptics";
 import { iconBtn } from "./primitives";
@@ -120,7 +121,7 @@ export function ReceiptScreen({
         ]
       : [
           [words!.quantityRow, `${order.qty} ${order.ticker} @ ${usd(order.priceUsd)}`],
-          ["Fee", usd(order.feeUsd)],
+          ...(showsFeeRow(chain.key) ? ([["Fee", usd(order.feeUsd)]] as [string, React.ReactNode][]) : []),
           ["Status", status],
           ...(checked ? ([["Checked", checked]] as [string, React.ReactNode][]) : []),
           ["Paid from", "Your cash balance"],
@@ -298,12 +299,13 @@ export function ReceiptScreen({
             <Seal size={24} />
             <div>
               <div style={{ fontWeight: 700, fontSize: 15.5, letterSpacing: "-.01em" }}>Permanent record</div>
-              <div style={{ fontSize: 12.5, color: "var(--ink-2)" }}>Signed &amp; recorded on {chain.name}</div>
+              <div style={{ fontSize: 12.5, color: "var(--ink-2)" }}>{chain.contracts.deployed ? <>Signed &amp; recorded on {chain.name}</> : <>Recorded on {chain.name}</>}</div>
             </div>
           </div>
           <p style={{ fontSize: 13.5, color: "var(--ink-2)", margin: "12px 0 14px", lineHeight: 1.55 }}>
-            This can&apos;t be edited or deleted, and anyone can check it. It&apos;s how Vera&apos;s track record stays
-            honest.
+            {chain.contracts.deployed
+              ? "This can’t be edited or deleted, and anyone can check it. It’s how Vera’s track record stays honest."
+              : "This trade is on the public ledger: it can’t be edited or deleted, and anyone can check it."}
           </p>
           {explorerHref ? (
             <a

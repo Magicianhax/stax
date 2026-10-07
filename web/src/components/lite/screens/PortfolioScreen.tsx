@@ -191,10 +191,9 @@ export function PortfolioScreen({
   const donutTotal = priced.reduce((s, h) => s + (h.valueUsd ?? 0), 0) + cash + savings || 1;
   const legend = [
     ...priced.map((h, i) => ({
-      // One symbol can be two rows (bStock's and Ondo's mint): key and name them per issuer, or
-      // React gets duplicate keys and the legend shows two identical lines.
+      // One stock held from both issuers has two rows: key and name them apart.
       key: holdingKey(h),
-      name: twinSymbols.has(h.asset.symbol) && h.venue ? `${toTile(h.asset.symbol, h.asset.name).name} (${PLATFORM_LABEL[h.venue]})` : toTile(h.asset.symbol, h.asset.name).name,
+      name: toTile(h.asset.symbol, h.asset.name).name + (twinSymbols.has(h.asset.symbol) && h.venue ? ` · ${PLATFORM_LABEL[h.venue]}` : ""),
       value: h.valueUsd ?? 0,
       color: rampColor(i),
     })),

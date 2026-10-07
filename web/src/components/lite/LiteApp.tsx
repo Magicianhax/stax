@@ -29,6 +29,7 @@ import { usePortfolio } from "@/hooks/useBalances";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { useChainKey } from "@/lib/chains/active";
 import { giftContractFor } from "@/lib/gifts";
+import { toneAfterNudge } from "@/lib/nudge";
 import { haptic } from "@/lib/haptics";
 import { TabBar, type TabId, useToast } from "@/components/design";
 import { InstallPrompt } from "@/components/app/InstallPrompt";
@@ -400,14 +401,13 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
     (t: Tone) => {
       if (t === tone || rethinking) return;
       haptic.select();
-      const previous = tone;
       setTone(t);
       setRethinking(true);
       const adjustedGoal = goalRef.current + TONE_HINT[t];
-      void invest.allocate(adjustedGoal, amountRef.current, TONE_RISK[t]).then((res) => {
-        // A failed nudge leaves the old plan on screen, so the chip must stay on the tone that plan
-        // was built with (and the same nudge can be tapped again).
-        if (!res) setTone(previous);
+      // A refused or failed rebuild leaves the old plan on screen, so the chip goes back to the
+      // tone that plan was built with (the refusal itself shows on PlanScreen).
+      void toneAfterNudge(tone, t, () => invest.allocate(adjustedGoal, amountRef.current, TONE_RISK[t])).then((kept) => {
+        setTone(kept);
         setRethinking(false);
       });
     },
@@ -682,7 +682,15 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
       view = <AutopilotScreen go={go} />;
       break;
     case "goal":
-      view = <GoalScreen go={go} initialGoal={params.goal as string | undefined} initialAmount={params.amt as string | undefined} />;
+      view = (
+        <GoalScreen
+          go={go}
+          refusal={invest.refusal}
+          onDismissRefusal={invest.clearRefusal}
+          initialGoal={invest.refusal ? goal : undefined}
+          initialAmount={invest.refusal ? amount : undefined}
+        />
+      );
       break;
     case "thinking":
       view = <ThinkingScreen />;
@@ -720,13 +728,20 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
           rethinking={rethinking}
           busy={invest.busy}
           dryRuns={invest.dryRuns}
+          refusal={invest.refusal}
           onNudge={onNudge}
           onInvest={onInvest}
           basket={basketPlan?.basket}
           goal={goal || undefined}
         />
       ) : (
-        <GoalScreen go={go} />
+        <GoalScreen
+          go={go}
+          refusal={invest.refusal}
+          onDismissRefusal={invest.clearRefusal}
+          initialGoal={invest.refusal ? goal : undefined}
+          initialAmount={invest.refusal ? amount : undefined}
+        />
       );
       break;
     case "placing":

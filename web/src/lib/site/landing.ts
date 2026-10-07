@@ -161,6 +161,15 @@ export function contractLine(chains: StaxChain[]): string {
 }
 
 export const HOW_TITLE = "Four moves.";
+
+/** The real app on BNB Chain, three screens from the demo (public/brand/screens), and the way in. */
+export const PHONES: { screen: "plan" | "goal" | "market"; title: string }[] = [
+  { screen: "plan", title: "A plan from what’s open" },
+  { screen: "goal", title: "No stock at a closed-market price" },
+  { screen: "market", title: "Same stock, two prices" },
+];
+export const PHONES_NOTE = "Screens from the live demo, with made-up money.";
+export const PHONES_LINK = "Try it yourself";
 export const REFUSE_TITLE = "What Stax refuses.";
 
 export const HACK_LINE = "Stax on BNB Chain is built for the BNB Hack: Tokenized Stocks Edition.";

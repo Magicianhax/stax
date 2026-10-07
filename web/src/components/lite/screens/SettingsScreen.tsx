@@ -20,6 +20,14 @@ import { addressUrl, shortAddress, usd } from "@/lib/format";
 import { siteUrl } from "@/lib/urls";
 import { iconBtn, sectionLabel } from "./primitives";
 import { useChainReady } from "../useChainReady";
+import { useDemo, type DemoMarketMode } from "@/components/demo/DemoProvider";
+import { DEMO_CHAIN_KEYS } from "@/lib/demo/world";
+
+const DEMO_MARKETS: { mode: DemoMarketMode; label: string }[] = [
+  { mode: "live", label: "Your clock" },
+  { mode: "open", label: "Open" },
+  { mode: "closed", label: "Closed" },
+];
 
 // ── Toggle ────────────────────────────────────────────────────────────────────
 function Toggle({ on }: { on: boolean }) {
@@ -129,6 +137,7 @@ export function SettingsScreen({
   const { address } = useSmartAccount();
   const { colorMode, toggle } = useTheme();
   const { chain, ready, investable } = useChainReady();
+  const demo = useDemo();
   const { on: hapticsOn, supported: hapticsSupported, toggle: toggleHaptics } = useHaptics();
   // Vera's identity + headline numbers (both REAL, from the chain).
   const { data: veraIdentity } = useAgentIdentity();
@@ -311,7 +320,7 @@ export function SettingsScreen({
       <div style={{ padding: "24px 22px 0" }}>
         <div style={sectionLabel}>Network</div>
         <div className="card" style={{ padding: 16 }}>
-          <NetworkSwitch />
+          <NetworkSwitch keys={demo ? DEMO_CHAIN_KEYS : undefined} />
           <p style={{ margin: "12px 2px 0", fontSize: 13, lineHeight: 1.5, color: "var(--ink-2)" }}>
             BNB Chain is the default, with stocks from bStock and Ondo. Base has gifts and your earlier Base investments. Mantle holds older ones.
             {!investable && (
@@ -323,6 +332,44 @@ export function SettingsScreen({
           </p>
         </div>
       </div>
+
+      {/* Demo only: pin the US market open or shut, so both stories can be tried at any hour. */}
+      {demo?.rwa && (
+        <div style={{ padding: "24px 22px 0" }}>
+          <div style={sectionLabel}>Demo market</div>
+          <div className="card" style={{ padding: 16 }}>
+            <div className="seg" role="radiogroup" aria-label="Demo market">
+              <span
+                className="seg-thumb"
+                style={{
+                  width: "calc((100% - 8px) / 3)",
+                  left: 4,
+                  transform: `translateX(calc(${DEMO_MARKETS.findIndex((m) => m.mode === demo.marketMode)} * 100%))`,
+                }}
+              />
+              {DEMO_MARKETS.map((m) => (
+                <button
+                  key={m.mode}
+                  role="radio"
+                  aria-checked={m.mode === demo.marketMode}
+                  onClick={() => {
+                    haptic.select();
+                    demo.setMarketMode(m.mode);
+                  }}
+                  className={`seg-item ${m.mode === demo.marketMode ? "is-on" : ""}`}
+                  style={{ height: 44 }}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            <p style={{ margin: "12px 2px 0", fontSize: 13, lineHeight: 1.5, color: "var(--ink-2)" }}>
+              This demo uses no money and no login. “Your clock” follows the real US market hours where you are. Pick Open to buy a
+              stock, or Closed to watch Vera refuse to buy one at a closed-market price.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Appearance */}
       <div style={{ padding: "24px 22px 0" }}>

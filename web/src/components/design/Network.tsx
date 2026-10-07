@@ -49,10 +49,12 @@ export function NetworkChip({ chain, onClick }: { chain: StaxChain; onClick: () 
 
 // Settings control. Reuses the app's sliding-thumb segmented control so it
 // feels like the buy/sell toggle, with each network's mark beside its name.
-export function NetworkSwitch({ onSwitched }: { onSwitched?: (chain: StaxChain) => void }) {
+export function NetworkSwitch({ onSwitched, keys }: { onSwitched?: (chain: StaxChain) => void; keys?: ChainKey[] }) {
   const [key, setKey] = useChainKey();
   const { notify } = useToast();
-  const idx = Math.max(0, CHAIN_KEYS.indexOf(key));
+  // The demo offers fewer networks than the app (it has no Mantle world).
+  const options = keys ?? CHAIN_KEYS;
+  const idx = Math.max(0, options.indexOf(key));
 
   const choose = (k: ChainKey) => {
     if (k === key) return;
@@ -70,12 +72,12 @@ export function NetworkSwitch({ onSwitched }: { onSwitched?: (chain: StaxChain) 
       <span
         className="seg-thumb"
         style={{
-          width: `calc((100% - 8px) / ${CHAIN_KEYS.length})`,
+          width: `calc((100% - 8px) / ${options.length})`,
           left: 4,
           transform: `translateX(calc(${idx} * 100%))`,
         }}
       />
-      {CHAIN_KEYS.map((k) => {
+      {options.map((k) => {
         const c = CHAINS[k];
         const on = k === key;
         return (

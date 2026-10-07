@@ -7,6 +7,7 @@
 import { parseUnits } from "viem";
 import { type ChainKey, getChain, type Asset } from "@/lib/chains";
 import { displayFor } from "@/lib/displayAssets";
+import { displayForDemo } from "@/lib/demo/bscRef";
 import type { Holding } from "@/hooks/useBalances";
 import type { ActivityRow, VeraRecord } from "@/lib/onchainHistory";
 import type { AllocateResult, InvestSuccess } from "@/lib/invest-types";
@@ -18,6 +19,7 @@ import type { PricesResponse } from "@/hooks/usePrices";
 import type { AssetPrice } from "@/lib/prices";
 import type { WalletTx } from "@/lib/walletTx";
 import { DEMO_NOW } from "@/lib/demoSeries";
+import { hx } from "@/lib/demo/hex";
 
 const DEMO_CHAIN = getChain("base");
 const DAY = 86_400;
@@ -94,10 +96,8 @@ export const DEMO_PORTFOLIO = {
   totalUsd: DEMO_INVESTED + DEMO_USDC.value,
 };
 
-const hx = (tag: string): `0x${string}` => ("0x" + tag.repeat(32).slice(0, 64)) as `0x${string}`;
-
 // Three placed plans, newest first. Timestamps count back from the fixed demo
-// "now" (Mon 7 Sep 2026 14:00 UTC) so Activity groups and Wallet dates are stable.
+// "now" (Mon 5 Oct 2026 14:00 UTC) so Activity groups and Wallet dates are stable.
 const PLAN_A = ["NVDA", "AAPL", "GOOGL", "aUSDC"];
 const PLAN_B = ["AAPL", "GOOGL", "aUSDC"];
 // Fills per demo plan (dollars in → units out at the reference prices), so the
@@ -192,6 +192,28 @@ export function demoSuccess(alloc: Allocation, amountUsd: number): InvestSuccess
 // performance chips + sparklines work offline. Demo numbers, demo screens only.
 
 export function demoSeedBaskets(chain: ChainKey): Basket[] {
+  if (chain === "bsc") {
+    return [
+      {
+        id: "p_demo_first_bsc",
+        chain: "bsc",
+        name: "My first Stax",
+        tagline: "A balanced mix that grows over time and doesn't lean on one company.",
+        icon: "basket",
+        color: "#57a07e",
+        items: [
+          { symbol: "SPY", weightPct: 30, reason: "One fund that holds the 500 biggest US companies." },
+          { symbol: "NVDA", weightPct: 25, reason: "Makes the chips most of today's AI runs on." },
+          { symbol: "AAPL", weightPct: 25, reason: "A steady, profitable giant." },
+          { symbol: "GOOGL", weightPct: 20, reason: "Search, YouTube and cloud in one company." },
+        ],
+        riskScore: 5000, // rehydrated on read by useBaskets
+        author: "you",
+        createdAt: Math.floor(Date.now() / 1000) - 12 * 86_400,
+        source: { goal: "Grow $60, mostly big names, nothing fancy" },
+      },
+    ];
+  }
   if (chain !== "base") return [];
   const items = [
     { symbol: "NVDA", weightPct: 30, reason: "Leads the AI boom." },
@@ -220,7 +242,7 @@ const DEMO_RANGE_SCALE: Record<MarketRange, number> = { "1D": 1, "1W": 2.4, "1M"
 
 /** Demo price history for one symbol + range, shaped from its display sparkline. */
 export function demoHistory(symbol: string, range: MarketRange): MarketHistoryResponse {
-  const d = displayFor(symbol);
+  const d = displayForDemo(symbol);
   const changePct = Number((d.day * DEMO_RANGE_SCALE[range]).toFixed(2));
   const base = d.price ?? 1;
   const first = d.spark[0] || 1;

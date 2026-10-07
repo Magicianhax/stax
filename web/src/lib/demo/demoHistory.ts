@@ -8,6 +8,7 @@
 // seeded price appreciation.
 import type { MarketRange } from "@/hooks/useMarket";
 import { DEMO_NOW, priceSeries } from "@/lib/demoSeries";
+import { hx } from "@/lib/demo/hex";
 import { DEMO_PORTFOLIO, DEMO_USDC } from "@/lib/demo/demoData";
 import {
   buildPositions,
@@ -21,14 +22,14 @@ import {
 } from "@/lib/positions";
 
 const DAY = 86_400;
-const hx = (tag: string): string => "0x" + tag.repeat(32).slice(0, 64);
+export { hx };
 
 /** Unix seconds `days` before the demo "now", at `hour:minute` UTC (mirrors demoData's `ago`). */
-function ago(days: number, hour = 14, minute = 0): number {
+export function ago(days: number, hour = 14, minute = 0): number {
   return Math.floor(DEMO_NOW / 1000) - days * DAY + (hour - 14) * 3600 + minute * 60;
 }
 
-interface SeedLot {
+export interface SeedLot {
   days: number;
   /** Share of today's quantity bought in this lot. Shares per symbol sum to 1. */
   frac: number;
@@ -76,35 +77,6 @@ const SEED: Record<string, SeedLot[]> = {
 /** Coverage well before the oldest lot, so every range reads as fully covered. */
 export const DEMO_COVERAGE_FROM = ago(400);
 
-let tradesCache: Trade[] | null = null;
-
-/** The seeded ledger: one buy per seed lot, costed at that week's 1Y price. */
-export function demoTrades(): Trade[] {
-  if (tradesCache) return tradesCache;
-  const out: Trade[] = [];
-  for (const h of DEMO_PORTFOLIO.holdings) {
-    const seeds = SEED[h.asset.symbol];
-    if (!seeds) continue;
-    const year = priceSeries(h.asset.symbol, "1Y");
-    for (const s of seeds) {
-      const at = ago(s.days, s.hour ?? 14, s.minute ?? 0);
-      const qty = h.qty * s.frac;
-      const price = interpolate(year, at * 1000) ?? h.priceUsd ?? 1;
-      out.push({
-        symbol: h.asset.symbol,
-        txHash: s.txHash,
-        at,
-        qty,
-        usdc: Math.round(qty * price * 100) / 100,
-        kind: s.kind,
-        side: "buy",
-      });
-    }
-  }
-  tradesCache = out.sort((a, b) => a.at - b.at);
-  return tradesCache;
-}
-
 export interface DemoHistory {
   positions: PositionHistory[];
   series: SeriesPoint[];
@@ -113,15 +85,68 @@ export interface DemoHistory {
   cashUsd: number;
 }
 
-const priceNow = new Map(DEMO_PORTFOLIO.holdings.map((h) => [h.asset.symbol, h.priceUsd]));
+type HoldingLike = { asset: { symbol: string }; qty: number; priceUsd?: number };
 
-/** Positions + the account value line for `range`, deterministic. */
-export function demoPortfolioHistory(range: MarketRange): DemoHistory {
-  const trades = demoTrades();
+/**
+ * The seeded ledger for `holdings`: one buy per seed lot, costed at that week's 1Y price.
+ * Several holding rows of one ticker (a twin: the same stock from both issuers) share that
+ * ticker's lots, split by their combined quantity.
+ */
+export function seededTrades(holdings: readonly HoldingLike[], seeds: Record<string, SeedLot[]>): Trade[] {
+  const qtyBySymbol = new Map<string, number>();
+  const priceBySymbol = new Map<string, number | undefined>();
+  for (const h of holdings) {
+    qtyBySymbol.set(h.asset.symbol, (qtyBySymbol.get(h.asset.symbol) ?? 0) + h.qty);
+    if (!priceBySymbol.has(h.asset.symbol)) priceBySymbol.set(h.asset.symbol, h.priceUsd);
+  }
+  const out: Trade[] = [];
+  for (const [symbol, qty] of qtyBySymbol) {
+    const lots = seeds[symbol];
+    if (!lots) continue;
+    const year = priceSeries(symbol, "1Y");
+    for (const s of lots) {
+      const at = ago(s.days, s.hour ?? 14, s.minute ?? 0);
+      const lotQty = qty * s.frac;
+      const price = interpolate(year, at * 1000) ?? priceBySymbol.get(symbol) ?? 1;
+      out.push({
+        symbol,
+        txHash: s.txHash,
+        at,
+        qty: lotQty,
+        usdc: Math.round(lotQty * price * 100) / 100,
+        kind: s.kind,
+        side: "buy",
+      });
+    }
+  }
+  return out.sort((a, b) => a.at - b.at);
+}
+
+/**
+ * Positions + the account value line for `range`, deterministic, for a demo account of
+ * `holdings` and `cashUsd` whose past is `trades` (the seeded ledger, plus whatever the visitor
+ * did in this session).
+ */
+export function demoHistoryFor(trades: Trade[], holdings: readonly HoldingLike[], cashUsd: number, range: MarketRange): DemoHistory {
+  const priceNow = new Map<string, number | undefined>();
+  for (const h of holdings) if (!priceNow.has(h.asset.symbol)) priceNow.set(h.asset.symbol, h.priceUsd);
   const positions = buildPositions(trades, (s) => priceNow.get(s));
   const symbols = [...new Set(trades.map((t) => t.symbol))];
   const perSymbol = new Map(symbols.map((s) => [s, priceSeries(s, range)]));
   const times = perSymbol.get(symbols[0])?.map((p) => p.t) ?? [];
-  const series = valueSeries(times, trades, (s, t) => interpolate(perSymbol.get(s) ?? [], t), DEMO_USDC.value);
-  return { positions, series, coverageFrom: DEMO_COVERAGE_FROM, totals: totalsOf(positions), cashUsd: DEMO_USDC.value };
+  const series = valueSeries(times, trades, (s, t) => interpolate(perSymbol.get(s) ?? [], t), cashUsd);
+  return { positions, series, coverageFrom: DEMO_COVERAGE_FROM, totals: totalsOf(positions), cashUsd };
+}
+
+let tradesCache: Trade[] | null = null;
+
+/** The Base demo's seeded ledger. */
+export function demoTrades(): Trade[] {
+  if (!tradesCache) tradesCache = seededTrades(DEMO_PORTFOLIO.holdings, SEED);
+  return tradesCache;
+}
+
+/** Positions + the account value line for `range`, deterministic (the Base demo). */
+export function demoPortfolioHistory(range: MarketRange): DemoHistory {
+  return demoHistoryFor(demoTrades(), DEMO_PORTFOLIO.holdings, DEMO_USDC.value, range);
 }

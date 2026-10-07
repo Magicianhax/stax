@@ -173,7 +173,8 @@ export function PlacingScreen({
             color: "var(--ink-2)",
           }}
         >
-          <Seal size={18} /> No network cost · signed &amp; recorded on {chain.name}
+          {/* "Signed & recorded" is only true on the executor path; BNB Chain trades go straight from the account. */}
+          <Seal size={18} /> No network cost · {chain.contracts.deployed ? <>signed &amp; recorded on {chain.name}</> : "checked by Binance first"}
         </div>
       </div>
     </div>

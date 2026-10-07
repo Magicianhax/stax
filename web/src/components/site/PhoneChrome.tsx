@@ -1,25 +1,24 @@
 // PhoneChrome — a static phone frame around a real screenshot of the app.
 //
-// The screenshots in public/brand/screens/ are captured from /demo at 390×844
-// (2× → 780×1688) with the app's own 52px status-bar padding, so the island and
-// clock drawn here sit over the aurora, never over content. No live app is
+// The screenshots in public/brand/screens/ are captured from /demo (the BNB Chain demo, demo data,
+// light theme) at 390×844 (2× → 780×1688) in the New York time zone, with 52px of status-bar
+// padding forced on, so the island and clock drawn here sit over the aurora, never over content.
+// "goal" is the closed-market capture (Vera saying no), the rest are taken with the market pinned
+// open (/demo?market=open) so the words never depend on the hour they were taken. No live app is
 // mounted on the landing; this is an image in a bezel, nothing more.
 import Image from "next/image";
 import s from "./PhoneChrome.module.css";
 
-export type PhoneScreen = "home" | "goal" | "plan" | "success" | "baskets" | "market";
+export type PhoneScreen = "goal" | "plan" | "market";
 
 const SCREEN_W = 390;
 const SCREEN_H = 844;
 
 /** Alt text describes what the screen shows, in the product's own words. */
 const ALT: Record<PhoneScreen, string> = {
-  home: "The Stax home screen: total balance, an “Invest with Vera” button, a row of baskets, and the stocks you own.",
-  goal: "The goal screen: a $200 amount and the goal “Grow $200, mostly big tech, keep some safe” typed in plain words, with a “Build my plan” button.",
-  plan: "Vera's plan: a balanced mix with Nvidia, Apple, Google and Safe Dollars, a one-line reason for each, and an “Invest $200” button.",
-  success: "The success screen: “You're invested.” with the four holdings now owned and a note that Vera recorded the plan on-chain.",
-  baskets: "The Baskets screen: ready-made mixes like Big Tech and AI & Chips, each with its weight bar and risk word.",
-  market: "The Market screen: Nvidia, Google, Apple, Meta and SpaceX with live prices and a search field.",
+  goal: "The goal screen after Vera said no: a note says the US stock market is closed and when it opens in your own time, with the $180 amount and the goal you typed kept in place.",
+  plan: "Vera's plan: a mix of the S&P 500, Apple, Microsoft and Google, each with the company it is bought from, how its price compares with the real share, and a one-line reason.",
+  market: "The Market screen: a line saying the US market is open and when it closes in your own time, then Nvidia, Tesla, Microsoft, Meta and Google with prices and what you own.",
 };
 
 export function PhoneChrome({

@@ -6,6 +6,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useChain } from "@/lib/chains/active";
 import { authedFetch } from "@/lib/authedFetch";
+import { useDemo } from "@/components/demo/DemoProvider";
 import type { EarningsInfo, EarningsMap } from "@/lib/earnings";
 
 async function fetchEarnings(): Promise<EarningsMap> {
@@ -18,11 +19,14 @@ async function fetchEarnings(): Promise<EarningsMap> {
 /** One stock's next earnings, or undefined while loading, off BSC, or when it has none (ETFs, crypto). */
 export function useEarnings(symbol: string | undefined): EarningsInfo | undefined {
   const chain = useChain();
+  const demo = useDemo();
   const { data } = useQuery({
     queryKey: ["earnings", chain.key],
     queryFn: fetchEarnings,
-    enabled: chain.key === "bsc",
+    enabled: chain.key === "bsc" && !demo,
     staleTime: 60 * 60_000,
   });
+  // Demo: invented dates, relative to the demo's own clock (lib/demo/bscMarket.ts).
+  if (demo) return symbol ? demo.earnings?.[symbol] : undefined;
   return symbol ? data?.[symbol] : undefined;
 }

@@ -27,10 +27,12 @@ import { planCheckFailedMessage, planDryRunView } from "@/lib/planDryRuns";
 import { gapToRealShare, planOpenIssuerNote, trustLine } from "@/lib/plainCopy";
 import { platformLabel } from "@/lib/spread";
 import { usMarketClock } from "@/lib/marketHours";
+import { useMarketNow } from "@/hooks/useMarketNow";
 import { useRwa } from "@/hooks/useRwa";
 import type { DryRun } from "@/lib/dryRun";
 import type { AllocateResult } from "@/lib/invest-types";
 import { iconBtn, Spinner, ThinkingDots, YieldTag } from "./primitives";
+import { RefusalNote } from "./RefusalNote";
 import { useChainReady } from "../useChainReady";
 
 type Tone = "balanced" | "safer" | "bolder" | "simple";
@@ -64,6 +66,7 @@ export function PlanScreen({
   basket,
   goal,
   dryRuns,
+  refusal = null,
 }: {
   go: (screen: string, params?: Record<string, unknown>) => void;
   allocation: AllocateResult;
@@ -84,6 +87,12 @@ export function PlanScreen({
    * on every hold. Undefined before the first hold renders exactly what this screen already did.
    */
   dryRuns?: DryRun[];
+  /**
+   * Why the server turned down the last nudge (market closed since this plan was built, under $6
+   * a stock). The plan on screen is the previous one, still valid, so this is a calm note rather
+   * than the red error banner.
+   */
+  refusal?: string | null;
 }) {
   const risk = riskMeta(allocation.riskScore);
   const { chain, ready: executorPath, investable } = useChainReady();
@@ -100,7 +109,8 @@ export function PlanScreen({
   const venueFor = (symbol: string, platform: "bstock" | "ondo" | undefined) =>
     platform ? rwa?.tickers.find((t) => t.ticker === symbol)?.venues.find((v) => v.platform === platform) : undefined;
   // Read once per mount: this screen is only ever reached by navigation, never server-rendered.
-  const [usMarketOpen] = useState(() => usMarketClock(Date.now()).buyable);
+  const marketNow = useMarketNow();
+  const [usMarketOpen] = useState(() => usMarketClock(marketNow()).buyable);
   const openIssuerNote = bsc ? planOpenIssuerNote(usMarketOpen, allocation.allocations.map((a) => a.venue)) : "";
   const { save } = useBaskets();
   const { notify } = useToast();
@@ -202,6 +212,12 @@ export function PlanScreen({
         <div style={{ ...recompose, flexShrink: 0, display: "flex", gap: 7, alignItems: "flex-start", padding: "10px 22px 0 68px", fontSize: 13, lineHeight: 1.45, color: "var(--ink-2)" }}>
           <Icon name="clock" size={14} style={{ flex: "none", marginTop: 2 }} />
           <span>{openIssuerNote}</span>
+        </div>
+      )}
+
+      {refusal && (
+        <div style={{ padding: "0 22px" }}>
+          <RefusalNote marginTop={14}>{refusal}</RefusalNote>
         </div>
       )}
 
@@ -383,8 +399,8 @@ export function PlanScreen({
           position: "sticky",
           bottom: 0,
           marginTop: "auto",
-          padding: "16px 22px calc(18px + env(safe-area-inset-bottom))",
-          background: "linear-gradient(to top, var(--paper), var(--paper) 62%, transparent)",
+          padding: "22px 22px calc(18px + env(safe-area-inset-bottom))",
+          background: "linear-gradient(to top, var(--paper), var(--paper) calc(100% - 22px), transparent)",
         }}
       >
         {/* After a failed check: which part, and the two ways forward (P0 #1). Hold stays live. */}

@@ -14,7 +14,10 @@
 // Chain screens exist; the words come from lib/site/landing.
 import { useRef } from "react";
 import { BadgeCheck, CalendarClock, MessageSquareText, ShieldCheck, type LucideIcon } from "lucide-react";
-import { HOW_TITLE, MOVES } from "@/lib/site/landing";
+import { HOW_TITLE, MOVES, PHONES, PHONES_LINK, PHONES_NOTE } from "@/lib/site/landing";
+import { siteUrl } from "@/lib/urls";
+import { PhoneChrome } from "../PhoneChrome";
+import { TiltCard } from "../ui/TiltCard";
 import { gsap, useGSAP, MOTION_OK } from "../ui/gsap";
 import { Reveal } from "../ui/Reveal";
 import l from "../layout.module.css";
@@ -113,6 +116,24 @@ export function HowItWorks() {
             })}
           </Reveal>
         </div>
+
+        {/* The real app on BNB Chain: three screens from the demo, and the way into it. */}
+        <Reveal as="ul" className={`${l.grid} ${s.phones}`} stagger={0.08}>
+          {PHONES.map((p) => (
+            <li key={p.screen} className={s.phoneItem}>
+              <TiltCard className={s.tilt} max={3}>
+                <PhoneChrome screen={p.screen} className={s.phone} />
+              </TiltCard>
+              <h3 className={s.phoneTitle}>{p.title}</h3>
+            </li>
+          ))}
+        </Reveal>
+        <p className={s.phonesNote}>
+          {PHONES_NOTE}{" "}
+          <a className={s.phonesLink} href={siteUrl("/demo")}>
+            {PHONES_LINK}
+          </a>
+        </p>
       </div>
     </section>
   );

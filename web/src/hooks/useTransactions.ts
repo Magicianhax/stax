@@ -31,6 +31,6 @@ export function useTransactions(address?: string) {
     refetchOnReconnect: true,
     queryFn: () => fetchTransactions(address as string),
   });
-  if (demo) return { ...query, data: [] as WalletTx[], isLoading: false, isPending: false } as typeof query;
+  if (demo) return { ...query, data: demo.transactions as WalletTx[], isLoading: false, isPending: false } as typeof query;
   return query;
 }

@@ -10,7 +10,6 @@ import { authedFetch } from "@/lib/authedFetch";
 import { useDemo } from "@/components/demo/DemoProvider";
 import type { MarketRange } from "@/hooks/useMarket";
 import type { HistoryTotals, PositionHistory, SeriesPoint } from "@/lib/positions";
-import { demoPortfolioHistory } from "@/lib/demo/demoHistory";
 
 export type { PositionHistory, HistoryTotals, SeriesPoint };
 
@@ -68,7 +67,7 @@ export function usePortfolioHistory(address: string | undefined, range: MarketRa
     queryFn: () => fetchHistory(address as string, range),
   });
   if (demo) {
-    return { ...query, data: demoPortfolioHistory(range), isLoading: false, isPending: false } as typeof query;
+    return { ...query, data: demo.history(range), isLoading: false, isPending: false } as typeof query;
   }
   return query;
 }

@@ -42,7 +42,8 @@ const BPS = BigInt(10000);
 const DEADLINE_SECONDS = 15 * 60;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-// Canned receipt hash for demo-mode buys/sells (never broadcast on-chain).
+// Canned receipt hash for demo-mode buys/sells on Base (never broadcast on-chain). On BNB Chain the
+// demo records the trade in its session and uses the hash that returns.
 const DEMO_SWAP_TX = ("0x" + "5a7c2b41".repeat(32).slice(0, 64)) as `0x${string}`;
 
 const approve = (token: `0x${string}`, spender: `0x${string}`, amount: bigint): Call => ({
@@ -224,6 +225,22 @@ export function useSwap() {
       if (demo) {
         setPhase("swapping");
         await sleep(1400);
+        if (demo.rwa) {
+          // BNB Chain demo: the same check and the same refusals as a real quote, then the trade
+          // is kept in this session only (Home, Owned and the wallet show it).
+          try {
+            const q = demo.quote({ asset, side: "buy", amountIn: usdToRaw(chain, amountUsd), venue });
+            const qty = Number(q.amountOut) / 10 ** (asset.decimals ?? 18);
+            const txHash = demo.recordTrade({ side: "buy", symbol: asset.symbol, venue, usd: amountUsd, qty });
+            setResult({ txHash, asset, amountUsd, side: "buy", dryRun: q.dryRun });
+            setPhase("done");
+          } catch (e) {
+            setError(e instanceof Error ? e.message : "The buy didn't go through.");
+            setErrorCause(e);
+            setPhase("error");
+          }
+          return;
+        }
         setResult({ txHash: DEMO_SWAP_TX, asset, amountUsd, side: "buy" });
         setPhase("done");
         return;
@@ -352,6 +369,21 @@ export function useSwap() {
       if (demo) {
         setPhase("swapping");
         await sleep(1400);
+        if (demo.rwa) {
+          try {
+            const q = demo.quote({ asset, side: "sell", amountIn, venue });
+            const usd = Number(q.amountOut) / 1e18;
+            const qty = Number(amountIn) / 10 ** (asset.decimals ?? 18);
+            const txHash = demo.recordTrade({ side: "sell", symbol: asset.symbol, venue, usd, qty });
+            setResult({ txHash, asset, amountUsd: usd, side: "sell", dryRun: q.dryRun });
+            setPhase("done");
+          } catch (e) {
+            setError(e instanceof Error ? e.message : "The sell didn't go through.");
+            setErrorCause(e);
+            setPhase("error");
+          }
+          return;
+        }
         setResult({ txHash: DEMO_SWAP_TX, asset, amountUsd: estUsdcValue, side: "sell" });
         setPhase("done");
         return;

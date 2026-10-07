@@ -15,6 +15,7 @@ import { useEffect, useState } from "react";
 import { usePortfolio, type Holding } from "@/hooks/useBalances";
 import { useActivity } from "@/hooks/useActivity";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
+import { useMarketNow } from "@/hooks/useMarketNow";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { Icon, HoldingRow, LogoCluster, SectionTitle, Sparkline, VerifiedBadge, NetworkChip } from "@/components/design";
 import { Money, Reveal } from "@/components/motion";
@@ -41,12 +42,13 @@ const TODAY_LINE_TICK_MS = 60_000;
  *  MarketScreen's `useBscMarketClock` uses) so the server and first client paint agree. */
 function useTodayLine(): string | null {
   const [line, setLine] = useState<string | null>(null);
+  const now = useMarketNow();
   useEffect(() => {
-    const tick = () => setLine(todayMarketLine(Date.now()));
+    const tick = () => setLine(todayMarketLine(now()));
     tick();
     const id = setInterval(tick, TODAY_LINE_TICK_MS);
     return () => clearInterval(id);
-  }, []);
+  }, [now]);
   return line;
 }
 
