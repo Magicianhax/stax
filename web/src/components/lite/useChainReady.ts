@@ -12,7 +12,9 @@ import { useDemo } from "@/components/demo/DemoProvider";
 export function useChainReady() {
   const chain = useChain();
   const demo = useDemo();
-  const ready = chain.contracts.deployed || demo !== null;
+  // The BNB Chain demo mirrors the real BNB Chain app, which has no executor yet (investing goes
+  // straight through the Binance router), so it is not "ready" in this sense; the Base demo is.
+  const ready = chain.contracts.deployed || (demo !== null && !demo.rwa);
   // Vera plans and basket buys. BSC has no executor yet (ADR-0005) but invests through the
   // Binance aggregator straight from the smart account, so it is investable without one.
   // `ready` stays executor-only for the surfaces that truly need it (autopilot, record).

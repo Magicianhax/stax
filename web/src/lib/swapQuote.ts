@@ -42,6 +42,8 @@ export interface SwapQuoteArgs {
   recipient: `0x${string}`;
   slippageBps?: number;
   build?: boolean;
+  /** With build=true: the floor the person reviewed, raw units of the output token (lib/slippage.ts). */
+  reviewedMinOut?: bigint;
   /** BSC only: which issuer to trade. Ignored (and safe to omit) on every other chain. */
   venue?: RwaPlatform;
 }
@@ -78,8 +80,8 @@ export function swapQuoteErrorMessage(json: unknown, fallback = "Couldn't get a 
  * and the per-user price-check limit. Anything without a code is an internal or upstream
  * problem and is never shown verbatim.
  */
-export type SwapQuoteErrorCode = "closed" | "min_trade" | "rate_limited";
-const CODES: ReadonlySet<string> = new Set<SwapQuoteErrorCode>(["closed", "min_trade", "rate_limited"]);
+export type SwapQuoteErrorCode = "closed" | "min_trade" | "rate_limited" | "price_moved";
+const CODES: ReadonlySet<string> = new Set<SwapQuoteErrorCode>(["closed", "min_trade", "rate_limited", "price_moved"]);
 
 export class SwapQuoteError extends Error {
   constructor(
@@ -122,7 +124,7 @@ export interface QuoteProblemContext {
 export function quoteProblemText(error: unknown, ctx: QuoteProblemContext): string | undefined {
   if (!(error instanceof Error)) return undefined;
   if (error instanceof SwapQuoteError) {
-    if (error.code === "min_trade") return error.message;
+    if (error.code === "min_trade" || error.code === "price_moved") return error.message;
     if (error.code === "rate_limited") return "Too many price checks — wait a few seconds";
     if (error.code === "closed" && typeof error.nextOpenMs === "number") {
       return `${ctx.companyName} is closed right now. It ${formatOpensLocal(error.nextOpenMs, ctx.nowMs)}.`;
@@ -153,14 +155,30 @@ export function quoteErrorMessage(error: unknown): string | undefined {
  */
 export function assertDryRunAllowsSend(dryRun: DryRun | undefined): void {
   if (dryRun?.status !== "failed") return;
-  throw new Error(dryRun.reason ?? "Binance checked this trade and it wouldn't go through right now.");
+  throw new DryRunRefusal(dryRun.reason ?? "Binance checked this trade and it wouldn't go through right now.");
+}
+
+/**
+ * Binance's check said this trade would revert, so nothing was sent. Typed so Trade shows it as
+ * a normal refusal the person can act on, not the red "your trade failed" banner reserved for a
+ * submitted trade that reverted.
+ */
+export class DryRunRefusal extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DryRunRefusal";
+  }
 }
 
 export async function fetchSwapQuote(args: SwapQuoteArgs): Promise<SwapQuote> {
   const res = await authedFetch("/api/swap-quote", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ ...args, amountIn: args.amountIn.toString() }),
+    body: JSON.stringify({
+      ...args,
+      amountIn: args.amountIn.toString(),
+      reviewedMinOut: args.reviewedMinOut?.toString(),
+    }),
   });
   const json = (await res.json().catch(() => null)) as (SwapQuoteWire & { error?: string }) | null;
   if (!res.ok || !json) {

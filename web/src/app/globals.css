@@ -462,6 +462,10 @@
 .stax .chip:active {
   transform: scale(0.96);
 }
+.stax .chip:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
 .stax .chip.is-on {
   background: var(--primary);
   color: var(--primary-ink);

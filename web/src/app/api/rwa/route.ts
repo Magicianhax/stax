@@ -26,10 +26,11 @@ export async function GET(req: NextRequest) {
       { tickers, asOf },
       {
         headers: {
-          // Edge/browser cache 20s, allow 60s stale-while-revalidate — a bit shorter than the
-          // 45s Binance-facing cache so a client refetches before the underlying data can turn
-          // over twice.
-          "Cache-Control": "public, s-maxage=20, stale-while-revalidate=60",
+          // Edge/browser cache 15s, allow 15s stale-while-revalidate. The catalog's open/closed state
+          // follows the clock (rebuilt on every read, lib/server/rwaCatalog.ts), so this is also how
+          // long a row can keep saying "Open now" past the 16:00 close. The Binance-facing 45s cache
+          // sits below, so a shorter edge window costs function calls, not Binance calls.
+          "Cache-Control": "public, s-maxage=15, stale-while-revalidate=15",
         },
       },
     );

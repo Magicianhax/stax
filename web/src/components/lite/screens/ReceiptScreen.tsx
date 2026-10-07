@@ -12,11 +12,14 @@ import { AssetTile, Icon, LogoCluster, Seal, useToast } from "@/components/desig
 import { DrawCheck, Money, Reveal } from "@/components/motion";
 import { toTile } from "@/lib/displayAssets";
 import { usd, txUrl } from "@/lib/format";
+import { showsFeeRow } from "@/lib/feeCopy";
 import { useChain } from "@/lib/chains/active";
 import { haptic } from "@/lib/haptics";
 import { iconBtn } from "./primitives";
 import type { TradeOrder } from "../LiteApp";
 import type { ActivityLeg } from "@/lib/onchainHistory";
+import type { DryRun } from "@/lib/dryRun";
+import { dryRunReceiptRow, holdingWords } from "@/lib/plainCopy";
 
 /** "Sep 7, 2026 · 14:02" */
 function exactTime(ms: number): string {
@@ -37,6 +40,7 @@ export function ReceiptScreen({
   at,
   legs,
   failed,
+  dryRun,
   onClose,
 }: {
   go: (target: string | number, params?: Record<string, unknown>) => void;
@@ -53,6 +57,8 @@ export function ReceiptScreen({
   legs?: ActivityLeg[];
   /** History receipts: the plan reverted on-chain. */
   failed?: boolean;
+  /** BSC manual trade: the Binance check this trade passed right before it was signed. */
+  dryRun?: DryRun;
   /** Closing-the-loop handler from LiteApp; falls back to go(-1). */
   onClose?: () => void;
 }) {
@@ -101,21 +107,25 @@ export function ReceiptScreen({
     const dp = symbol === "aUSDC" || symbol === "USDC" ? 2 : q >= 100 ? 2 : 4;
     return `${q.toLocaleString("en-US", { maximumFractionDigits: dp })} ${toTile(symbol).name === symbol ? symbol : symbol}`;
   };
+  const words = order ? holdingWords(order.unit, order.ticker) : undefined;
+  const checked = dryRunReceiptRow(dryRun);
   const rows: [string, React.ReactNode][] = order
     ? isSell
       ? [
-          ["Shares & price", `${order.qty} ${order.ticker} @ ${usd(order.priceUsd)}`],
+          [words!.quantityRow, `${order.qty} ${order.ticker} @ ${usd(order.priceUsd)}`],
           ["Added to cash", usd(order.amountUsd)],
           ["Status", status],
+          ...(checked ? ([["Checked", checked]] as [string, React.ReactNode][]) : []),
           ["Network", chain.name],
           ["Time", when],
         ]
       : [
-          ["Shares & price", `${order.qty} ${order.ticker} @ ${usd(order.priceUsd)}`],
-          ["Fee", usd(order.feeUsd)],
+          [words!.quantityRow, `${order.qty} ${order.ticker} @ ${usd(order.priceUsd)}`],
+          ...(showsFeeRow(chain.key) ? ([["Fee", usd(order.feeUsd)]] as [string, React.ReactNode][]) : []),
           ["Status", status],
+          ...(checked ? ([["Checked", checked]] as [string, React.ReactNode][]) : []),
           ["Paid from", "Your cash balance"],
-          ["Ownership", "Real shares, held by you"],
+          ["Ownership", words!.ownership],
           ["Network", chain.name],
           ["Time", when],
         ]
@@ -289,12 +299,13 @@ export function ReceiptScreen({
             <Seal size={24} />
             <div>
               <div style={{ fontWeight: 700, fontSize: 15.5, letterSpacing: "-.01em" }}>Permanent record</div>
-              <div style={{ fontSize: 12.5, color: "var(--ink-2)" }}>Signed &amp; recorded on {chain.name}</div>
+              <div style={{ fontSize: 12.5, color: "var(--ink-2)" }}>{chain.contracts.deployed ? <>Signed &amp; recorded on {chain.name}</> : <>Recorded on {chain.name}</>}</div>
             </div>
           </div>
           <p style={{ fontSize: 13.5, color: "var(--ink-2)", margin: "12px 0 14px", lineHeight: 1.55 }}>
-            This can&apos;t be edited or deleted, and anyone can check it. It&apos;s how Vera&apos;s track record stays
-            honest.
+            {chain.contracts.deployed
+              ? "This can’t be edited or deleted, and anyone can check it. It’s how Vera’s track record stays honest."
+              : "This trade is on the public ledger: it can’t be edited or deleted, and anyone can check it."}
           </p>
           {explorerHref ? (
             <a

@@ -2,6 +2,7 @@
 // token's on-chain price next to the underlying share's reference price, plus whether the
 // issuer will trade it right now. Everything that shows or buys a BSC stock reads these.
 import type { RwaPlatform } from "./chains";
+import { usMarketState } from "./marketHours";
 
 /** Stax's own display state. The API calls the regular session "regular"; Stax calls it "open". */
 export type MarketState = "open" | "premarket" | "postmarket" | "overnight" | "closed" | "paused" | "unsupported";
@@ -28,6 +29,27 @@ export type RwaReasonCode =
 
 /** Binance rejects quotes of $5 or less (40375), and the floor is exclusive, so a leg needs $6. */
 export const BSC_MIN_LEG_USD = 6;
+
+/**
+ * A sale only has to clear Binance's real floor (over $5). The $6 buffer exists so a BUY lands
+ * above the floor after fees and price moves; applying it to a sale trapped a position bought at
+ * the $6 minimum (worth about $5.97 after Binance's fee) with no way to sell it.
+ */
+export const BSC_MIN_SELL_USD = 5.01;
+
+/** The smallest leg Stax will send for `side` on BSC. */
+export function minLegUsd(side: "buy" | "sell"): number {
+  return side === "sell" ? BSC_MIN_SELL_USD : BSC_MIN_LEG_USD;
+}
+
+/**
+ * Sell-tab chips (25/50/75/All) that would come out under Binance's floor for a position worth
+ * `positionUsd`. An unknown value leaves every chip enabled; the server still decides.
+ */
+export function sellShareClearsFloor(positionUsd: number | undefined, pct: number): boolean {
+  if (positionUsd === undefined || !Number.isFinite(positionUsd)) return true;
+  return (positionUsd * pct) / 100 >= BSC_MIN_SELL_USD;
+}
 
 export interface VenueView {
   platform: RwaPlatform;
@@ -86,4 +108,58 @@ export function marketStateFrom(s: { marketStatus: RwaMarketStatus | null; reaso
     default:
       return s.marketStatus;
   }
+}
+
+/**
+ * Whether the BSC Sell button is off. A stock sells through its own issuer, so that issuer has to
+ * be trading; crypto (BTCB, ETH, BNB) has no catalog row and no market hours, so it is never
+ * blocked by the venue gate (the same exemption useBscBuyGate gives a crypto buy).
+ */
+export function bscSellBlocked(tier: string | undefined, venue: { buyable: boolean } | undefined): boolean {
+  if (tier === "crypto") return false;
+  return !venue?.buyable;
+}
+
+/** The slice of a Binance row's `statusInfo` that decides its state and whether it can be bought. */
+export interface RwaStatusLike {
+  openState: boolean;
+  marketStatus: RwaMarketStatus | null;
+  reasonCode: RwaReasonCode;
+}
+
+/**
+ * `state` for one row at `nowMs`. `marketStateFrom` reads the API's own session — bStock's
+ * statusInfo carries no session at all (`marketStatus` always null) so it always falls through,
+ * but so does an Ondo row that gives no session either, and both need the same two fallbacks in
+ * order: first, a non-TRADING reason the issuer already flagged as not open (`openState` false) is
+ * Stax's own "paused" state, not a guess. Only when the row gives no signal at all does the
+ * US-hours calendar stand in. One rule for the catalog AND the trade gate, so a row can't read
+ * "open" on Market and then be bought after the close (or the reverse).
+ */
+export function venueState(s: RwaStatusLike, nowMs: number): MarketState {
+  const fromApi = marketStateFrom(s);
+  if (fromApi !== null) return fromApi;
+  if (!s.openState && s.reasonCode !== "TRADING") return "paused";
+  return usMarketState(nowMs);
+}
+
+/**
+ * Whether a buy of this row is allowed at `nowMs`. `state` and `isBuyable` come from independent
+ * signals (the calendar vs. the issuer's own flags) and can disagree: an issuer that still claims
+ * TRADING after Stax's own clock says the market is closed must never read as buyable, because
+ * that is exactly the weekend-premium buy Vera is supposed to refuse. The calendar wins.
+ */
+export function venueBuyable(s: RwaStatusLike, nowMs: number): boolean {
+  return venueState(s, nowMs) === "closed" ? false : isBuyable(s);
+}
+
+/**
+ * The price a screen prints for an asset: the live number when there is one; else the hard-coded
+ * display table's "reference" price, except on BNB Chain outside the demo. There a Binance outage
+ * or rate limit used to leave the table's number (Nvidia at $134.19) on screen as if it were live,
+ * next to a Buy button that works, so no live price reads as "no price" (undefined).
+ */
+export function priceOrStatic(p: { bsc: boolean; demo: boolean; live: number | null | undefined; staticPrice: number | undefined }): number | undefined {
+  if (p.live !== null && p.live !== undefined) return p.live;
+  return p.bsc && !p.demo ? undefined : p.staticPrice;
 }

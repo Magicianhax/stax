@@ -10,6 +10,7 @@ import { Icon, VeraOrb, ChainLaunching, AmountInput, Keypad } from "@/components
 import { useAmountKeypad, toAmountString } from "@/hooks/useAmountKeypad";
 import { usd } from "@/lib/format";
 import { iconBtn, VeraTag } from "./primitives";
+import { RefusalNote } from "./RefusalNote";
 import { useChainReady } from "../useChainReady";
 
 // Suggestions follow the amount typed above, so a chip never names a figure
@@ -25,23 +26,33 @@ function suggestionsFor(amount: number): string[] {
 
 export function GoalScreen({
   go,
+  refusal = null,
+  onDismissRefusal,
+  initialGoal,
+  initialAmount,
 }: {
   go: (screen: string, params?: Record<string, unknown>) => void;
+  /** Why Vera wouldn't build the last plan (market closed, under $6 a stock), shown as a calm note. */
+  refusal?: string | null;
+  onDismissRefusal?: () => void;
+  /** What was typed when Vera said no, so nobody has to type it again. */
+  initialGoal?: string;
+  initialAmount?: number;
 }) {
   const { address } = useSmartAccount();
   const { chain, investable: ready } = useChainReady();
   const { data: bal } = useUsdcBalance(address ?? undefined);
   const balance = bal?.value ?? 0;
 
-  const [goal, setGoal] = useState("");
+  const [goal, setGoal] = useState(initialGoal ?? "");
   // Default amount: $300 when the cash covers it, otherwise a round figure the
   // balance does cover, so the screen never opens already in an error state.
   // The user's own edits win once they type.
-  const [edited, setEdited] = useState<string | null>(null);
+  const [edited, setEdited] = useState<string | null>(initialAmount ? String(initialAmount) : null);
   const suggested = balance >= 300 ? "300" : String(Math.floor(balance / 10) * 10 || Math.floor(balance));
   // The keypad owns the edited value; the suggestion stands until they touch it.
   // The cash on hand is the ceiling, but only once the balance has loaded.
-  const pad = useAmountKeypad({ max: bal ? balance : undefined });
+  const pad = useAmountKeypad({ max: bal ? balance : undefined, initial: initialAmount ? String(initialAmount) : undefined });
   const amt = edited === null ? suggested : pad.value;
   const setAmt = (v: string) => {
     setEdited(v);
@@ -104,8 +115,11 @@ export function GoalScreen({
           Say it however feels natural. No finance words needed; I’ll handle the rest.
         </p>
 
+        {/* Vera's own "no": a normal answer, so a calm note, never the red error banner. */}
+        {refusal && <RefusalNote>{refusal}</RefusalNote>}
+
         {/* amount */}
-        <div style={{ marginTop: 28 }}>
+        <div style={{ marginTop: refusal ? 22 : 28 }}>
           <div className="label-eyebrow" style={{ marginBottom: 8 }}>
             How much to invest
           </div>
@@ -163,7 +177,10 @@ export function GoalScreen({
           <div className="field" style={{ padding: "14px 16px" }}>
             <textarea
               value={goal}
-              onChange={(e) => setGoal(e.target.value)}
+              onChange={(e) => {
+                setGoal(e.target.value);
+                onDismissRefusal?.();
+              }}
               onFocus={() => setPadOpen(false)}
               rows={3}
               aria-label="Your goal"

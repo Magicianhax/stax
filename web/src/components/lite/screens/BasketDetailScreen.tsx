@@ -27,14 +27,16 @@ import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { useUsdcBalance } from "@/hooks/useBalances";
 import { getChain } from "@/lib/chains";
 import { setActiveChainKey } from "@/lib/chains/active";
-import { basketToAllocation, isBasketInvestable, reasonFor, riskWord, type Basket } from "@/lib/baskets";
+import { basketMinAmountUsd, basketToAllocation, isBasketInvestable, reasonFor, riskWord, type Basket } from "@/lib/baskets";
 import { assetLogo } from "@/lib/assetLogo";
 import { toTile, catFor } from "@/lib/displayAssets";
 import { usd } from "@/lib/format";
+import { BSC_MIN_LEG_USD } from "@/lib/rwa";
 import { haptic } from "@/lib/haptics";
 import { iconBtn } from "./primitives";
 import { riskMeta } from "./PlanScreen";
 import { useChainReady } from "../useChainReady";
+import { trustLine } from "@/lib/plainCopy";
 import { RampWeightBar, clusterOf, fmtPct, shareBasket } from "./basketPrimitives";
 import { useSymbolSeries, blendSeries, changeOf, readoutDate } from "./useRangeSeries";
 
@@ -53,7 +55,7 @@ export function BasketDetailScreen({
   /** A basket decoded from a share link (not in storage yet). */
   shared?: Basket;
 }) {
-  const { chain, investable: ready } = useChainReady();
+  const { chain, ready: executorPath, investable: ready } = useChainReady();
   const { byId, mine, save, remove, publish } = useBaskets();
   const { notify } = useToast();
   const giftsOn = useGiftsEnabled(); // gift-ui
@@ -111,7 +113,13 @@ export function BasketDetailScreen({
   const risk = riskMeta(basket.riskScore);
   const basketChain = getChain(basket.chain);
   const canSave = basket.author === "shared" && !isMine;
-  const canReview = investable && ready && amount > 0;
+  // BNB Chain: every holding must get Binance's $6 minimum, so a basket has a smallest amount.
+  const minAmount = chain.key === "bsc" ? basketMinAmountUsd(basket.items) : null;
+  const tooSmall = minAmount !== null && amount > 0 && amount < minAmount;
+  // The sheet already shows "of $balance"; an amount over it can never be placed (the plan would
+  // fail at Binance's check and retrying can't help), same line the goal screen uses.
+  const overBalance = chain.key === "bsc" && Boolean(bal) && amount > balance + 1e-6;
+  const canReview = investable && ready && amount > 0 && !tooSmall && !overBalance;
 
   const onShare = async () => {
     haptic.light();
@@ -356,8 +364,9 @@ export function BasketDetailScreen({
         <div className="card" style={{ padding: 16 }}>
           <div style={{ fontWeight: 700, fontSize: 15 }}>How this is built</div>
           <p style={{ fontSize: 13.5, color: "var(--ink-2)", margin: "6px 0 0", lineHeight: 1.55 }}>
-            The weights are fixed: every dollar you put in is split exactly as shown. Before each invest, Vera
-            checks the risk and signs it, and the plan is recorded so its track record can&apos;t be edited later.
+            The weights are fixed: every dollar you put in is split exactly as shown. {executorPath
+              ? "Before each invest, Vera checks the risk and signs it, and the plan is recorded so its track record can’t be edited later."
+              : "Binance checks each trade before it’s sent, so you see a problem before any money moves."}
             {basket.source?.goal && (
               <>
                 {" "}
@@ -369,7 +378,7 @@ export function BasketDetailScreen({
       </div>
 
       <div style={{ padding: "14px 22px 0", display: "flex", justifyContent: "center" }}>
-        <VerifiedBadge label="Vera signs the risk before each invest" onClick={() => go("settings")} />
+        <VerifiedBadge label={trustLine("basket", executorPath)} onClick={() => go("settings")} />
       </div>
 
       {/* Pinned invest bar — sticky, like PlanScreen. */}
@@ -378,8 +387,8 @@ export function BasketDetailScreen({
           position: "sticky",
           bottom: 0,
           marginTop: "auto",
-          padding: "16px 22px calc(18px + env(safe-area-inset-bottom))",
-          background: "linear-gradient(to top, var(--paper), var(--paper) 62%, transparent)",
+          padding: "22px 22px calc(18px + env(safe-area-inset-bottom))",
+          background: "linear-gradient(to top, var(--paper), var(--paper) calc(100% - 22px), transparent)",
         }}
       >
         {!ready ? (
@@ -424,6 +433,15 @@ export function BasketDetailScreen({
             </button>
           ))}
         </div>
+        {overBalance ? (
+          <p role="alert" style={{ margin: "10px 2px 0", fontSize: 13, fontWeight: 500, color: "var(--neg)", lineHeight: 1.45 }}>
+            That’s more than the {usd(balance)} you have to invest. Add cash, or start smaller.
+          </p>
+        ) : tooSmall ? (
+          <p role="alert" style={{ margin: "10px 2px 0", fontSize: 13, fontWeight: 500, color: "var(--neg)", lineHeight: 1.45 }}>
+            This basket needs at least {usd(minAmount!)} so every holding gets ${BSC_MIN_LEG_USD}.
+          </p>
+        ) : null}
         <p style={{ fontSize: 13, color: "var(--ink-2)", margin: "14px 0 0", lineHeight: 1.5 }}>
           You&apos;ll see the full split and Vera&apos;s risk check before anything is placed.
         </p>

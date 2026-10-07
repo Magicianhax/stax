@@ -14,7 +14,6 @@ import type { ChainKey } from "@/lib/chains";
 import { useChain } from "@/lib/chains/active";
 import { authedFetch } from "@/lib/authedFetch";
 import { useDemo } from "@/components/demo/DemoProvider";
-import { DEMO_PRICES } from "@/lib/demo/demoData";
 
 export interface PricesResponse {
   chain: ChainKey;
@@ -44,7 +43,7 @@ export function usePrices() {
     enabled: !demo,
   });
   // Demo: one reference price table for every screen (holdings are valued from it too).
-  if (demo) return { ...query, data: DEMO_PRICES, isLoading: false, isPending: false } as typeof query;
+  if (demo) return { ...query, data: demo.prices, isLoading: false, isPending: false } as typeof query;
   return query;
 }
 

@@ -105,8 +105,15 @@ export function cachedBscBalances(address: `0x${string}`, tokenAddresses: `0x${s
   return value;
 }
 
-/** Drops one address's cached balances so the next read is forced fresh — call after a send that
- *  changes it lands (a trade or a Savings deposit/redeem), rather than waiting out the TTL. */
-export function invalidateBscBalanceCache(address: `0x${string}`): void {
-  balanceCache.delete(address.toLowerCase());
+/**
+ * Drops one address's cached balances so the next read is forced fresh — call after a send that
+ * changes it lands (a trade or a Savings deposit/redeem), rather than waiting out the TTL.
+ * `minAgeMs` keeps a client from draining the shared Binance budget: an entry younger than that is
+ * left alone, so one address costs at most one fresh Wallet API read per `minAgeMs`.
+ */
+export function invalidateBscBalanceCache(address: `0x${string}`, minAgeMs = 0): void {
+  const key = address.toLowerCase();
+  const hit = balanceCache.get(key);
+  if (hit && Date.now() - hit.at < minAgeMs) return;
+  balanceCache.delete(key);
 }

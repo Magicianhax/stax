@@ -12,7 +12,7 @@
 import { useState } from "react";
 import { Icon, SectionTitle, BottomSheet } from "@/components/design";
 import { useDemo } from "@/components/demo/DemoProvider";
-import { useSavings, useSavingsBalance, useSavingsRate, DEMO_SAVINGS_RATE } from "@/hooks/useSavings";
+import { useSavings, useSavingsBalance, useSavingsRate } from "@/hooks/useSavings";
 import { useUsdcBalance } from "@/hooks/useBalances";
 import { usd } from "@/lib/format";
 import { haptic } from "@/lib/haptics";
@@ -36,8 +36,12 @@ export function SavingsCard({ address }: { address?: string }) {
   // Snapshot of the balance when "Move money out" opened — so the confirm copy and the success
   // amount stay put even after moveOut succeeds and useSavingsBalance refetches down to 0.
   const [outAmount, setOutAmount] = useState(0);
+  // Same for "Move money in": the amount is derived from the cash on hand (the $25 preset is capped
+  // by it), and the refetch right after a deposit drops the cash, so the success sheet read the
+  // post-deposit number ('Moved to Savings $5.00' after moving $25).
+  const [inAmount, setInAmount] = useState(0);
 
-  const effectiveRate = demo ? DEMO_SAVINGS_RATE : rate;
+  const effectiveRate = demo ? demo.savings?.rate : rate;
   const cash = bal?.value ?? 0;
   const inSavings = savingsBal ?? 0;
   const hasSavings = inSavings > 0;
@@ -67,6 +71,7 @@ export function SavingsCard({ address }: { address?: string }) {
   const confirmIn = () => {
     if (!address || !canMoveIn) return;
     haptic.light();
+    setInAmount(amount);
     void savings.moveIn(amount, address);
   };
   const confirmOut = () => {
@@ -134,7 +139,7 @@ export function SavingsCard({ address }: { address?: string }) {
       {/* Move money in */}
       <BottomSheet open={sheet === "in"} onClose={close} title="Move money in">
         {savings.phase === "done" ? (
-          <SuccessBody label="Moved to Savings" amount={amount} onDone={close} />
+          <SuccessBody label="Moved to Savings" amount={inAmount > 0 ? inAmount : undefined} onDone={close} />
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: "2px 2px 8px" }}>
             <p style={{ margin: 0, fontSize: 14, color: "var(--ink-2)", lineHeight: 1.5 }}>

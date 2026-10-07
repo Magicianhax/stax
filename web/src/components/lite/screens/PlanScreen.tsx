@@ -24,13 +24,15 @@ import { usd } from "@/lib/format";
 import { assetBySymbol } from "@/lib/chains";
 import { STAX_FEE_LABEL, feeUsd } from "@/lib/fees";
 import { planCheckFailedMessage, planDryRunView } from "@/lib/planDryRuns";
-import { gapToRealShare, planOpenIssuerNote } from "@/lib/plainCopy";
+import { gapToRealShare, planOpenIssuerNote, trustLine } from "@/lib/plainCopy";
 import { platformLabel } from "@/lib/spread";
 import { usMarketClock } from "@/lib/marketHours";
+import { useMarketNow } from "@/hooks/useMarketNow";
 import { useRwa } from "@/hooks/useRwa";
 import type { DryRun } from "@/lib/dryRun";
 import type { AllocateResult } from "@/lib/invest-types";
 import { iconBtn, Spinner, ThinkingDots, YieldTag } from "./primitives";
+import { RefusalNote } from "./RefusalNote";
 import { useChainReady } from "../useChainReady";
 
 type Tone = "balanced" | "safer" | "bolder" | "simple";
@@ -64,6 +66,7 @@ export function PlanScreen({
   basket,
   goal,
   dryRuns,
+  refusal = null,
 }: {
   go: (screen: string, params?: Record<string, unknown>) => void;
   allocation: AllocateResult;
@@ -84,9 +87,15 @@ export function PlanScreen({
    * on every hold. Undefined before the first hold renders exactly what this screen already did.
    */
   dryRuns?: DryRun[];
+  /**
+   * Why the server turned down the last nudge (market closed since this plan was built, under $6
+   * a stock). The plan on screen is the previous one, still valid, so this is a calm note rather
+   * than the red error banner.
+   */
+  refusal?: string | null;
 }) {
   const risk = riskMeta(allocation.riskScore);
-  const { chain, investable } = useChainReady();
+  const { chain, ready: executorPath, investable } = useChainReady();
   const dryRunView = planDryRunView(allocation.allocations, dryRuns, (s) => assetBySymbol(chain, s)?.decimals ?? 18);
   const failedMessage = planCheckFailedMessage(
     dryRunView.failedSymbols.map((sym) => toTile(sym).name),
@@ -100,7 +109,8 @@ export function PlanScreen({
   const venueFor = (symbol: string, platform: "bstock" | "ondo" | undefined) =>
     platform ? rwa?.tickers.find((t) => t.ticker === symbol)?.venues.find((v) => v.platform === platform) : undefined;
   // Read once per mount: this screen is only ever reached by navigation, never server-rendered.
-  const [usMarketOpen] = useState(() => usMarketClock(Date.now()).buyable);
+  const marketNow = useMarketNow();
+  const [usMarketOpen] = useState(() => usMarketClock(marketNow()).buyable);
   const openIssuerNote = bsc ? planOpenIssuerNote(usMarketOpen, allocation.allocations.map((a) => a.venue)) : "";
   const { save } = useBaskets();
   const { notify } = useToast();
@@ -205,6 +215,12 @@ export function PlanScreen({
         </div>
       )}
 
+      {refusal && (
+        <div style={{ padding: "0 22px" }}>
+          <RefusalNote marginTop={14}>{refusal}</RefusalNote>
+        </div>
+      )}
+
       {/* nudge chips — talk back to Vera (a basket's weights are fixed, so none) */}
       {!basket && (
       <div style={{ display: "flex", gap: 8, padding: "14px 22px 0", overflowX: "auto", flexShrink: 0 }}>
@@ -279,7 +295,7 @@ export function PlanScreen({
                 {a.reason}
               </div>
               {/* Binance's own pre-trade check on this leg, in plain words — never claims a
-                  check that didn't run (design decision in lib/plainCopy.ts's dryRunLine, matched
+                  check that didn't run (design decision in lib/planDryRuns.ts, matched
                   here for the "not checked yet" case that screen deliberately stays silent on). */}
               {check && (
                 <div
@@ -330,7 +346,7 @@ export function PlanScreen({
 
       {/* trust line */}
       <div style={{ padding: "14px 22px 0", display: "flex", justifyContent: "center" }}>
-        <VerifiedBadge label="Vera will sign & record this plan" onClick={() => go("settings")} />
+        <VerifiedBadge label={trustLine("plan", executorPath)} onClick={() => go("settings")} />
       </div>
 
       {/* quiet text actions — keep this mix, or hand it to a friend */}
@@ -383,8 +399,8 @@ export function PlanScreen({
           position: "sticky",
           bottom: 0,
           marginTop: "auto",
-          padding: "16px 22px calc(18px + env(safe-area-inset-bottom))",
-          background: "linear-gradient(to top, var(--paper), var(--paper) 62%, transparent)",
+          padding: "22px 22px calc(18px + env(safe-area-inset-bottom))",
+          background: "linear-gradient(to top, var(--paper), var(--paper) calc(100% - 22px), transparent)",
         }}
       >
         {/* After a failed check: which part, and the two ways forward (P0 #1). Hold stays live. */}

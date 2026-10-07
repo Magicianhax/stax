@@ -95,6 +95,12 @@ describe("quoteProblemText", () => {
     expect(quoteProblemText(err, nvdaBsc)).toBe("The smallest trade is $6. Enter $6 or more.");
   });
 
+  it("keeps 'the price moved' as the server wrote it, so Trade asks for a fresh look", () => {
+    const err = swapQuoteErrorFrom({ error: "The price moved since you looked. Check the new price and try again.", code: "price_moved" }, 400);
+    expect(err.code).toBe("price_moved");
+    expect(quoteProblemText(err, nvdaBsc)).toMatch(/price moved/);
+  });
+
   it("says a closed market in the viewer's own clock, never the server's ET sentence", () => {
     const now = new Date(2026, 8, 26, 12, 0, 0).getTime();
     const next = new Date(2026, 8, 28, 18, 30, 0).getTime();

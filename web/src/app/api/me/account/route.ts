@@ -1,5 +1,5 @@
 // POST /api/me/account — record the smart account the signed-in user trades from.
-//   body { chain: "base" | "mantle", owner: 0x…, address: 0x… }  →  { ok: true }
+//   body { chain: "base" | "mantle" | "bsc", owner: 0x…, address: 0x… }  →  { ok: true }
 // Called once per session by useSmartAccount() (fire-and-forget). The stored row
 // lets /api/swap-quote verify that quotes are built for the caller's own account.
 import type { NextRequest } from "next/server";
@@ -15,7 +15,7 @@ export const runtime = "nodejs";
 
 const addr = z.string().refine((a) => isAddress(a), "Invalid address.");
 const Body = z.object({
-  chain: z.enum(["base", "mantle"]),
+  chain: z.enum(["base", "mantle", "bsc"]),
   owner: addr,
   address: addr,
 });

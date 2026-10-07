@@ -37,6 +37,8 @@ import { PLATFORM_LABEL } from "@/components/lite/rwa/VenuePicker";
 import { rampColor } from "./basketPrimitives";
 import { changeOf, readoutDate, useSymbolSeries, type MarketRange } from "./useRangeSeries";
 import type { LoopParams } from "../LiteApp";
+import { useChainReady } from "../useChainReady";
+import { trustLine } from "@/lib/plainCopy";
 
 // No 5Y: this account's value line starts when our snapshots did, and offering a
 // range we cannot fill invites the reader to trust a shape that is not there.
@@ -57,6 +59,7 @@ export function PortfolioScreen({
   loop?: LoopParams;
 }) {
   const chain = useChain();
+  const { ready } = useChainReady();
   const { address } = useSmartAccount();
   // Cash, invested, and total all arrive pre-computed from /api/portfolio —
   // this screen renders them verbatim (no client-side money math).
@@ -184,15 +187,20 @@ export function PortfolioScreen({
     );
   }
 
-  const donutTotal = priced.reduce((s, h) => s + (h.valueUsd ?? 0), 0) + cash || 1;
+  const savings = port?.savingsUsd ?? 0;
+  const donutTotal = priced.reduce((s, h) => s + (h.valueUsd ?? 0), 0) + cash + savings || 1;
   const legend = [
     ...priced.map((h, i) => ({
-      key: h.asset.symbol,
-      name: toTile(h.asset.symbol, h.asset.name).name,
+      // One stock held from both issuers has two rows: key and name them apart.
+      key: holdingKey(h),
+      name: toTile(h.asset.symbol, h.asset.name).name + (twinSymbols.has(h.asset.symbol) && h.venue ? ` · ${PLATFORM_LABEL[h.venue]}` : ""),
       value: h.valueUsd ?? 0,
       color: rampColor(i),
     })),
     ...(cash > 0 ? [{ key: "cash", name: "Cash", value: cash, color: "color-mix(in srgb, var(--ink-3) 45%, var(--surface-2))" }] : []),
+    // Savings counts in the donut's centre total, so it gets its own slice instead of leaving the
+    // legend percentages short of 100.
+    ...(savings > 0 ? [{ key: "savings", name: "Savings", value: savings, color: "color-mix(in srgb, var(--primary) 35%, var(--surface-2))" }] : []),
   ];
   const chartReady = (points?.length ?? 0) > 1;
 
@@ -277,7 +285,7 @@ export function PortfolioScreen({
               )}
             </div>
             <div style={{ fontSize: 12.5, color: "var(--ink-3)", padding: "10px 4px 0", lineHeight: 1.45 }}>
-              {usd(invested)} invested · {usd(cash)} cash.{" "}
+              {usd(invested)} invested · {usd(cash)} cash{savings > 0 ? ` · ${usd(savings)} in Savings` : ""}.{" "}
               {real
                 ? covered
                   ? "Change is your gain over the range, not deposits."
@@ -308,8 +316,10 @@ export function PortfolioScreen({
               const abs = rc && h.valueUsd !== undefined ? h.valueUsd - h.valueUsd / (1 + rc.pct / 100) : undefined;
               // Unrealized gain against what was paid, when the lots are known.
               const pos = positions.get(h.asset.symbol);
+              // Cost basis is for the whole ticker, not one issuer's token, so a ticker held through both
+              // issuers shows each row's own move instead of the same combined gain twice.
               const gain =
-                pos && pos.unrealizedUsd !== null && pos.unrealizedPct !== null && pos.costBasisUsd > 0
+                pos && !twinSymbols.has(h.asset.symbol) && pos.unrealizedUsd !== null && pos.unrealizedPct !== null && pos.costBasisUsd > 0
                   ? { abs: pos.unrealizedUsd, pct: pos.unrealizedPct, label: "vs cost" }
                   : null;
               const qty = tokenQty(h.raw, h.asset.decimals ?? 18);
@@ -391,7 +401,7 @@ export function PortfolioScreen({
         </div>
 
         <div style={{ padding: "18px 22px 0", display: "flex", justifyContent: "center" }}>
-          <VerifiedBadge label="Every plan signed & recorded by Vera" onClick={() => go("settings")} />
+          <VerifiedBadge label={trustLine("every", ready)} onClick={() => go("settings")} />
         </div>
       </Reveal>
     </div>

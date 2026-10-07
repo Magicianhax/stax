@@ -4,7 +4,7 @@
 // basket's default invest amount — BasketDetailScreen opens its amount sheet on "100".
 import { describe, expect, it } from "vitest";
 import { assetBySymbol, getChain } from "./chains";
-import { BASKET_TAGLINE_MAX, CURATED_BASKETS, curatedBaskets } from "./baskets";
+import { BASKET_TAGLINE_MAX, CURATED_BASKETS, basketMinAmountUsd, curatedBaskets } from "./baskets";
 
 const DEFAULT_BASKET_AMOUNT_USD = 100;
 const BSC_MIN_LEG_USD = 6;
@@ -110,5 +110,23 @@ describe("BSC curated baskets and risk flags", () => {
     const withPreIpo = CURATED_BASKETS.bsc.filter((b) => b.items.some((i) => assetBySymbol(chain, i.symbol)?.risk === "preipo"));
     expect(withPreIpo.length).toBeGreaterThan(0);
     for (const b of withPreIpo) expect(b.tagline.toLowerCase()).toContain("risk");
+  });
+});
+
+describe("basketMinAmountUsd", () => {
+  it("is the smallest whole amount at which the smallest holding still gets $6", () => {
+    // A 15% holding needs $40 (0.15 * 40 = $6.00); $39 would give it $5.85.
+    expect(basketMinAmountUsd([{ weightPct: 15 }, { weightPct: 35 }, { weightPct: 50 }])).toBe(40);
+    // 14% needs $43 (0.14 * 42 = $5.88, 0.14 * 43 = $6.02).
+    expect(basketMinAmountUsd([{ weightPct: 14 }, { weightPct: 86 }])).toBe(43);
+  });
+
+  it("is lower than the $100 default for every curated BSC basket, so the default always works", () => {
+    for (const b of CURATED_BASKETS.bsc) expect(basketMinAmountUsd(b.items)!).toBeLessThanOrEqual(100);
+  });
+
+  it("is null for an empty basket and ignores a zero weight", () => {
+    expect(basketMinAmountUsd([])).toBeNull();
+    expect(basketMinAmountUsd([{ weightPct: 0 }, { weightPct: 50 }, { weightPct: 50 }])).toBe(12);
   });
 });

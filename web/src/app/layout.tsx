@@ -10,6 +10,7 @@ import {
   GITHUB_URL,
   AWARDS,
   SITE_DESCRIPTION,
+  OFFER_DESCRIPTION,
 } from "@/lib/seo";
 
 // Stax "Soft" theme fonts (see globals.css):
@@ -161,7 +162,7 @@ const JSON_LD = {
         "@type": "Offer",
         price: "0",
         priceCurrency: "USD",
-        description: "No account fees. Trading fees are covered by Stax.",
+        description: OFFER_DESCRIPTION,
       },
       publisher: { "@id": `${SITE_URL}/#organization` },
     },

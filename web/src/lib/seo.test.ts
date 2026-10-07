@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { AWARDS, ELIGIBILITY, SITE_DESCRIPTION } from "./seo";
+import { AWARDS, ELIGIBILITY, OFFER_DESCRIPTION, SITE_DESCRIPTION } from "./seo";
+import { STAX_FEE_PCT } from "./fees";
 
 describe("seo copy", () => {
   it("keeps the meta description short enough for a search snippet", () => {
@@ -25,5 +26,14 @@ describe("seo copy", () => {
   it("keeps both awards, each with its citation", () => {
     expect(AWARDS.map((a) => a.name)).toEqual(["Track Winner, Trading & Strategy", "Best UI/UX"]);
     for (const a of AWARDS) expect(a.url).toMatch(/^https:\/\/x\.com\/Mantle_Official\/status\/\d+$/);
+  });
+});
+
+describe("structured-data offer", () => {
+  it("doesn't claim trading is free everywhere: Base and Mantle charge the flat fee", () => {
+    expect(OFFER_DESCRIPTION).not.toMatch(/trading fees are covered/i);
+    expect(OFFER_DESCRIPTION).toMatch(/No Stax fee on BNB Chain/);
+    expect(OFFER_DESCRIPTION).toContain(`${STAX_FEE_PCT}%`);
+    expect(OFFER_DESCRIPTION).toMatch(/Base and Mantle/);
   });
 });

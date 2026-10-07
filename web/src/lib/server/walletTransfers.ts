@@ -58,6 +58,9 @@ export function knownTokens(chain: StaxChain): Map<string, { symbol: string; dec
     m.set(chain.usdc.address.toLowerCase(), { symbol: chain.usdc.symbol, decimals: chain.usdc.decimals });
     for (const a of chain.assets.all) {
       if (a.address && a.decimals) m.set(a.address.toLowerCase(), { symbol: a.symbol, decimals: a.decimals });
+      // BNB Chain: the other issuer's mint of the same stock is the same holding, in its own
+      // decimals. Unmapped, a twin transfer read as an unknown "?" token and never reached cost basis.
+      if (a.twin) m.set(a.twin.address.toLowerCase(), { symbol: a.symbol, decimals: a.twin.decimals });
     }
     tokenMaps.set(chain.key, m);
   }

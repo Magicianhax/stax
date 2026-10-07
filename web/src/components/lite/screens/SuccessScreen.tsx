@@ -165,7 +165,7 @@ export function SuccessScreen({
               <Icon name="shield" size={22} />
             </span>
             <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 600, fontSize: 15.5 }}>Vera recorded this plan</div>
+              <div style={{ fontWeight: 600, fontSize: 15.5 }}>{chain.contracts.deployed ? "Vera recorded this plan" : `Your plan is on ${chain.name}`}</div>
               <div className="mono" style={{ fontSize: 11.5, color: "var(--ink-2)", marginTop: 2 }}>
                 View the receipt on {chain.explorer.name}
               </div>
@@ -180,8 +180,8 @@ export function SuccessScreen({
           position: "sticky",
           bottom: 0,
           marginTop: "auto",
-          padding: "16px 22px calc(18px + env(safe-area-inset-bottom))",
-          background: "linear-gradient(to top, var(--paper), var(--paper) 62%, transparent)",
+          padding: "22px 22px calc(18px + env(safe-area-inset-bottom))",
+          background: "linear-gradient(to top, var(--paper), var(--paper) calc(100% - 22px), transparent)",
         }}
       >
         <button className="btn btn-primary btn-block btn-lg tap" onClick={onDone}>

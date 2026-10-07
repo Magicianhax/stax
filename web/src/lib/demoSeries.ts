@@ -8,7 +8,7 @@
 //   cashFlowWeeks(8)                    → { t, v }[] net cash in (+) / out (−) per week
 //   projection({ amount: 25, cadence: "weekly", riskBps: 6000, months: 12 })
 //                                       → { contributed, projected } (monthly { t, v }[])
-import { displayFor } from "@/lib/displayAssets";
+import { displayForDemo } from "@/lib/demo/bscRef";
 import type { MarketRange } from "@/hooks/useMarket";
 import type { Cadence } from "@/lib/autopilot";
 
@@ -18,8 +18,8 @@ export interface SeriesPoint {
   v: number;
 }
 
-/** Fixed "now" for demo timestamps: Mon 7 Sep 2026, 14:00 UTC. */
-export const DEMO_NOW = Date.UTC(2026, 8, 7, 14, 0, 0);
+/** Fixed "now" for demo timestamps: Mon 5 Oct 2026, 14:00 UTC (a trading day inside the judging week). */
+export const DEMO_NOW = Date.UTC(2026, 9, 5, 14, 0, 0);
 
 const DAY = 86_400e3;
 
@@ -79,7 +79,7 @@ function stamp(n: number, step: number): number[] {
 
 /** Price history for one symbol + range, ending at the display price. */
 export function priceSeries(symbol: string, range: MarketRange): SeriesPoint[] {
-  const d = displayFor(symbol);
+  const d = displayForDemo(symbol);
   const { n, step } = RANGE_SHAPE[range];
   const change = d.kind === "safe" ? 0.01 * RANGE_SCALE[range] : d.day * RANGE_SCALE[range];
   const vol = d.kind === "safe" ? 0.0004 : d.kind === "crypto" ? 0.018 : 0.011;

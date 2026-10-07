@@ -8,7 +8,10 @@ import "server-only";
 import type { PublicClient } from "viem";
 import { ERC20_ABI } from "@/lib/abis";
 import type { StaxChain } from "@/lib/chains/types";
-import { cachedBscBalances } from "./binance/wallet";
+import { cachedBscBalances, invalidateBscBalanceCache } from "./binance/wallet";
+
+/** How old a cached read must be before `fresh` may replace it (one fresh Binance read per address per 2 s). */
+export const FRESH_BALANCE_MIN_AGE_MS = 2_000;
 
 /**
  * BSC's raw token balances via the Binance Wallet API (one batched read across every candidate
@@ -17,9 +20,15 @@ import { cachedBscBalances } from "./binance/wallet";
  * `null` on ANY failure (bad shape, timeout, rate limit) so the caller falls back to the RPC
  * multicall below and never goes blank for a Binance hiccup.
  */
-async function bscRawBalances(chain: StaxChain, address: `0x${string}`, tokenAddresses: `0x${string}`[]): Promise<Map<string, bigint> | null> {
+async function bscRawBalances(
+  chain: StaxChain,
+  address: `0x${string}`,
+  tokenAddresses: `0x${string}`[],
+  fresh = false,
+): Promise<Map<string, bigint> | null> {
   if (chain.key !== "bsc") return null;
   try {
+    if (fresh) invalidateBscBalanceCache(address, FRESH_BALANCE_MIN_AGE_MS);
     return await cachedBscBalances(address, tokenAddresses);
   } catch (err) {
     console.warn("[bscBalances] Binance Wallet API balances unavailable, falling back to RPC:", err instanceof Error ? err.message : err);
@@ -64,9 +73,28 @@ export async function bscBalanceMap(
   client: PublicClient,
   address: `0x${string}`,
   readAddresses: `0x${string}`[],
+  opts: { fresh?: boolean } = {},
 ): Promise<Map<string, bigint>> {
-  const binanceMap = await bscRawBalances(chain, address, readAddresses);
+  const binanceMap = await bscRawBalances(chain, address, readAddresses, opts.fresh);
   const missing = binanceMap ? readAddresses.filter((a) => !binanceMap.has(a.toLowerCase())) : readAddresses;
   const rpcMap = await rpcBalancesFor(client, address, missing);
   return binanceMap ? new Map([...binanceMap, ...rpcMap]) : rpcMap;
+}
+
+/**
+ * The cash (USDT) balance straight from the chain. The Binance Wallet API read is cached for
+ * ~45 s and also serves the holdings, so right after a trade it still shows the pre-trade cash;
+ * an RPC read is current, and it is the same source the Wallet's own cash figure uses (so Home and
+ * Wallet agree). Null when the read fails, and the caller keeps the merged map's value.
+ */
+export async function rpcCashRaw(chain: StaxChain, client: PublicClient, address: `0x${string}`): Promise<bigint | null> {
+  if (chain.key !== "bsc") return null;
+  try {
+    const [r] = await client.multicall({
+      contracts: [{ address: chain.usdc.address, abi: ERC20_ABI, functionName: "balanceOf" as const, args: [address] as const }],
+    });
+    return r.status === "success" ? (r.result as bigint) : null;
+  } catch {
+    return null;
+  }
 }

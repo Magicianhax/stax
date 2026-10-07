@@ -64,11 +64,13 @@ Put this contract, verbatim and trimmed to ≤150 words, as the opening comment 
 
 ## Assets
 
-- Screenshots: capture from the dev server already running at http://localhost:3000/demo at 390×844,
-  deviceScaleFactor 2, into `web/public/brand/screens/{goal,plan,success,home,baskets,market}.png`
-  (PNG, keep each ≤ 350 KB; crop to the phone viewport, no browser chrome). Navigate via the demo
-  UI (Home → type a goal → Plan → place → Success). Never kill that server; you cannot start a
-  second one in this directory.
+- Screenshots: capture from `/demo?mode=light&market=open` at 390×844, deviceScaleFactor 2, into
+  `web/public/brand/screens/{goal,plan,market}.png` (PNG, keep each ≤ 350 KB; palette-reduce with
+  sharp). The demo runs on BNB Chain (see docs/DEMO.md). Capture in the America/New_York time zone
+  with `.stax .screen-pad-top { padding-top: 52px }` injected (the status bar PhoneChrome draws
+  needs that room) and the Next dev badge hidden. `goal.png` is the one taken with
+  `?market=closed`: Vera's refusal. The rest use `?market=open`, so the words never depend on the
+  hour of the capture.
 - Awards: no image needed; a small SVG laurel/rosette mark in `public/brand/awards/mark.svg` is fine.
 - Film: keep `FilmLightbox` behind a "Watch the film" text button with the poster only; no `LoopVideo`.
 - Delete `DemoMount` usage, `HeroDemo`, `DemoPhone`, `LoopVideo` from the landing. Nothing on `/`

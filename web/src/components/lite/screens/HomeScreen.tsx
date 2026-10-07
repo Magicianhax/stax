@@ -15,7 +15,7 @@ import { useEffect, useState } from "react";
 import { usePortfolio, type Holding } from "@/hooks/useBalances";
 import { useActivity } from "@/hooks/useActivity";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
-import { useSavingsBalance } from "@/hooks/useSavings";
+import { useMarketNow } from "@/hooks/useMarketNow";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { Icon, HoldingRow, LogoCluster, SectionTitle, Sparkline, VerifiedBadge, NetworkChip } from "@/components/design";
 import { Money, Reveal } from "@/components/motion";
@@ -27,6 +27,7 @@ import { todayMarketLine } from "@/lib/homeToday";
 import { portfolioSeries } from "@/lib/demoSeries";
 import { iconBtn } from "./primitives";
 import { useChainReady } from "../useChainReady";
+import { trustLine } from "@/lib/plainCopy";
 import { HomeBanners } from "../HomeBanners";
 import { useBaskets } from "@/hooks/useBaskets";
 import { BasketRailTile } from "./basketPrimitives";
@@ -41,12 +42,13 @@ const TODAY_LINE_TICK_MS = 60_000;
  *  MarketScreen's `useBscMarketClock` uses) so the server and first client paint agree. */
 function useTodayLine(): string | null {
   const [line, setLine] = useState<string | null>(null);
+  const now = useMarketNow();
   useEffect(() => {
-    const tick = () => setLine(todayMarketLine(Date.now()));
+    const tick = () => setLine(todayMarketLine(now()));
     tick();
     const id = setInterval(tick, TODAY_LINE_TICK_MS);
     return () => clearInterval(id);
-  }, []);
+  }, [now]);
   return line;
 }
 
@@ -92,7 +94,7 @@ export function HomeScreen({
   loop?: LoopParams;
 }) {
   const { address } = useSmartAccount();
-  const { chain, ready } = useChainReady();
+  const { chain, ready, investable } = useChainReady();
   const demo = useDemo();
   // Cash, invested, and total all arrive pre-computed from /api/portfolio —
   // this screen renders them verbatim (no client-side money math).
@@ -106,9 +108,9 @@ export function HomeScreen({
   const balance = port?.cashUsd ?? 0;
   const holdings: Holding[] = port?.holdings ?? [];
   const invested = port?.investedUsd ?? 0;
-  // Savings (Venus, BSC) isn't in the portfolio total; add it so Home and Wallet agree.
-  const { data: savingsBal } = useSavingsBalance(address ?? undefined);
-  const total = (port?.totalUsd ?? 0) + (chain.key === "bsc" ? (savingsBal ?? 0) : 0);
+  // /api/portfolio's total already holds Savings (Venus, BSC), exactly once, so Home and Wallet
+  // render it as-is.
+  const total = port?.totalUsd ?? 0;
 
   const today = todayChange(holdings, port?.totalUsd ?? 0);
   const up = (today?.abs ?? 0) >= 0;
@@ -354,7 +356,7 @@ export function HomeScreen({
                 Nothing here yet
               </div>
               <div style={{ fontSize: 13.5, marginTop: 4, lineHeight: 1.5 }}>
-                {ready
+                {investable
                   ? "Tell Vera a goal and place your first plan in one tap."
                   : `Nothing on ${chain.name} yet. Earlier investments live under Mantle in Settings.`}
               </div>
@@ -477,7 +479,7 @@ export function HomeScreen({
 
         {/* trust footer */}
         <div style={{ padding: "18px 22px 0", display: "flex", justifyContent: "center" }}>
-          <VerifiedBadge label="Every plan signed & recorded by Vera" onClick={() => go("settings")} />
+          <VerifiedBadge label={trustLine("every", ready)} onClick={() => go("settings")} />
         </div>
       </Reveal>
     </div>

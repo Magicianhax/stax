@@ -25,13 +25,12 @@ import { useChain } from "@/lib/chains/active";
 import { haptic } from "@/lib/haptics";
 import { ONRAMP_PRESETS, offrampUrl, onrampEnabled, onrampSupported, onrampUrl } from "@/lib/onramp";
 import { SavingsCard } from "@/components/lite/savings/SavingsCard";
-import { useSavingsBalance } from "@/hooks/useSavings";
 import type { WalletTx } from "@/lib/walletTx";
 import { useDemo } from "@/components/demo/DemoProvider";
-import { DEMO_TRANSACTIONS } from "@/lib/demo/demoData";
 import { DEMO_NOW } from "@/lib/demoSeries";
 import { iconBtn, Spinner, Pager } from "./primitives";
 import { ReceiveSheet } from "@/components/lite/receive";
+import { isInvestKind, walletTxKind, walletTxParty, walletTxTitle } from "@/lib/walletLabels";
 
 const DOTS = "••••••";
 const WEEK = 7 * 86_400e3;
@@ -96,7 +95,6 @@ export function WalletScreen({
   const chain = useChain();
   const { user } = usePrivy();
   const { data: bal, isLoading: balLoading } = useUsdcBalance(address ?? undefined);
-  const { data: savingsBal } = useSavingsBalance(address ?? undefined);
   const { data: port, isLoading: portLoading } = usePortfolio(address ?? undefined);
   const { data: txs, isLoading: txLoading } = useTransactions(address ?? undefined);
   const { data: activity } = useActivity(address ?? undefined);
@@ -141,14 +139,14 @@ export function WalletScreen({
 
   const cash = bal?.value ?? 0;
   const invested = port?.investedUsd ?? 0;
-  // BSC Savings (Venus) isn't a portfolio holding, so it's added here: the parts under the
-  // total must add up to it (design critique P1 #12).
-  const inSavings = chain.key === "bsc" ? (savingsBal ?? 0) : 0;
+  // BSC Savings (Venus) isn't an investment: /api/portfolio keeps it out of `invested` and
+  // reports it on its own, so the parts under the total add up to it (design critique P1 #12).
+  const inSavings = chain.key === "bsc" ? (port?.savingsUsd ?? 0) : 0;
   const total = cash + invested + inSavings;
 
   // Transactions, 10 per page. The demo mirrors Home's activity (same plans,
   // same hashes) so the two screens never contradict each other.
-  const txList = useMemo(() => (demo ? DEMO_TRANSACTIONS : (txs ?? [])), [demo, txs]);
+  const txList = useMemo(() => (demo ? demo.transactions : (txs ?? [])), [demo, txs]);
   const txPageCount = Math.max(1, Math.ceil(txList.length / 10));
   const txSafePage = Math.min(txPage, txPageCount - 1);
   const txRows = txList.slice(txSafePage * 10, txSafePage * 10 + 10);
@@ -162,8 +160,10 @@ export function WalletScreen({
 
   // A transfer to the executor is a plan being placed; its holdings come from
   // the activity log (matched by tx hash) for the row's logo cluster.
-  const executor = chain.contracts.executor.toLowerCase();
-  const isInvest = (t: WalletTx) => t.direction === "out" && t.counterparty.toLowerCase() === executor;
+  // On BNB Chain a plan goes to the Binance router and Savings to the Venus vault, not to the
+  // executor, so those read as what they are (lib/walletLabels.ts) rather than "Sent USDT".
+  const kindOf = (t: WalletTx) => walletTxKind(chain, t);
+  const isInvest = (t: WalletTx) => isInvestKind(kindOf(t));
   const symbolsFor = (t: WalletTx) => activity?.find((a) => a.txHash.toLowerCase() === t.hash.toLowerCase())?.symbols;
 
   const loading = balLoading || portLoading;
@@ -358,7 +358,7 @@ export function WalletScreen({
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 600, fontSize: 15 }}>
-                      {invest ? "Invested in a plan" : `${incoming ? "Received" : "Sent"} ${t.symbol}`}
+                      {walletTxTitle(kindOf(t), t)}
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 2, minWidth: 0 }}>
                       <span className={invest ? "tnum" : "mono"} style={{ fontSize: 11.5, color: "var(--ink-2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -514,7 +514,7 @@ export function WalletScreen({
       )}
 
       {/* transaction detail sheet */}
-      <BottomSheet open={!!tx} onClose={() => setTx(null)} title={tx ? (isInvest(tx) ? "Invested" : tx.direction === "in" ? "Received" : "Sent") : undefined}>
+      <BottomSheet open={!!tx} onClose={() => setTx(null)} title={tx ? (isInvest(tx) ? "Invested" : walletTxParty(kindOf(tx)) ? walletTxTitle(kindOf(tx), tx) : tx.direction === "in" ? "Received" : "Sent") : undefined}>
         {tx && (
           <div style={{ display: "flex", flexDirection: "column", gap: 18, padding: "2px 2px 8px" }}>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
@@ -525,7 +525,14 @@ export function WalletScreen({
             </div>
             <div className="card" style={{ padding: "4px 16px" }}>
               <DetailRow label="Status" value="Confirmed" />
-              <DetailRow label={isInvest(tx) ? "Placed by" : tx.direction === "in" ? "From" : "To"} value={isInvest(tx) ? "Vera · Stax executor" : shortAddress(tx.counterparty)} mono={!isInvest(tx)} borderTop />
+              {(() => {
+                const party = walletTxParty(kindOf(tx));
+                return party ? (
+                  <DetailRow label={party.label} value={party.value} borderTop />
+                ) : (
+                  <DetailRow label={tx.direction === "in" ? "From" : "To"} value={shortAddress(tx.counterparty)} mono borderTop />
+                );
+              })()}
               <DetailRow label="Network" value={chain.name} borderTop />
               {tx.timestamp && (
                 <DetailRow label="When" value={new Date(tx.timestamp * 1000).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })} borderTop />

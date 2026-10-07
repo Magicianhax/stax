@@ -32,6 +32,7 @@ import { useChain } from "@/lib/chains/active";
 import { encodeV3Path, singleHopSqrtLimit } from "@/lib/swapRouting";
 import { aggregatorRouterFor, assertDryRunAllowsSend, fetchSwapQuote, usesAggregator } from "@/lib/swapQuote";
 import { feeOf, STAX_TREASURY } from "@/lib/fees";
+import { clearsReviewedFloor, PriceMovedError } from "@/lib/slippage";
 import { usdToRaw } from "@/lib/units";
 import { resolveVenueAddress } from "@/lib/venues";
 
@@ -41,7 +42,8 @@ const BPS = BigInt(10000);
 const DEADLINE_SECONDS = 15 * 60;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-// Canned receipt hash for demo-mode buys/sells (never broadcast on-chain).
+// Canned receipt hash for demo-mode buys/sells on Base (never broadcast on-chain). On BNB Chain the
+// demo records the trade in its session and uses the hash that returns.
 const DEMO_SWAP_TX = ("0x" + "5a7c2b41".repeat(32).slice(0, 64)) as `0x${string}`;
 
 const approve = (token: `0x${string}`, spender: `0x${string}`, amount: bigint): Call => ({
@@ -124,6 +126,8 @@ async function aggregatorCalls(
     amountIn: bigint;
     account: `0x${string}`;
     slippageBps: number;
+    /** The floor the person reviewed (output token, raw). The swap is built to never go below it. */
+    reviewedMinOut: bigint;
     venue?: RwaPlatform;
   },
 ): Promise<{ calls: Call[]; minOut: bigint; dryRun?: DryRun }> {
@@ -134,6 +138,7 @@ async function aggregatorCalls(
     sender: p.account,
     recipient: p.account,
     slippageBps: p.slippageBps,
+    reviewedMinOut: p.reviewedMinOut,
     build: true,
     venue: p.venue,
   });
@@ -147,6 +152,9 @@ async function aggregatorCalls(
   // hasn't sent its first on-chain trade yet, so there's nothing deployed to simulate
   // against) or no check at all (every other chain) both fall through normally.
   assertDryRunAllowsSend(q.dryRun);
+  // The server anchors the build to the reviewed floor (lib/slippage.ts); this is the backstop
+  // that a swap whose minimum sits below what the sheet promised is never signed.
+  if (!clearsReviewedFloor(q.minOut, p.reviewedMinOut)) throw new PriceMovedError();
   // Belt-and-suspenders for the twin-venue bug this guards against elsewhere (TradeScreen's
   // holding lookup, resolveVenueAddress): the approve below is built from OUR resolved
   // `p.tokenIn`, so if the server's quote ever disagreed about which token this trade means,
@@ -217,6 +225,22 @@ export function useSwap() {
       if (demo) {
         setPhase("swapping");
         await sleep(1400);
+        if (demo.rwa) {
+          // BNB Chain demo: the same check and the same refusals as a real quote, then the trade
+          // is kept in this session only (Home, Owned and the wallet show it).
+          try {
+            const q = demo.quote({ asset, side: "buy", amountIn: usdToRaw(chain, amountUsd), venue });
+            const qty = Number(q.amountOut) / 10 ** (asset.decimals ?? 18);
+            const txHash = demo.recordTrade({ side: "buy", symbol: asset.symbol, venue, usd: amountUsd, qty });
+            setResult({ txHash, asset, amountUsd, side: "buy", dryRun: q.dryRun });
+            setPhase("done");
+          } catch (e) {
+            setError(e instanceof Error ? e.message : "The buy didn't go through.");
+            setErrorCause(e);
+            setPhase("error");
+          }
+          return;
+        }
         setResult({ txHash: DEMO_SWAP_TX, asset, amountUsd, side: "buy" });
         setPhase("done");
         return;
@@ -262,11 +286,9 @@ export function useSwap() {
             amountIn: netIn,
             account: recipient,
             slippageBps,
+            reviewedMinOut: minOut,
             venue,
           });
-          if (agg.minOut < minOut / BigInt(2)) {
-            throw new Error("The price moved too much since your quote. Please try again.");
-          }
           calls = agg.calls;
           dryRun = agg.dryRun;
         } else if (route) {
@@ -347,6 +369,21 @@ export function useSwap() {
       if (demo) {
         setPhase("swapping");
         await sleep(1400);
+        if (demo.rwa) {
+          try {
+            const q = demo.quote({ asset, side: "sell", amountIn, venue });
+            const usd = Number(q.amountOut) / 1e18;
+            const qty = Number(amountIn) / 10 ** (asset.decimals ?? 18);
+            const txHash = demo.recordTrade({ side: "sell", symbol: asset.symbol, venue, usd, qty });
+            setResult({ txHash, asset, amountUsd: usd, side: "sell", dryRun: q.dryRun });
+            setPhase("done");
+          } catch (e) {
+            setError(e instanceof Error ? e.message : "The sell didn't go through.");
+            setErrorCause(e);
+            setPhase("error");
+          }
+          return;
+        }
         setResult({ txHash: DEMO_SWAP_TX, asset, amountUsd: estUsdcValue, side: "sell" });
         setPhase("done");
         return;
@@ -385,11 +422,9 @@ export function useSwap() {
             amountIn,
             account: recipient,
             slippageBps,
+            reviewedMinOut: minUsdcOut,
             venue,
           });
-          if (agg.minOut < minUsdcOut / BigInt(2)) {
-            throw new Error("The price moved too much since your quote. Please try again.");
-          }
           calls = agg.calls;
           dryRun = agg.dryRun;
         } else if (route) {

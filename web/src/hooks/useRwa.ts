@@ -11,6 +11,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useChain } from "@/lib/chains/active";
 import { assetBySymbol } from "@/lib/chains";
 import { authedFetch } from "@/lib/authedFetch";
+import { useDemo } from "@/components/demo/DemoProvider";
 import type { RwaListResponse, RwaTickerView, VenueView } from "@/lib/rwa";
 
 async function fetchRwa(): Promise<RwaListResponse> {
@@ -25,14 +26,18 @@ async function fetchRwa(): Promise<RwaListResponse> {
 /** The full BSC catalog. Disabled — `data` stays undefined — on every other chain. */
 export function useRwa() {
   const chain = useChain();
-  const enabled = chain.key === "bsc";
-  return useQuery({
+  const demo = useDemo();
+  const enabled = chain.key === "bsc" && !demo;
+  const query = useQuery({
     queryKey: ["rwa", chain.key],
     queryFn: fetchRwa,
     enabled,
     staleTime: 20_000,
     refetchInterval: enabled ? 30_000 : false,
   });
+  // Demo: the demo market (lib/demo/bscMarket.ts), no request to Binance or to our API.
+  if (demo?.rwa) return { ...query, data: demo.rwa, isLoading: false, isPending: false, isError: false, error: null } as typeof query;
+  return query;
 }
 
 /** One ticker's catalog row — undefined while loading, off BSC, or not (yet) listed. */

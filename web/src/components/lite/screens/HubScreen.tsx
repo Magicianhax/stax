@@ -26,7 +26,8 @@ export function HubScreen({
 }: {
   go: (target: string | number, params?: Record<string, unknown>) => void;
 }) {
-  const { chain, ready } = useChainReady();
+  // `investable`, not `ready`: BNB Chain invests straight from the account without an executor.
+  const { chain, investable } = useChainReady();
   const giftsOn = useGiftsEnabled();
   const { claimableCount } = useGifts();
 
@@ -35,7 +36,7 @@ export function HubScreen({
       id: "goal",
       icon: "orbit",
       title: "Build a plan",
-      hint: ready ? "Tell Vera a goal, get a plan in seconds" : `Opening shortly on ${chain.name}`,
+      hint: investable ? "Tell Vera a goal, get a plan in seconds" : `Opening shortly on ${chain.name}`,
       onClick: () => go("goal"),
     },
     {

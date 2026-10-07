@@ -23,6 +23,9 @@ vi.mock("./autopilotStore", () => ({
   pauseAutopilot: (...args: unknown[]) => pauseAutopilotSpy(...args),
 }));
 
+const fetchWalletsSpy = vi.fn();
+vi.mock("./privyAuth", () => ({ fetchPrivyEmbeddedWallets: (...args: unknown[]) => fetchWalletsSpy(...args) }));
+
 const buildLegsSpy = vi.fn();
 vi.mock("@/lib/legBuilder", () => ({ buildLegs: (...args: unknown[]) => buildLegsSpy(...args) }));
 
@@ -49,6 +52,8 @@ vi.mock("./privySmartAccount", () => ({
 }));
 
 import { runAutopilot } from "./autopilotExecutor";
+import { AllocationRefusal } from "./bscPlan";
+import { BinanceLegRefusal } from "./binanceLegs";
 import { getChain } from "@/lib/chains";
 import { signRiskInference } from "@/lib/eip712";
 import type { AutopilotConfig } from "@/lib/autopilot";
@@ -82,6 +87,7 @@ function cfg(overrides: Partial<AutopilotConfig> = {}): AutopilotConfig {
 }
 
 beforeEach(() => {
+  fetchWalletsSpy.mockReset().mockResolvedValue([{ id: "w1", address: "0x1111111111111111111111111111111111111111" }]);
   planAutopilotRunSpy.mockReset();
   readContractSpy.mockClear();
   recordRunSpy.mockReset().mockResolvedValue(undefined);
@@ -111,7 +117,7 @@ describe("runAutopilot: a rule plan with nothing to do", () => {
 
     const result = await runAutopilot(cfg(), { nowSeconds: NOW_S }, deployedBsc);
 
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ ok: true, receipt: "Vera checked your plan: already on target, nothing to do." });
     expect(logRunSpy).toHaveBeenCalledWith(expect.objectContaining({ status: "success", reason: expect.stringContaining("nothing to do") }));
     expect(buildLegsSpy).not.toHaveBeenCalled();
   });
@@ -185,6 +191,77 @@ describe("runAutopilot: a rule plan above the user's risk ceiling", () => {
     expect(logRunSpy).toHaveBeenCalledWith(expect.objectContaining({ status: "skipped", assessedRiskBps: 6000, reason: expect.stringMatching(/risk ceiling/i) }));
     expect(buildLegsSpy).not.toHaveBeenCalled();
     expect(signRiskInference).not.toHaveBeenCalled();
+    expect(sendUserOperationSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("runAutopilot: a refusal Stax's own planning rules make", () => {
+  it("logs a closed market as skipped, so Activity shows it, and doesn't ask the cron to retry", async () => {
+    planAutopilotRunSpy.mockRejectedValue(new AllocationRefusal("The market is closed right now; it opens Mon 9:30am ET."));
+
+    const result = await runAutopilot(cfg(), { nowSeconds: NOW_S }, deployedBsc);
+
+    expect(result).toEqual({ ok: false, reason: "The market is closed right now; it opens Mon 9:30am ET.", retryable: false });
+    expect(logRunSpy).toHaveBeenCalledWith(expect.objectContaining({ status: "skipped", reason: expect.stringContaining("closed") }));
+  });
+
+  it("logs an under-$6 leg as skipped, in Autopilot words rather than 'Enter $6 or more'", async () => {
+    planAutopilotRunSpy.mockResolvedValue({
+      ok: true,
+      kind: "rule",
+      rule: { type: "safety_switch", dropPct: 3, movePct: 25 },
+      intents: [{ symbol: "SPY", action: "buy", usd: 5, reason: "x" }, { symbol: "QQQ", action: "buy", usd: 5, reason: "x" }],
+      receipt: "r",
+    });
+    buildLegsSpy.mockRejectedValue(new BinanceLegRefusal("The smallest trade is $6. Enter $6 or more.", "min_trade"));
+
+    const result = await runAutopilot(cfg({ maxPerPeriodUsd: 100 }), { nowSeconds: NOW_S }, deployedBsc);
+
+    expect(result.ok).toBe(false);
+    expect(result.retryable).toBe(false);
+    expect(result.reason).toMatch(/Raise the amount/);
+    expect(result.reason).not.toMatch(/Enter \$6/);
+    expect(logRunSpy).toHaveBeenCalledWith(expect.objectContaining({ status: "skipped" }));
+    expect(sendUserOperationSpy).not.toHaveBeenCalled();
+  });
+
+  it("still throws a real fault, so the cron's retry and the error log see it", async () => {
+    planAutopilotRunSpy.mockRejectedValue(new Error("db down"));
+    await expect(runAutopilot(cfg(), { nowSeconds: NOW_S }, deployedBsc)).rejects.toThrow("db down");
+  });
+});
+
+describe("runAutopilot: a run that found nothing to do", () => {
+  it("returns the receipt, so Run now can say 'nothing to do' instead of 'Vera invested for you'", async () => {
+    planAutopilotRunSpy.mockResolvedValue({ ok: true, kind: "rule", rule: { type: "buy_discount", symbol: "NVDA", discountPct: 2 }, intents: [], receipt: "Vera checked your plan: nothing to do." });
+    const result = await runAutopilot(cfg(), { nowSeconds: NOW_S }, deployedBsc);
+    expect(result).toEqual({ ok: true, receipt: "Vera checked your plan: nothing to do." });
+  });
+});
+
+describe("runAutopilot: the signing wallet is re-checked at run time", () => {
+  it("pauses and signs nothing when the stored wallet isn't the user's own", async () => {
+    fetchWalletsSpy.mockResolvedValue([{ id: "w_other", address: "0x9999999999999999999999999999999999999999" }]);
+
+    const result = await runAutopilot(cfg(), { nowSeconds: NOW_S }, deployedBsc);
+
+    expect(result.ok).toBe(false);
+    expect(result.retryable).toBe(false);
+    expect(pauseAutopilotSpy).toHaveBeenCalledWith("ap_1");
+    expect(logRunSpy).toHaveBeenCalledWith(expect.objectContaining({ status: "error", reason: expect.stringMatching(/isn't one of yours/) }));
+    expect(planAutopilotRunSpy).not.toHaveBeenCalled();
+    expect(sendUserOperationSpy).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when Privy can't be reached: skips the run without signing or pausing", async () => {
+    fetchWalletsSpy.mockRejectedValue(new Error("privy down"));
+
+    const result = await runAutopilot(cfg(), { nowSeconds: NOW_S }, deployedBsc);
+
+    expect(result.ok).toBe(false);
+    expect(pauseAutopilotSpy).not.toHaveBeenCalled();
+    expect(logRunSpy).toHaveBeenCalledWith(expect.objectContaining({ status: "skipped" }));
+    expect(planAutopilotRunSpy).not.toHaveBeenCalled();
     expect(sendUserOperationSpy).not.toHaveBeenCalled();
   });
 });

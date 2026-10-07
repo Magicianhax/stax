@@ -2,7 +2,7 @@
 // of these functions instead of formatting a number inline, so the wording (and the threshold
 // under which a gap reads as "same as the real share") lives in one tested place.
 import { describe, expect, it } from "vitest";
-import { gapSentence, gapWords, stateLabel, dryRunLine, venuePickerExplainer, riskLine, shortGapLine, gapToRealShare, closedBuyLabel, planOpenIssuerNote } from "./plainCopy";
+import { gapSentence, gapWords, stateLabel, dryRunReceiptRow, venuePickerExplainer, riskLine, shortGapLine, gapToRealShare, closedBuyLabel, planOpenIssuerNote, trustLine, holdingWords } from "./plainCopy";
 import type { DryRun } from "./dryRun";
 
 describe("gapSentence", () => {
@@ -129,35 +129,23 @@ describe("venuePickerExplainer", () => {
   });
 });
 
-describe("dryRunLine", () => {
+describe("dryRunReceiptRow", () => {
   const base: DryRun = { status: "passed", checkedAt: 0 };
 
-  it("reports nothing until a check has actually run", () => {
-    expect(dryRunLine(undefined, "0.034", "NVDA")).toEqual({ kind: "none" });
+  it("says nothing until a check has actually run", () => {
+    expect(dryRunReceiptRow(undefined)).toBeNull();
   });
 
-  it("stays quiet when the check was skipped, never claiming one happened", () => {
-    expect(dryRunLine({ ...base, status: "skipped" }, "0.034", "NVDA")).toEqual({ kind: "none" });
+  it("says nothing when the check was skipped, never claiming one happened", () => {
+    expect(dryRunReceiptRow({ ...base, status: "skipped" })).toBeNull();
   });
 
-  it("shows a quiet confirmation line when Binance's simulate passed", () => {
-    expect(dryRunLine({ ...base, status: "passed" }, "0.034", "NVDA")).toEqual({
-      kind: "quiet",
-      text: "Checked with Binance · you'll get about 0.034 NVDA",
-    });
+  it("confirms the check when Binance's simulate passed", () => {
+    expect(dryRunReceiptRow(base)).toBe("Checked with Binance before it was sent");
   });
 
-  it("surfaces the plain-words reason, and blocks confirming, when the simulate failed", () => {
-    expect(
-      dryRunLine({ ...base, status: "failed", reason: "The market closed while you were typing." }, "0.034", "NVDA"),
-    ).toEqual({ kind: "blocking", text: "The market closed while you were typing." });
-  });
-
-  it("falls back to a plain-words reason when a failed check carries none", () => {
-    expect(dryRunLine({ ...base, status: "failed" }, "0.034", "NVDA")).toEqual({
-      kind: "blocking",
-      text: "Binance couldn't confirm this trade would go through.",
-    });
+  it("has no line for a failed check, because that trade is never sent", () => {
+    expect(dryRunReceiptRow({ ...base, status: "failed", reason: "x" })).toBeNull();
   });
 });
 
@@ -234,5 +222,28 @@ describe("planOpenIssuerNote", () => {
     expect(planOpenIssuerNote(false, ["bstock", "ondo"])).toBe(
       "The US market is closed. Vera buys from bStock and Ondo, which are open now.",
     );
+  });
+});
+
+describe("trustLine", () => {
+  it("claims a signature and an on-chain record only on the executor path", () => {
+    expect(trustLine("plan", true)).toMatch(/sign/);
+    expect(trustLine("every", true)).toMatch(/recorded/);
+    for (const kind of ["every", "plan", "basket"] as const) {
+      expect(trustLine(kind, false)).not.toMatch(/sign|record/i);
+      expect(trustLine(kind, false)).toMatch(/Binance/);
+    }
+  });
+});
+
+describe("holdingWords", () => {
+  it("calls a stock real shares", () => {
+    expect(holdingWords("shares", "NVDA")).toEqual({ quantityRow: "Shares & price", ownership: "Real shares, held by you" });
+  });
+  it("never calls a coin a share", () => {
+    const w = holdingWords("BTCB", "BTCB");
+    expect(w.quantityRow).toBe("Amount & price");
+    expect(w.ownership).toBe("Held in your account as BTCB");
+    expect(JSON.stringify(w)).not.toMatch(/share/i);
   });
 });

@@ -15,15 +15,10 @@ import { assertSavingsCallsAreSafe, type ExecCall } from "@/lib/execution";
 import { authedFetch } from "@/lib/authedFetch";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { useRefreshBalances } from "@/hooks/useBalances";
+import { withChainParam } from "@/lib/chainUrl";
 import type { SavingsRateResponse } from "@/app/api/savings/route";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-const DEMO_SAVINGS_TX = ("0x" + "5a7c2b41".repeat(32).slice(0, 64)) as `0x${string}`;
-const DEMO_RATE: SavingsRateResponse = { chain: "bsc", available: true, apyBps: 420, apyDisplay: "4.20%" };
-// A plausible standing balance for demo mode's screenshot wallet — DemoProvider's own `DemoApi`
-// carries no Savings field (nothing there needed one before this card existed), so this is kept
-// local here rather than widening that shared type for a display-only constant.
-const DEMO_SAVINGS_BALANCE_USD = 42.15;
 
 type Phase = "idle" | "moving" | "done" | "error";
 
@@ -39,7 +34,7 @@ export function useSavingsRate() {
     staleTime: 30_000,
     refetchInterval: 60_000,
     queryFn: async (): Promise<SavingsRateResponse> => {
-      const res = await fetch(`/api/savings`, { headers: { "x-stax-chain": chain.key } });
+      const res = await fetch(withChainParam(`/api/savings`, chain.key), { headers: { "x-stax-chain": chain.key } });
       if (!res.ok) throw new Error("Couldn't load the savings rate.");
       return res.json();
     },
@@ -62,13 +57,13 @@ export function useSavingsBalance(address?: string) {
     staleTime: 15_000,
     refetchInterval: 30_000,
     queryFn: async (): Promise<number | null> => {
-      const res = await fetch(`/api/savings?address=${address}`, { headers: { "x-stax-chain": chain.key } });
+      const res = await fetch(withChainParam(`/api/savings?address=${address}`, chain.key), { headers: { "x-stax-chain": chain.key } });
       if (!res.ok) throw new Error("Couldn't load your Savings balance.");
       const json = (await res.json()) as SavingsRateResponse;
       return json.balanceUsd ?? null;
     },
   });
-  if (demo) return { ...query, data: DEMO_SAVINGS_BALANCE_USD, isLoading: false, isPending: false } as typeof query;
+  if (demo) return { ...query, data: demo.savings?.balanceUsd ?? 0, isLoading: false, isPending: false } as typeof query;
   return query;
 }
 
@@ -94,7 +89,10 @@ export function useSavings() {
       if (demo) {
         setPhase("moving");
         await sleep(1200);
-        setTxHash(DEMO_SAVINGS_TX);
+        // Simulated: nothing is sent. The balance and cash move in the demo's own session only.
+        const balance = demo.savings?.balanceUsd ?? 0;
+        const usd = body.action === "deposit" ? body.amountUsd : -Math.min(balance, balance * body.ratio);
+        setTxHash(demo.recordSavings(Number(usd.toFixed(2))));
         setPhase("done");
         return;
       }
@@ -139,5 +137,3 @@ export function useSavings() {
   return { phase, error, txHash, busy: phase === "moving", moveIn, moveOut, reset };
 }
 
-/** The demo-mode rate, for screens that render before useSavingsRate's query is enabled. */
-export const DEMO_SAVINGS_RATE = DEMO_RATE;

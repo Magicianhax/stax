@@ -20,6 +20,7 @@ import { useMarketHistory, type MarketRange } from "@/hooks/useMarket";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { useBaskets } from "@/hooks/useBaskets";
 import { useRwa, useBscBuyGate } from "@/hooks/useRwa";
+import { bscSellBlocked, priceOrStatic } from "@/lib/rwa";
 import { useSpreadHistory } from "@/hooks/useSpread";
 import { PriceVsRealShare } from "@/components/lite/spread/PriceVsRealShare";
 import { historyStatus } from "@/lib/priceHistoryStatus";
@@ -102,7 +103,7 @@ export function AssetDetailScreen({
   // Design critique P1 #5: on BSC this is overridden below to the CHOSEN issuer's own price,
   // once that venue is known — the generic oracle price disagreed with the venue a viewer had
   // just picked on the panel further down this same screen.
-  let shownPrice = livePrice ?? d.price;
+  let shownPrice = priceOrStatic({ bsc: chain.key === "bsc", demo: demo !== null, live: livePrice, staticPrice: d.price });
   const safe = asset.tier === "safe";
   const stock = asset.tier === "stock";
   // Coinbase B20 stocks (Base): dividends grow the token instead of paying cash.
@@ -286,7 +287,9 @@ export function AssetDetailScreen({
   // closed while the catalog hasn't answered yet, same as `bscBuyable` above.
   const sellVenue = holding?.venue ?? defaultVenue;
   const sellVenueView = rwaTicker?.venues.find((v) => v.platform === sellVenue);
-  const sellBlocked = bsc && !sellVenueView?.buyable;
+  const sellBlocked = bsc && bscSellBlocked(asset.tier, sellVenueView);
+  // The price printed next to the position is the one its own issuer's token trades at.
+  const positionPrice = bsc && holding?.venue !== undefined && holding.priceUsd !== undefined ? holding.priceUsd : shownPrice;
   // Design critique P1 #12: a fetch error shouldn't be a dead end — offer the retry it needs.
   const unavailable = bsc && bscGate.status === "unavailable";
 
@@ -442,9 +445,11 @@ export function AssetDetailScreen({
             <Stat
               label="Value"
               value={
-                // A twin position is priced at its own issuer's token, which the portfolio
-                // already did; the headline price is the default venue's.
-                holding.venue !== undefined && holding.venue !== asset.platform && holding.valueUsd !== undefined ? (
+                // On BNB Chain a position is priced at the issuer whose token it is, which the
+                // portfolio already did. The headline price follows the issuer picked for the
+                // NEXT buy, which can be the other one (bStock shares, Ondo chosen) and can differ
+                // by a lot while one of them is closed, so it never prices shares it didn't mint.
+                bsc && holding.venue !== undefined && holding.valueUsd !== undefined ? (
                   usd(holding.valueUsd)
                 ) : shownPrice !== undefined ? (
                   <Money value={holding.qty * shownPrice} />
@@ -459,9 +464,7 @@ export function AssetDetailScreen({
               label={asset.tier === "stock" ? "Shares" : "Amount"}
               value={tokenQty(holding.raw, asset.decimals ?? 18)}
             />
-            {shownPrice !== undefined && (
-              <Stat label="Price" value={usd(shownPrice)} />
-            )}
+            {positionPrice !== undefined && <Stat label="Price" value={usd(positionPrice)} />}
             {position && position.costBasisUsd > 0 && (
               <>
                 <Stat label="Avg cost" value={usd(position.avgCostPerUnit)} />
@@ -606,8 +609,10 @@ export function AssetDetailScreen({
           bottom: 0,
           zIndex: 5,
           marginTop: "auto",
-          padding: "16px 22px calc(18px + env(safe-area-inset-bottom))",
-          background: "linear-gradient(to top, var(--paper), var(--paper) 62%, transparent)",
+          padding: "22px 22px calc(18px + env(safe-area-inset-bottom))",
+          // Opaque except for the top fade: the reason line (a closed market, a paused issuer) sits
+          // in it, and with a fade that long the line printed over the card scrolling underneath.
+          background: "linear-gradient(to top, var(--paper), var(--paper) calc(100% - 22px), transparent)",
         }}
       >
         {reason && (

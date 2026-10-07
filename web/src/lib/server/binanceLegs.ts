@@ -19,8 +19,9 @@ import { encodeFunctionData } from "viem";
 import { ERC20_ABI } from "@/lib/abis";
 import { fromUnits } from "@/lib/format";
 import { formatNextOpen, nextUsOpenMs } from "@/lib/marketHours";
-import { BSC_MIN_LEG_USD, isBuyable } from "@/lib/rwa";
+import { BSC_MIN_LEG_USD, minLegUsd, venueBuyable } from "@/lib/rwa";
 import { rawToUsd } from "@/lib/units";
+import { anchoredSlippageBps, PRICE_MOVED_MESSAGE } from "@/lib/slippage";
 import type { ExecCall } from "@/lib/execution";
 import type { Asset, StaxChain } from "@/lib/chains/types";
 import { getBinanceWeb3 } from "./binance";
@@ -49,6 +50,15 @@ export interface BinanceLegArgs {
    * made just to size this guard.
    */
   usdValue: number;
+  /**
+   * The floor the person reviewed (expected output minus their tolerance), raw units of tokenOut.
+   * When set on a build, the swap is built with slippage tightened so its minimum can't fall
+   * below it, or refused with "price_moved" when the fresh quote is already under it
+   * (lib/slippage.ts).
+   */
+  reviewedMinOut?: bigint;
+  /** Which way the leg trades; sells clear a lower floor than buys. Defaults to "buy". */
+  side?: "buy" | "sell";
   /** False for a price check: quote only, no swap build, and the leg's `swapData` is "0x". */
   build?: boolean;
 }
@@ -86,7 +96,7 @@ export class BinanceLegRefusal extends Error {
    */
   constructor(
     message: string,
-    readonly code?: "min_trade" | "route",
+    readonly code?: "min_trade" | "route" | "price_moved",
   ) {
     super(message);
   }
@@ -114,13 +124,20 @@ export async function buildBinanceLeg(a: BinanceLegArgs): Promise<BinanceLeg> {
   if (!Number.isFinite(a.usdValue)) {
     throw new BinanceLegRefusal("Couldn't price this trade right now. Try again in a moment.");
   }
-  if (a.usdValue < BSC_MIN_LEG_USD) {
-    // Design critique P1 #11: name the next step, not just the rule that was broken. Reviewer
-    // follow-up: side-neutral wording, and no leading "NVDA:" — buildBinanceLeg prices both buy
-    // and sell legs, and "the smallest buy is $6" told someone selling a $5.70 position (bought
-    // at the $6 floor, dipped since, no amount field on the Sell tab to "enter more" into) that
-    // they needed to make a bigger BUY.
-    throw new BinanceLegRefusal(`The smallest trade is $${BSC_MIN_LEG_USD}. Enter $${BSC_MIN_LEG_USD} or more.`, "min_trade");
+  const side = a.side ?? "buy";
+  // The 1e-6 absorbs float dust from splitting a plan (a leg sized exactly at the floor can land a
+  // few wei under it); the floor is already a buffer above the real >$5 limit.
+  if (a.usdValue < minLegUsd(side) - 1e-6) {
+    // Design critique P1 #11: name the next step, not just the rule that was broken. A buy has no
+    // amount to "enter" on a plan screen, so the words stay about the trade. A sale is checked
+    // against Binance's real floor ($5), not the $6 buffer buys carry, and its message points at
+    // what the Sell tab can actually do (a bigger share), never at an amount field it doesn't have.
+    throw new BinanceLegRefusal(
+      side === "sell"
+        ? "The smallest sale is $5. Sell more of it, or wait until it's worth more."
+        : `The smallest trade is $${BSC_MIN_LEG_USD}. Enter $${BSC_MIN_LEG_USD} or more.`,
+      "min_trade",
+    );
   }
   const router = a.chain.routers.binance;
   if (!router) throw new Error(`Binance aggregator isn't configured on ${a.chain.name}.`);
@@ -143,7 +160,14 @@ export async function buildBinanceLeg(a: BinanceLegArgs): Promise<BinanceLeg> {
     throw new BinanceLegRefusal(`${a.symbol}: Binance quoted a different amount than requested.`, "route");
   }
 
-  const slippageFloor = (q.toTokenAmount * (BPS - BigInt(a.slippageBps))) / BPS;
+  // Anchor the build's tolerance to what the person reviewed (price checks have nothing to anchor).
+  let slippageBps = a.slippageBps;
+  if (a.build !== false) {
+    const anchored = anchoredSlippageBps({ freshExpectedOut: q.toTokenAmount, reviewedMinOut: a.reviewedMinOut, slippageBps });
+    if (anchored === null) throw new BinanceLegRefusal(PRICE_MOVED_MESSAGE, "price_moved");
+    slippageBps = anchored;
+  }
+  const slippageFloor = (q.toTokenAmount * (BPS - BigInt(slippageBps))) / BPS;
   // A price check (TradeScreen polls every 15 s) needs only the quote. Building the swap is a
   // second call against the shared 5-per-window budget, so it happens only when the user is
   // about to sign, and a price-only leg carries no calldata.
@@ -160,7 +184,7 @@ export async function buildBinanceLeg(a: BinanceLegArgs): Promise<BinanceLeg> {
     };
   }
 
-  const slippagePercent = (a.slippageBps / 100).toString();
+  const slippagePercent = (slippageBps / 100).toString();
   const built = await binance
     .buildSwap({
       fromToken: a.tokenIn,
@@ -176,6 +200,11 @@ export async function buildBinanceLeg(a: BinanceLegArgs): Promise<BinanceLeg> {
   }
   if (built.tx.to.toLowerCase() !== router.toLowerCase()) {
     throw new BinanceLegRefusal(`${a.symbol}: Binance's swap calldata targeted an unexpected router.`, "route");
+  }
+  // Binance builds its own minimum into the calldata. If it's below what the person reviewed
+  // (allowing 1 bp of rounding), the swap could settle for less than they agreed to: refuse.
+  if (a.reviewedMinOut !== undefined && built.tx.minReceiveAmount < (a.reviewedMinOut * (BPS - BigInt(1))) / BPS) {
+    throw new BinanceLegRefusal(PRICE_MOVED_MESSAGE, "price_moved");
   }
   const minOut = built.tx.minReceiveAmount < slippageFloor ? built.tx.minReceiveAmount : slippageFloor;
 
@@ -204,7 +233,7 @@ export function checkBscBuyable(
   nowMs: number,
 ): { ok: true; row: RwaToken } | { ok: false; message: string; nextOpenMs?: number } {
   const row = tokens.find((t) => t.tokenContractAddress.toLowerCase() === tokenAddress.toLowerCase());
-  if (!row || !isBuyable(row.statusInfo)) {
+  if (!row || !venueBuyable(row.statusInfo, nowMs)) {
     // No row at all means Binance has nothing to say about this address — there is no session to
     // report, so this is the one case that carries no `nextOpenMs` (design critique P0 #1: the
     // client falls back to its own "check back" copy rather than inventing a time).

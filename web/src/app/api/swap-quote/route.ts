@@ -28,6 +28,7 @@ import { assetBySymbol, isRoutable } from "@/lib/chains";
 import { KyberError, KyberNoRoute, kyberBuild, kyberRoute } from "@/lib/server/kyber";
 import { BinanceLegError, BinanceLegRefusal, bscLegUsdValue, buildBinanceLeg, checkBscBuyable, cryptoLegUsdValue } from "@/lib/server/binanceLegs";
 import { priceAsset } from "@/lib/prices";
+import { anchoredSlippageBps, PRICE_MOVED_MESSAGE, reviewedFloorRequiredMessage } from "@/lib/slippage";
 import { chainFromRequest, serverClient } from "@/lib/server/chain";
 import { getBinanceWeb3 } from "@/lib/server/binance";
 import { dryRunBscSwap } from "@/lib/server/dryRun";
@@ -59,6 +60,11 @@ const SwapQuoteRequestSchema = z.object({
   recipient: z.string().refine((a) => isAddress(a), "Invalid recipient."), // must equal sender (checked below)
   slippageBps: z.number().int().min(0).max(2000).optional(),
   build: z.boolean().optional(),
+  /**
+   * With build=true: the floor the person reviewed (raw units of the output token). The swap is
+   * built so its minimum can't fall below it, or refused as "price_moved" (lib/slippage.ts).
+   */
+  reviewedMinOut: z.string().regex(/^\d{1,40}$/).optional(),
   /** BSC only: which issuer to trade (bStock vs Ondo). Ignored off BSC. */
   venue: z.enum(["bstock", "ondo"]).optional(),
 });
@@ -155,6 +161,8 @@ export async function POST(req: NextRequest) {
   const binanceVenue = Boolean(chain.routers.binance && asset.via === "binance");
 
   if (binanceVenue) {
+    const floorMessage = reviewedFloorRequiredMessage(body);
+    if (floorMessage) return badRequest(floorMessage);
     // Review Focus #1: refuse before ever asking Binance for a quote when the issuer isn't
     // trading this token right now (fails closed if the catalog doesn't even list it).
     // Crypto (BTCB, ETH, BNB) has no RWA row and no market hours: it trades whenever the
@@ -192,6 +200,8 @@ export async function POST(req: NextRequest) {
         taker: sender,
         slippageBps,
         usdValue,
+        side: body.side,
+        ...(body.reviewedMinOut ? { reviewedMinOut: BigInt(body.reviewedMinOut) } : {}),
         build: Boolean(body.build),
       });
       // Dry run only when there is a real swap to check (build=true — right before the user
@@ -245,19 +255,28 @@ export async function POST(req: NextRequest) {
 
     let amountOut = route.amountOut;
     let data: `0x${string}` | undefined;
+    let buildSlippageBps = slippageBps;
     if (body.build) {
+      // Same anchoring as BSC: the build's tolerance can't reach below the floor that was reviewed.
+      const anchored = anchoredSlippageBps({
+        freshExpectedOut: route.amountOut,
+        reviewedMinOut: body.reviewedMinOut ? BigInt(body.reviewedMinOut) : undefined,
+        slippageBps,
+      });
+      if (anchored === null) return jsonError(400, PRICE_MOVED_MESSAGE, undefined, { code: "price_moved" });
+      buildSlippageBps = anchored;
       const built = await kyberBuild(chain, {
         routeSummary: route.routeSummary,
         sender,
         recipient,
-        slippageBps,
+        slippageBps: buildSlippageBps,
         deadline: Math.floor(Date.now() / 1000) + DEADLINE_SECONDS,
       });
       if (built.amountIn !== amountIn) return jsonError(502, "The aggregator changed the swap amount. Please try again.");
       amountOut = built.amountOut;
       data = built.data;
     }
-    const minOut = (amountOut * (BPS - BigInt(slippageBps))) / BPS;
+    const minOut = (amountOut * (BPS - BigInt(buildSlippageBps))) / BPS;
 
     const result: SwapQuoteResponse = {
       router: route.routerAddress,

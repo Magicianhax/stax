@@ -6,10 +6,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-vi.mock("@/lib/server/privyAuth", () => ({ verifyRequest: vi.fn().mockResolvedValue({ userId: "u1" }) }));
+const fetchWalletsMock = vi.fn();
+vi.mock("@/lib/server/privyAuth", () => ({
+  verifyRequest: vi.fn().mockResolvedValue({ userId: "u1" }),
+  fetchPrivyEmbeddedWallets: (...args: unknown[]) => fetchWalletsMock(...args),
+}));
 vi.mock("@/lib/server/admin", () => ({ requireApproved: vi.fn().mockResolvedValue(null) }));
 vi.mock("@/lib/server/rateLimit", () => ({ rateLimit: vi.fn().mockResolvedValue({ ok: true }) }));
-const getSmartAccountMock = vi.fn().mockResolvedValue(null);
+const getSmartAccountMock = vi.fn();
 vi.mock("@/lib/server/users", () => ({
   touchUser: vi.fn().mockResolvedValue(undefined),
   getSmartAccount: (...args: unknown[]) => getSmartAccountMock(...args),
@@ -49,6 +53,10 @@ function req(b: Record<string, unknown>): NextRequest {
 }
 
 beforeEach(() => {
+  // A normal user has registered the smart account body() sends.
+  getSmartAccountMock.mockReset().mockResolvedValue({ address: "0x2222222222222222222222222222222222222222" });
+  // The caller's own embedded wallet is exactly what body() sends.
+  fetchWalletsMock.mockReset().mockResolvedValue([{ id: "w1", address: "0x1111111111111111111111111111111111111111" }]);
   getAutopilotSpy.mockReset().mockResolvedValue(null);
   upsertAutopilotSpy.mockReset().mockImplementation((cfg: unknown) => Promise.resolve(cfg));
 });
@@ -98,4 +106,48 @@ describe("POST /api/autopilot: rules that read live holdings (rebalance, safety_
       expect(upsertAutopilotSpy).toHaveBeenCalled();
     },
   );
+});
+
+describe("POST /api/autopilot: the signing wallet must be the caller's own", () => {
+  it("refuses another user's wallet id paired with the caller's own smart account", async () => {
+    const res = await POST(req(body({ walletId: "w_victim", owner: "0x9999999999999999999999999999999999999999" })));
+    expect(res.status).toBe(403);
+    expect(upsertAutopilotSpy).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when Privy can't be reached, rather than trusting the body", async () => {
+    fetchWalletsMock.mockRejectedValueOnce(new Error("privy down"));
+    const res = await POST(req(body()));
+    expect(res.status).toBe(503);
+    expect(upsertAutopilotSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/autopilot: a registered smart account is required", () => {
+  it("returns a plain 409 when the user has no smart account on this chain", async () => {
+    getSmartAccountMock.mockResolvedValue(null);
+    const res = await POST(req(body()));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/Open your wallet once/);
+    expect(upsertAutopilotSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/autopilot: BNB Chain amounts that could never trade", () => {
+  it("refuses the $5 daily idea: under Binance's $6 minimum, every run would be skipped", async () => {
+    const res = await POST(req(body({ amountUsd: 5, cadence: "daily" })));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/at least \$6/);
+    expect(upsertAutopilotSpy).not.toHaveBeenCalled();
+  });
+
+  it("needs $12 for a safety switch, which buys two names", async () => {
+    const rule = { type: "safety_switch", dropPct: 3, movePct: 25 };
+    expect((await POST(req(body({ amountUsd: 10, rule })))).status).toBe(400);
+    expect((await POST(req(body({ amountUsd: 12, rule })))).status).toBe(200);
+  });
+
+  it("leaves Base's small amounts alone", async () => {
+    expect((await POST(req(body({ chain: "base", amountUsd: 5 })))).status).toBe(200);
+  });
 });
