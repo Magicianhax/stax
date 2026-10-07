@@ -29,11 +29,6 @@ import {
   type SpreadTickerCall,
 } from "@/lib/spread";
 
-// Binance's Web3 API refuses US traffic ("40304: Service not available due to compliance
-// restriction"), and Vercel runs functions in Washington DC by default, so every route that
-// reaches Binance runs in Frankfurt. The database is in us-east-1: one extra ocean crossing.
-export const preferredRegion = "fra1";
-
 export const revalidate = 0; // caching is managed via Cache-Control below
 
 const TICK_WINDOW_MS = SPREAD_SNAPSHOT_SPACING_MINUTES * 60 * 1000;

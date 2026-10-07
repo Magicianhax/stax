@@ -7,11 +7,6 @@ import { claimDueAutopilots, releaseAutopilot } from "@/lib/server/autopilotStor
 import { runAutopilot } from "@/lib/server/autopilotExecutor";
 import { isPermanent } from "@/lib/autopilotRetry";
 
-// Binance's Web3 API refuses US traffic ("40304: Service not available due to compliance
-// restriction"), and Vercel runs functions in Washington DC by default, so every route that
-// reaches Binance runs in Frankfurt. The database is in us-east-1: one extra ocean crossing.
-export const preferredRegion = "fra1";
-
 // Scheduled, autonomous runs — never cache. Allow up to 5 min for a batch.
 // Every due config is claimed atomically (claimed_at stamped), then grouped by
 // chain: chains run in parallel, configs within a chain sequentially (one
