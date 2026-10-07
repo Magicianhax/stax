@@ -26,7 +26,8 @@ import { useAmountKeypad } from "@/hooks/useAmountKeypad";
 import { describeNextChange } from "@/lib/marketHours";
 import { stateLabel, gapSentence } from "@/lib/plainCopy";
 import { otherOpenVenue } from "@/lib/assetVenuePicker";
-import { BSC_MIN_LEG_USD, sellShareClearsFloor } from "@/lib/rwa";
+import { BSC_MIN_LEG_USD, priceOrStatic, sellShareClearsFloor } from "@/lib/rwa";
+import { useDemo } from "@/components/demo/DemoProvider";
 import { usd, tokenQty, fromUnits } from "@/lib/format";
 import { feeUsd, feeOf } from "@/lib/fees";
 import { usdToRaw } from "@/lib/units";
@@ -66,6 +67,7 @@ export function TradeScreen({
 }) {
   const chain = useChain();
   const bsc = chain.key === "bsc";
+  const demo = useDemo();
   // Design critique P1 #9: "Buy from Ondo instead" switches the issuer right here, without a
   // trip back to Asset detail. The prop is where the trade started; this is where it is now.
   // A trade that bounced back with an error remounts this screen, so the switch rides in the draft.
@@ -83,7 +85,7 @@ export function TradeScreen({
   const { data: dayMarket } = useMarketHistory(asset.symbol, "1D");
   // Design critique P1 #5: overridden below to the CHOSEN issuer's own price on BSC — the
   // generic oracle price can name a different number than the venue this trade actually uses.
-  let shownPrice = livePrice ?? d.price;
+  let shownPrice = priceOrStatic({ bsc, demo: demo !== null, live: livePrice, staticPrice: d.price });
   const day = dayMarket?.changePct ?? d.day;
   const up = day >= 0;
   const market = useMarketStatus();

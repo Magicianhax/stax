@@ -1,7 +1,7 @@
 // The two rules the whole market-hours layer rests on: what "buyable" means, and how the
 // gap between a token and the real share is measured.
 import { describe, expect, it } from "vitest";
-import { BSC_MIN_LEG_USD, BSC_MIN_SELL_USD, gapPct, isBuyable, marketStateFrom, minLegUsd, sellShareClearsFloor, bscSellBlocked, venueBuyable, venueState } from "./rwa";
+import { BSC_MIN_LEG_USD, BSC_MIN_SELL_USD, gapPct, isBuyable, marketStateFrom, minLegUsd, sellShareClearsFloor, bscSellBlocked, venueBuyable, venueState, priceOrStatic } from "./rwa";
 
 describe("isBuyable", () => {
   it("is true only when open AND trading", () => {
@@ -106,5 +106,18 @@ describe("venueBuyable: the trade gate and the catalog share one rule", () => {
   it("still lets Ondo trade overnight, because its own session says so", () => {
     const ondoOvernight = { openState: true, marketStatus: "overnight" as const, reasonCode: "TRADING" as const };
     expect(venueBuyable(ondoOvernight, FRI_AFTER_CLOSE)).toBe(true);
+  });
+});
+
+describe("priceOrStatic", () => {
+  it("prefers a live price everywhere", () => {
+    expect(priceOrStatic({ bsc: true, demo: false, live: 201.5, staticPrice: 134.19 })).toBe(201.5);
+  });
+  it("falls back to the display table on Base and Mantle and in the demo, as before", () => {
+    expect(priceOrStatic({ bsc: false, demo: false, live: null, staticPrice: 134.19 })).toBe(134.19);
+    expect(priceOrStatic({ bsc: true, demo: true, live: undefined, staticPrice: 134.19 })).toBe(134.19);
+  });
+  it("shows no price on BNB Chain when Binance gave none, never the hard-coded table's number", () => {
+    expect(priceOrStatic({ bsc: true, demo: false, live: null, staticPrice: 134.19 })).toBeUndefined();
   });
 });

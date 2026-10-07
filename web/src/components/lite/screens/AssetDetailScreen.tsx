@@ -20,7 +20,7 @@ import { useMarketHistory, type MarketRange } from "@/hooks/useMarket";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { useBaskets } from "@/hooks/useBaskets";
 import { useRwa, useBscBuyGate } from "@/hooks/useRwa";
-import { bscSellBlocked } from "@/lib/rwa";
+import { bscSellBlocked, priceOrStatic } from "@/lib/rwa";
 import { useSpreadHistory } from "@/hooks/useSpread";
 import { PriceVsRealShare } from "@/components/lite/spread/PriceVsRealShare";
 import { historyStatus } from "@/lib/priceHistoryStatus";
@@ -103,7 +103,7 @@ export function AssetDetailScreen({
   // Design critique P1 #5: on BSC this is overridden below to the CHOSEN issuer's own price,
   // once that venue is known — the generic oracle price disagreed with the venue a viewer had
   // just picked on the panel further down this same screen.
-  let shownPrice = livePrice ?? d.price;
+  let shownPrice = priceOrStatic({ bsc: chain.key === "bsc", demo: demo !== null, live: livePrice, staticPrice: d.price });
   const safe = asset.tier === "safe";
   const stock = asset.tier === "stock";
   // Coinbase B20 stocks (Base): dividends grow the token instead of paying cash.

@@ -152,3 +152,14 @@ export function venueState(s: RwaStatusLike, nowMs: number): MarketState {
 export function venueBuyable(s: RwaStatusLike, nowMs: number): boolean {
   return venueState(s, nowMs) === "closed" ? false : isBuyable(s);
 }
+
+/**
+ * The price a screen prints for an asset: the live number when there is one; else the hard-coded
+ * display table's "reference" price, except on BNB Chain outside the demo. There a Binance outage
+ * or rate limit used to leave the table's number (Nvidia at $134.19) on screen as if it were live,
+ * next to a Buy button that works, so no live price reads as "no price" (undefined).
+ */
+export function priceOrStatic(p: { bsc: boolean; demo: boolean; live: number | null | undefined; staticPrice: number | undefined }): number | undefined {
+  if (p.live !== null && p.live !== undefined) return p.live;
+  return p.bsc && !p.demo ? undefined : p.staticPrice;
+}

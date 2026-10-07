@@ -326,3 +326,13 @@ describe("parseExplorerTransfers", () => {
     expect(() => parseExplorerTransfers(BASE, WALLET, { message: "Something went wrong" })).toThrow();
   });
 });
+
+describe("knownTokens on BNB Chain", () => {
+  it("maps the other issuer's mint of a stock to the same symbol, in its own decimals", () => {
+    const bsc = getChain("bsc");
+    const nvda = bsc.assets.all.find((a) => a.symbol === "NVDA")!;
+    const m = knownTokens(bsc);
+    expect(m.get(nvda.address!.toLowerCase())?.symbol).toBe("NVDA");
+    expect(m.get(nvda.twin!.address.toLowerCase())).toEqual({ symbol: "NVDA", decimals: nvda.twin!.decimals });
+  });
+});
