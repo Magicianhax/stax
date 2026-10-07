@@ -31,6 +31,7 @@ import { DEMO_TRANSACTIONS } from "@/lib/demo/demoData";
 import { DEMO_NOW } from "@/lib/demoSeries";
 import { iconBtn, Spinner, Pager } from "./primitives";
 import { ReceiveSheet } from "@/components/lite/receive";
+import { isInvestKind, walletTxKind, walletTxParty, walletTxTitle } from "@/lib/walletLabels";
 
 const DOTS = "••••••";
 const WEEK = 7 * 86_400e3;
@@ -160,8 +161,10 @@ export function WalletScreen({
 
   // A transfer to the executor is a plan being placed; its holdings come from
   // the activity log (matched by tx hash) for the row's logo cluster.
-  const executor = chain.contracts.executor.toLowerCase();
-  const isInvest = (t: WalletTx) => t.direction === "out" && t.counterparty.toLowerCase() === executor;
+  // On BNB Chain a plan goes to the Binance router and Savings to the Venus vault, not to the
+  // executor, so those read as what they are (lib/walletLabels.ts) rather than "Sent USDT".
+  const kindOf = (t: WalletTx) => walletTxKind(chain, t);
+  const isInvest = (t: WalletTx) => isInvestKind(kindOf(t));
   const symbolsFor = (t: WalletTx) => activity?.find((a) => a.txHash.toLowerCase() === t.hash.toLowerCase())?.symbols;
 
   const loading = balLoading || portLoading;
@@ -356,7 +359,7 @@ export function WalletScreen({
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 600, fontSize: 15 }}>
-                      {invest ? "Invested in a plan" : `${incoming ? "Received" : "Sent"} ${t.symbol}`}
+                      {walletTxTitle(kindOf(t), t)}
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 2, minWidth: 0 }}>
                       <span className={invest ? "tnum" : "mono"} style={{ fontSize: 11.5, color: "var(--ink-2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -512,7 +515,7 @@ export function WalletScreen({
       )}
 
       {/* transaction detail sheet */}
-      <BottomSheet open={!!tx} onClose={() => setTx(null)} title={tx ? (isInvest(tx) ? "Invested" : tx.direction === "in" ? "Received" : "Sent") : undefined}>
+      <BottomSheet open={!!tx} onClose={() => setTx(null)} title={tx ? (isInvest(tx) ? "Invested" : walletTxParty(kindOf(tx)) ? walletTxTitle(kindOf(tx), tx) : tx.direction === "in" ? "Received" : "Sent") : undefined}>
         {tx && (
           <div style={{ display: "flex", flexDirection: "column", gap: 18, padding: "2px 2px 8px" }}>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
@@ -523,7 +526,14 @@ export function WalletScreen({
             </div>
             <div className="card" style={{ padding: "4px 16px" }}>
               <DetailRow label="Status" value="Confirmed" />
-              <DetailRow label={isInvest(tx) ? "Placed by" : tx.direction === "in" ? "From" : "To"} value={isInvest(tx) ? "Vera · Stax executor" : shortAddress(tx.counterparty)} mono={!isInvest(tx)} borderTop />
+              {(() => {
+                const party = walletTxParty(kindOf(tx));
+                return party ? (
+                  <DetailRow label={party.label} value={party.value} borderTop />
+                ) : (
+                  <DetailRow label={tx.direction === "in" ? "From" : "To"} value={shortAddress(tx.counterparty)} mono borderTop />
+                );
+              })()}
               <DetailRow label="Network" value={chain.name} borderTop />
               {tx.timestamp && (
                 <DetailRow label="When" value={new Date(tx.timestamp * 1000).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })} borderTop />

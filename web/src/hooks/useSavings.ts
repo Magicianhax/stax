@@ -15,6 +15,7 @@ import { assertSavingsCallsAreSafe, type ExecCall } from "@/lib/execution";
 import { authedFetch } from "@/lib/authedFetch";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { useRefreshBalances } from "@/hooks/useBalances";
+import { withChainParam } from "@/lib/chainUrl";
 import type { SavingsRateResponse } from "@/app/api/savings/route";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -39,7 +40,7 @@ export function useSavingsRate() {
     staleTime: 30_000,
     refetchInterval: 60_000,
     queryFn: async (): Promise<SavingsRateResponse> => {
-      const res = await fetch(`/api/savings`, { headers: { "x-stax-chain": chain.key } });
+      const res = await fetch(withChainParam(`/api/savings`, chain.key), { headers: { "x-stax-chain": chain.key } });
       if (!res.ok) throw new Error("Couldn't load the savings rate.");
       return res.json();
     },
@@ -62,7 +63,7 @@ export function useSavingsBalance(address?: string) {
     staleTime: 15_000,
     refetchInterval: 30_000,
     queryFn: async (): Promise<number | null> => {
-      const res = await fetch(`/api/savings?address=${address}`, { headers: { "x-stax-chain": chain.key } });
+      const res = await fetch(withChainParam(`/api/savings?address=${address}`, chain.key), { headers: { "x-stax-chain": chain.key } });
       if (!res.ok) throw new Error("Couldn't load your Savings balance.");
       const json = (await res.json()) as SavingsRateResponse;
       return json.balanceUsd ?? null;

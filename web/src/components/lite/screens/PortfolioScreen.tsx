@@ -191,8 +191,10 @@ export function PortfolioScreen({
   const donutTotal = priced.reduce((s, h) => s + (h.valueUsd ?? 0), 0) + cash + savings || 1;
   const legend = [
     ...priced.map((h, i) => ({
-      key: h.asset.symbol,
-      name: toTile(h.asset.symbol, h.asset.name).name,
+      // One symbol can be two rows (bStock's and Ondo's mint): key and name them per issuer, or
+      // React gets duplicate keys and the legend shows two identical lines.
+      key: holdingKey(h),
+      name: twinSymbols.has(h.asset.symbol) && h.venue ? `${toTile(h.asset.symbol, h.asset.name).name} (${PLATFORM_LABEL[h.venue]})` : toTile(h.asset.symbol, h.asset.name).name,
       value: h.valueUsd ?? 0,
       color: rampColor(i),
     })),
@@ -315,8 +317,10 @@ export function PortfolioScreen({
               const abs = rc && h.valueUsd !== undefined ? h.valueUsd - h.valueUsd / (1 + rc.pct / 100) : undefined;
               // Unrealized gain against what was paid, when the lots are known.
               const pos = positions.get(h.asset.symbol);
+              // Cost basis is for the whole ticker, not one issuer's token, so a ticker held through both
+              // issuers shows each row's own move instead of the same combined gain twice.
               const gain =
-                pos && pos.unrealizedUsd !== null && pos.unrealizedPct !== null && pos.costBasisUsd > 0
+                pos && !twinSymbols.has(h.asset.symbol) && pos.unrealizedUsd !== null && pos.unrealizedPct !== null && pos.costBasisUsd > 0
                   ? { abs: pos.unrealizedUsd, pct: pos.unrealizedPct, label: "vs cost" }
                   : null;
               const qty = tokenQty(h.raw, h.asset.decimals ?? 18);

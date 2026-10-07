@@ -1,6 +1,6 @@
 "use client";
 import type { ActivityLeg } from "@/lib/onchainHistory";
-import type { RwaPlatform } from "@/lib/chains";
+import type { ChainKey, RwaPlatform } from "@/lib/chains";
 import type { DryRun } from "@/lib/dryRun";
 
 // Stax app shell — a small screen router that mirrors the design's go(screen,
@@ -38,6 +38,7 @@ import { LoadingScreen } from "@/components/shared/AppShell";
 import { BetaGateScreen } from "./screens/BetaGateScreen";
 import { HomeScreen } from "./screens/HomeScreen";
 import { GoalScreen } from "./screens/GoalScreen";
+import { routesAfterPlanAttempt } from "./planRoutes";
 import { ThinkingScreen } from "./screens/ThinkingScreen";
 import { PlanScreen } from "./screens/PlanScreen";
 import { PlacingScreen } from "./screens/PlacingScreen";
@@ -193,12 +194,27 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
 
   // Gifts live on Base only (ADR-0010), while BNB Chain is the default. Opening a gift screen, or
   // a `?gift=` link, on a chain without the gift contract switches to the one that has it.
+  //
+  // The switch is borrowed, not a new choice: the network the person was on is remembered and put
+  // back once no gift screen is left in the stack, so a BNB Chain user isn't stranded on Base (with
+  // their USDT and stocks gone from Home) after sending a gift, and the app doesn't reopen on Base.
   const [activeChainKey, setActiveChain] = useChainKey();
+  const chainBeforeGift = useRef<ChainKey | null>(null);
+  const onGiftScreen = stack.some((r) => r.screen === "gift" || r.screen === "gifts");
   useEffect(() => {
-    if (current.screen !== "gift" && current.screen !== "gifts") return;
-    if (giftContractFor(activeChainKey) || !giftContractFor("base")) return;
-    setActiveChain("base");
-  }, [current.screen, activeChainKey, setActiveChain]);
+    if (onGiftScreen) {
+      if (giftContractFor(activeChainKey) || !giftContractFor("base")) return;
+      chainBeforeGift.current = activeChainKey;
+      setActiveChain("base");
+      notify("Gifts live on Base, so we switched you there for now.", "info");
+      return;
+    }
+    const before = chainBeforeGift.current;
+    if (!before) return;
+    chainBeforeGift.current = null;
+    // Only undo OUR switch: someone who picked another network on the way keeps their pick.
+    if (activeChainKey === "base") setActiveChain(before);
+  }, [onGiftScreen, activeChainKey, setActiveChain, notify]);
   const { screen, params } = current;
 
   const [goal, setGoal] = useState("");
@@ -320,11 +336,9 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
         const startedAt = Date.now(); // feel-trade: Thinking dwells ≥ DWELL_MS
         void invest.allocate(g, a, "balanced").then((res) => {
           const swapIn = () =>
-            setStack((s) => {
-              // Replace the thinking route with plan (or fall back to goal).
-              const base = s.filter((r) => r.screen !== "thinking");
-              return [...base, { screen: res ? "plan" : "goal", params: {} }];
-            });
+            // Replace the thinking route with the plan, or go back to the goal screen carrying what
+            // the person typed (and without stacking a second goal route).
+            setStack((s) => routesAfterPlanAttempt(s, Boolean(res), g, a));
           setTimeout(swapIn, Math.max(0, DWELL_MS - (Date.now() - startedAt)));
         });
         return;
@@ -386,10 +400,14 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
     (t: Tone) => {
       if (t === tone || rethinking) return;
       haptic.select();
+      const previous = tone;
       setTone(t);
       setRethinking(true);
       const adjustedGoal = goalRef.current + TONE_HINT[t];
-      void invest.allocate(adjustedGoal, amountRef.current, TONE_RISK[t]).then(() => {
+      void invest.allocate(adjustedGoal, amountRef.current, TONE_RISK[t]).then((res) => {
+        // A failed nudge leaves the old plan on screen, so the chip must stay on the tone that plan
+        // was built with (and the same nudge can be tapped again).
+        if (!res) setTone(previous);
         setRethinking(false);
       });
     },
@@ -664,7 +682,7 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
       view = <AutopilotScreen go={go} />;
       break;
     case "goal":
-      view = <GoalScreen go={go} />;
+      view = <GoalScreen go={go} initialGoal={params.goal as string | undefined} initialAmount={params.amt as string | undefined} />;
       break;
     case "thinking":
       view = <ThinkingScreen />;
