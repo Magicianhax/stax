@@ -1,6 +1,7 @@
 "use client";
 import type { ActivityLeg } from "@/lib/onchainHistory";
 import type { RwaPlatform } from "@/lib/chains";
+import type { DryRun } from "@/lib/dryRun";
 
 // Stax app shell — a small screen router that mirrors the design's go(screen,
 // params) orchestrator (app.jsx) while wiring the REAL hooks end to end.
@@ -140,6 +141,8 @@ export interface TradeDraft {
   amt: string;
   sellPct: number;
   tol: number;
+  /** BSC: the issuer the person switched to on Trade, so a bounce back doesn't undo the switch. */
+  venue?: RwaPlatform;
 }
 
 /** Balances the moment Placing appeared (`params.before` on placing/success). */
@@ -253,7 +256,7 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
         // Trade and Placing both leave the stack: back from the receipt is the asset.
         setStack((s) => [
           ...s.filter((x) => x.screen !== "placing" && x.screen !== "trade"),
-          { screen: "receipt", params: { order, txHash: r.txHash, at: Date.now(), loop } },
+          { screen: "receipt", params: { order, txHash: r.txHash, at: Date.now(), loop, dryRun: r.dryRun } },
         ]);
         swap.reset();
       });
@@ -765,6 +768,7 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
         loop?: LoopParams;
         legs?: ActivityLeg[];
         failed?: boolean;
+        dryRun?: DryRun;
       };
       const { order, loop, ref: refCode, ...rest } = rp;
       view = (
@@ -779,6 +783,7 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
           at={rest.at}
           legs={rest.legs}
           failed={rest.failed}
+          dryRun={rest.dryRun}
           onClose={order ? () => closeTrade(order, loop) : undefined}
         />
       );

@@ -279,7 +279,7 @@ export function PlanScreen({
                 {a.reason}
               </div>
               {/* Binance's own pre-trade check on this leg, in plain words — never claims a
-                  check that didn't run (design decision in lib/plainCopy.ts's dryRunLine, matched
+                  check that didn't run (design decision in lib/planDryRuns.ts, matched
                   here for the "not checked yet" case that screen deliberately stays silent on). */}
               {check && (
                 <div

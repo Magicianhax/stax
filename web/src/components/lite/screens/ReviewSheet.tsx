@@ -8,6 +8,7 @@ import { AssetTile, BottomSheet, type TileAsset } from "@/components/design";
 import { HoldButton } from "@/components/motion";
 import { useChain } from "@/lib/chains/active";
 import { usd } from "@/lib/format";
+import { holdingWords } from "@/lib/plainCopy";
 import type { TradeOrder } from "../LiteApp";
 
 export interface ReviewSheetProps {
@@ -50,7 +51,7 @@ export function ReviewSheet({ open, onClose, onConfirm, order, tile }: ReviewShe
             {title}
           </div>
           <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 2 }}>
-            {isSell ? "Paid into your cash balance" : "Real shares, held by you"}
+            {isSell ? "Paid into your cash balance" : order ? holdingWords(order.unit, order.ticker).ownership : ""}
           </div>
         </div>
       </div>

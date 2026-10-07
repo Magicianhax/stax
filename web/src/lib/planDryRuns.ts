@@ -1,6 +1,6 @@
 // PlanScreen's per-leg reading of a Vera plan's Binance Transaction API dry runs
 // (InvestPlanResult.dryRuns — one entry per leg, each tagged with the leg's `symbol` and target
-// `token` by /api/invest-plan). Deliberately separate from lib/plainCopy.ts's `dryRunLine`, which
+// `token` by /api/invest-plan). Deliberately separate from lib/plainCopy.ts's `dryRunReceiptRow`, which
 // is Trade's own quiet inline check and intentionally renders nothing for "skipped" so a routine
 // buy doesn't read like something unusual happened. PlanScreen is the one trust moment before a
 // hold-to-invest moves real money across every leg at once, so a leg Binance hasn't checked yet

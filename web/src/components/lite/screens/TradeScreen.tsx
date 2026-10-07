@@ -24,14 +24,14 @@ import { displayFor } from "@/lib/displayAssets";
 import { Icon, AssetTile, useMarketStatus, AmountInput, Keypad } from "@/components/design";
 import { useAmountKeypad } from "@/hooks/useAmountKeypad";
 import { describeNextChange } from "@/lib/marketHours";
-import { stateLabel, dryRunLine, gapSentence } from "@/lib/plainCopy";
+import { stateLabel, gapSentence } from "@/lib/plainCopy";
 import { otherOpenVenue } from "@/lib/assetVenuePicker";
 import { BSC_MIN_LEG_USD, sellShareClearsFloor } from "@/lib/rwa";
-import type { DryRun } from "@/lib/dryRun";
 import { usd, tokenQty, fromUnits } from "@/lib/format";
 import { feeUsd, feeOf } from "@/lib/fees";
 import { usdToRaw } from "@/lib/units";
-import { quoteProblemText, SwapQuoteError } from "@/lib/swapQuote";
+import { DryRunRefusal, quoteProblemText, SwapQuoteError } from "@/lib/swapQuote";
+import { PriceMovedError } from "@/lib/slippage";
 import { holdingVenue } from "@/lib/venues";
 import { PLATFORM_LABEL } from "@/components/lite/rwa/VenuePicker";
 import { haptic } from "@/lib/haptics";
@@ -68,7 +68,8 @@ export function TradeScreen({
   const bsc = chain.key === "bsc";
   // Design critique P1 #9: "Buy from Ondo instead" switches the issuer right here, without a
   // trip back to Asset detail. The prop is where the trade started; this is where it is now.
-  const [venueOverride, setVenueOverride] = useState<RwaPlatform | undefined>(undefined);
+  // A trade that bounced back with an error remounts this screen, so the switch rides in the draft.
+  const [venueOverride, setVenueOverride] = useState<RwaPlatform | undefined>(draft?.venue);
   const venue = venueOverride ?? venueProp;
   const asset: Asset = chain.assets.all.find((a) => a.symbol === symbol) ?? chain.assets.all[0];
   const d = displayFor(asset.symbol, asset.name);
@@ -190,17 +191,8 @@ export function TradeScreen({
   }
   const unit = asset.tier === "stock" ? "shares" : ticker;
 
-  // The dryrun stream attaches `dryRun?: DryRun` to the quote once /api/swap-quote runs a
-  // Binance simulate before signing; `Quote` doesn't declare the field yet, so this reads it
-  // defensively and renders nothing until it actually shows up (never claims a check that
-  // didn't run — lib/plainCopy.ts's `dryRunLine` is the single render decision, tested on its
-  // own). BSC only: off BSC there's no Binance simulate to report.
-  const dryRun = (quote as (typeof quote & { dryRun?: DryRun }) | undefined)?.dryRun;
-  const dryRunInfo = bsc ? dryRunLine(dryRun, tokenQty(netOutRaw, decimals), unit) : ({ kind: "none" } as const);
-  const dryRunBlocking = dryRunInfo.kind === "blocking";
-
   const order: TradeOrder | null =
-    side === "buy" && canBuy && !dryRunBlocking && quote
+    side === "buy" && canBuy && quote
       ? {
           side: "buy",
           symbol: asset.symbol,
@@ -233,7 +225,7 @@ export function TradeScreen({
   const confirm = () => {
     if (!order || !address) return;
     haptic.medium();
-    const nextDraft: TradeDraft = { amt, sellPct, tol };
+    const nextDraft: TradeDraft = { amt, sellPct, tol, ...(venueOverride ? { venue: venueOverride } : {}) };
     if (order.side === "buy") {
       if (!quote) return;
       void swap.buy({
@@ -262,16 +254,19 @@ export function TradeScreen({
   };
 
   const sellEmpty = side === "sell" && (!sellable || !holding || heldRaw <= BigInt(0));
-  const canReview = side === "buy" ? canBuy && !dryRunBlocking : canSell;
+  const canReview = side === "buy" ? canBuy : canSell;
   // Design critique P1 #11: only a trade that was SUBMITTED and reverted is an error — a refused
   // quote (market closed, below the $6 minimum) or a failed dry run is a normal state the person
   // can act on, so it never borrows the red banner (`isRealError` below decides the styling).
-  const quoteRefusalText = side === "buy" ? (quoteErrorText ?? (dryRunBlocking ? dryRunInfo.text : undefined)) : sellQuoteErrorText;
+  const quoteRefusalText = side === "buy" ? quoteErrorText : sellQuoteErrorText;
   // A swap that failed at its build-time quote carries the same SwapQuoteError: same plain words.
   const swapErrorText =
     swap.errorCause instanceof SwapQuoteError ? quoteProblemText(swap.errorCause, problemCtx(side)) : swap.error;
   const bannerError = swapErrorText ?? quoteRefusalText;
-  const isRealError = Boolean(swap.error);
+  // A refusal (market closed, price moved, Binance's check said no) means nothing was sent; only a
+  // submitted trade that failed on-chain is a real error.
+  const isRefusal = swap.errorCause instanceof SwapQuoteError || swap.errorCause instanceof DryRunRefusal || swap.errorCause instanceof PriceMovedError;
+  const isRealError = Boolean(swap.error) && !isRefusal;
 
   // Every amount change clears a stale swap error along with it, so the screen
   // never shows a failure for a trade the person has already edited away.
@@ -301,11 +296,6 @@ export function TradeScreen({
           : `${n > 0 ? usd(fee) : usd(feeUsd(100))} fee · no network cost`}
         {venueLabel ? ` · via ${venueLabel}` : ""}
       </div>
-      {dryRunInfo.kind === "quiet" && (
-        <p role="status" className="tnum" style={{ margin: "0 0 12px", textAlign: "center", fontSize: 12.5, color: "var(--ink-2)" }}>
-          {dryRunInfo.text}
-        </p>
-      )}
       <button
         className="btn btn-primary btn-block btn-lg tap"
         disabled={!canReview || swap.busy}
