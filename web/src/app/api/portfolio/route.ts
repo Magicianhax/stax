@@ -18,6 +18,8 @@ import { getBinanceWeb3 } from "@/lib/server/binance";
 import { bscBalanceMap, rpcCashRaw } from "@/lib/server/bscBalances";
 import { getSavingsBalanceUsd } from "@/lib/server/savings";
 import { getDaySummary } from "@/lib/server/marketData";
+import { verifyRequest } from "@/lib/server/privyAuth";
+import { getSmartAccount } from "@/lib/server/users";
 import { rateLimit, clientIp } from "@/lib/server/rateLimit";
 import { badRequest, tooManyRequests, serverError } from "@/lib/server/respond";
 
@@ -55,6 +57,17 @@ async function twinPricesByAddress(chain: StaxChain): Promise<Map<string, number
   }
 }
 
+async function callerOwns(req: NextRequest, chain: ChainKey, address: string): Promise<boolean> {
+  try {
+    const user = await verifyRequest(req);
+    if (!user) return false;
+    const account = await getSmartAccount(user.userId, chain);
+    return Boolean(account) && account!.address.toLowerCase() === address.toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
 export async function GET(req: NextRequest) {
   const limit = await rateLimit(`portfolio:${clientIp(req)}`, 30, 60_000);
   if (!limit.ok) return tooManyRequests(limit.retryAfter);
@@ -64,7 +77,9 @@ export async function GET(req: NextRequest) {
 
   const chain = chainFromRequest(req);
   const client = serverClient(chain);
-  const fresh = req.nextUrl.searchParams.get("fresh") === "1";
+  // `?fresh=1` forces live Wallet API + RPC reads, so only the account's own signed-in owner may
+  // ask for it; anyone else silently gets the cached read.
+  const fresh = req.nextUrl.searchParams.get("fresh") === "1" && (await callerOwns(req, chain.key, address));
 
   try {
     const assets = chain.assets.all.filter((a) => a.address && a.decimals);

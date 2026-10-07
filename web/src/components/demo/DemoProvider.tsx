@@ -89,15 +89,10 @@ export function DemoProvider({
     }
   }, []);
 
-  // BNB Chain is the demo's network. Pinned during the first render (idempotent) so nothing below
-  // ever paints another network first, and released when the demo unmounts.
-  useState(() => {
-    pinDemoChain("bsc");
-    return true;
-  });
+  // BNB Chain is the demo's network. Pinned in an effect (a counted pin: two demos on one page
+  // can't unpin each other, and server rendering never touches module state) and released when
+  // the demo unmounts. Before the effect runs the app's default network, BNB Chain, is what renders.
   useEffect(() => {
-    // Again here: React's dev double-mount runs this cleanup once, which would otherwise leave
-    // the demo unpinned.
     pinDemoChain("bsc");
     return () => unpinDemoChain();
   }, []);

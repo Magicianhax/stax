@@ -34,6 +34,8 @@ import { recordRun, logRun, pauseAutopilot } from "@/lib/server/autopilotStore";
 import { planAutopilotRun } from "@/lib/server/autopilotPlan";
 import { AllocationRefusal } from "@/lib/server/bscPlan";
 import { BinanceLegRefusal } from "@/lib/server/binanceLegs";
+import { fetchPrivyEmbeddedWallets } from "@/lib/server/privyAuth";
+import { ownsEmbeddedWallet } from "@/lib/server/privyWallets";
 import { getServerSmartAccountClient } from "@/lib/server/privySmartAccount";
 import { buildLegs } from "@/lib/legBuilder";
 import { buildPlanId, recHash, signRiskInference } from "@/lib/eip712";
@@ -105,6 +107,26 @@ export async function runAutopilot(
     : undefined;
   const log = (entry: Omit<Parameters<typeof logRun>[0], "userId" | "ranAt" | "chain" | "amountUsd"> & { amountUsd?: number }) =>
     logRun({ userId: working.userId, chain: chain.key, ranAt: now, amountUsd: working.amountUsd, ...basketMeta, ...entry });
+
+  // The server signs for (walletId, owner). The route checked that pair belongs to this user when
+  // it was saved, but rows saved before that check could pair someone else's wallet id with this
+  // user's account, so re-check at run time. Fail closed: any doubt means nothing signs.
+  try {
+    const wallets = await fetchPrivyEmbeddedWallets(working.userId);
+    if (!ownsEmbeddedWallet(wallets, working.walletId, working.owner)) {
+      const reason = "Autopilot is paused because its wallet isn't one of yours. Set it up again in Autopilot.";
+      console.error(`[autopilot] wallet/owner mismatch for ${working.id}; pausing`);
+      await log({ status: "error", reason });
+      await pauseAutopilot(working.id);
+      return { ok: false, reason, retryable: false };
+    }
+  } catch (err) {
+    // Couldn't check (Privy down): skip this run, keep the schedule, try again next tick.
+    console.error("[autopilot] couldn't verify wallet ownership:", err instanceof Error ? err.message : err);
+    const reason = "We couldn't check your wallet just now. Autopilot will try again on its next run.";
+    await log({ status: "skipped", reason });
+    return { ok: false, reason, retryable: false };
+  }
 
   if (!chain.contracts.deployed) {
     const reason = `Stax is not deployed on ${chain.name} yet.`;

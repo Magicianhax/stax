@@ -44,3 +44,13 @@ export function anchoredSlippageBps(p: {
 export function clearsReviewedFloor(builtMinOut: bigint, reviewedMinOut: bigint): boolean {
   return builtMinOut >= reviewedMinOut - reviewedMinOut / BigInt(10_000);
 }
+
+/**
+ * A BNB Chain swap build must carry the floor the person reviewed; without it nothing anchors the
+ * built minimum. Returns the plain 400 message when it's missing, else null. Price checks
+ * (build=false) need no floor.
+ */
+export function reviewedFloorRequiredMessage(p: { build?: boolean; reviewedMinOut?: string }): string | null {
+  if (p.build && !p.reviewedMinOut) return "Check the price again before you confirm.";
+  return null;
+}
