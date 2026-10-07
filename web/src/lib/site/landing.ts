@@ -153,6 +153,16 @@ export const REFUSALS: { title: string; note: string }[] = [
 /** What the signed-plan contract checks, after "On <networks>". */
 export const CONTRACT_CLAUSE = ", a contract also checks Vera’s signature, your risk limit and every cent spent.";
 
+/**
+ * The networks the signed-plan contract can be live on, BNB Chain first (live since its funded
+ * test on 2026-10-07). Only the ones whose executor is actually deployed are ever named.
+ */
+export const CONTRACT_CHAINS: StaxChain[] = [BSC, BASE, MANTLE];
+
+export function liveContractChains(chains: StaxChain[] = CONTRACT_CHAINS): StaxChain[] {
+  return chains.filter((c) => c.contracts.deployed);
+}
+
 /** The one line about the signed-plan contract, for the networks it is live on. */
 export function contractLine(chains: StaxChain[]): string {
   const names = chains.map((c) => c.name);
@@ -210,7 +220,7 @@ export const FAQ: { q: string; a: string }[] = [
   },
   {
     q: "Can Vera invest for me on a schedule?",
-    a: "Autopilot is rolling out on BNB Chain after a funded test. Its rules invest on a schedule, buy when a stock costs less than the real share, keep a mix balanced, and more. Rules only ever buy.",
+    a: "Yes. Autopilot is live on BNB Chain. Its rules invest on a schedule, buy when a stock costs less than the real share, keep a mix balanced, and more, always within the limits you set. Rules only ever buy.",
   },
   {
     q: "Who can use Stax?",

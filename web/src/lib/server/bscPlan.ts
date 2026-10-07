@@ -15,6 +15,10 @@ import type { ExecCall } from "@/lib/execution";
 import type { Allocation } from "@/lib/allocation-schema";
 import { buildBinanceLeg, checkBscBuyable, directCallsForLeg, BinanceLegRefusal } from "./binanceLegs";
 import type { RwaToken } from "./binance/types";
+import { closedMessage, soonestOpenMs, venueAddressFor } from "./bscLegToken";
+
+// Moved to bscLegToken.ts (legBuilder uses them too); re-exported for existing callers.
+export { closedMessage, venueAddressFor };
 
 /**
  * What a plan says when one of its holdings comes out under Binance's floor at invest time. The
@@ -32,25 +36,6 @@ export const PLAN_MIN_LEG_MESSAGE = `Each holding in a plan needs at least $${BS
 export function maxBscLegs(usd: number): number {
   if (!Number.isFinite(usd) || usd <= 0) return 0;
   return Math.floor(usd / BSC_MIN_LEG_USD);
-}
-
-/** The address a buy of `ticker` should target right now: `bestVenue`'s own row. Null when nothing is buyable. */
-export function venueAddressFor(ticker: RwaTickerView | undefined): `0x${string}` | null {
-  if (!ticker || !ticker.bestVenue) return null;
-  return ticker.venues.find((v) => v.platform === ticker.bestVenue)?.address ?? null;
-}
-
-/** Soonest open time across every venue of a ticker, for the "closed" message when none is buyable. */
-function soonestOpenMs(ticker: RwaTickerView | undefined, nowMs: number): number {
-  if (!ticker || ticker.venues.length === 0) return nextUsOpenMs(nowMs);
-  const known = ticker.venues.map((v) => v.nextOpenMs).filter((v): v is number => v !== null);
-  return known.length > 0 ? Math.min(...known) : nextUsOpenMs(nowMs);
-}
-
-/** Same wording as checkBscBuyable's own closed message, for a ticker with no buyable venue at all. */
-export function closedMessage(symbol: string, ticker: RwaTickerView | undefined, nowMs: number): string {
-  const openMs = soonestOpenMs(ticker, nowMs);
-  return `${symbol} is closed right now; it ${formatNextOpen(new Date(openMs), new Date(nowMs))}.`;
 }
 
 /** Vera's BSC candidate universe: catalog tickers with a venue buyable right now. */

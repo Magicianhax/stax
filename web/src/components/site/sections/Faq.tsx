@@ -2,7 +2,7 @@
 
 // FAQ — the landing's own short questions for Stax on BNB Chain (bStock and
 // Ondo, the two prices, a closed US market, the $6 minimum, fees, which
-// network, Autopilot rolling out, who can use it), each answered in one short
+// network, Autopilot live on BNB Chain, who can use it), each answered in one short
 // breath from lib/site/landing, where the numbers come from the registry.
 // The in-app Help screen keeps its own list in lib/faq. On the grid: heading
 // 5 columns, list 7 columns. Native <details>/<summary>, so keyboard and

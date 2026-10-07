@@ -146,10 +146,34 @@ export function planOpenIssuerNote(usMarketOpen: boolean | undefined, venues: re
 }
 
 /**
+ * Whether a screen may say "signed & recorded": only for what goes through the executor, which
+ * checks Vera's signed risk call and writes the plan on-chain. Vera plans, baskets and Autopilot
+ * do wherever the executor is live (BNB Chain since 2026-10-07). A manual Buy or Sell on BNB Chain
+ * never does: it goes straight from the account to Binance's router (/api/swap-quote). Base and
+ * Mantle keep their existing wording, keyed on the executor alone.
+ */
+export function signedByExecutor(
+  chain: { contracts: { deployed: boolean }; routers: { binance?: `0x${string}` } },
+  kind: "plan" | "trade",
+): boolean {
+  if (!chain.contracts.deployed) return false;
+  return !(kind === "trade" && chain.routers.binance);
+}
+
+/** PlacingScreen's line after "No network cost · ", from the same rule as signedByExecutor. */
+export function placingTrustNote(
+  chain: { name: string; contracts: { deployed: boolean }; routers: { binance?: `0x${string}` } },
+  kind: "plan" | "trade",
+): string {
+  return signedByExecutor(chain, kind) ? `signed & recorded on ${chain.name}` : "checked by Binance first";
+}
+
+/**
  * The trust line under a plan, a basket or the activity feed. "Vera signs and records" is true
- * only on the executor path (`chain.contracts.deployed`): on BNB Chain the plan goes straight
- * from the person's own account and nothing is signed with Vera's key or written on-chain, so
- * there the line says what does happen, Binance checking each trade first.
+ * only on the executor path (`chain.contracts.deployed`); on a chain where plans go straight from
+ * the person's own account, nothing is signed with Vera's key or written on-chain, so there the
+ * line says what does happen, Binance checking each trade first. Every kind here is about plans,
+ * never a manual trade (see signedByExecutor).
  */
 export type TrustLineKind = "every" | "plan" | "basket";
 export function trustLine(kind: TrustLineKind, executorPath: boolean): string {

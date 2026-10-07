@@ -5,10 +5,11 @@
 //   allocate(goal, amount)  -> AI builds an allocation (POST /api/allocate)
 //   invest(allocation, ...) -> server signs a plan (POST /api/invest-plan), then we send
 //                              ONE batched gasless UserOp. Two shapes, chosen by the response:
-//                                executor (Base/Mantle): [ fee -> treasury,
-//                                  USDC.approve(executor, total),
+//                                executor (Base, Mantle, BNB Chain): [ fee -> treasury,
+//                                  cash.approve(executor, total),
 //                                  executor.investWithAI(plan, inf, legs, total) ]
-//                                direct (ADR-0005, BSC before the executor is deployed): the
+//                                  (lib/executorCalls.ts; no fee call on BNB Chain)
+//                                direct (ADR-0005, a Binance chain with no executor): the
 //                                  response's own `calls` array, sent verbatim after
 //                                  `assertExecCallsAreSafe` checks every recipient — see
 //                                  lib/execution.ts.
@@ -20,14 +21,12 @@
 // response carries its own calls and needs no deployed executor to send them.
 import { useCallback, useState } from "react";
 import type { DryRun } from "@/lib/dryRun";
-import { encodeFunctionData } from "viem";
 import { useActiveWallet } from "@/hooks/useActiveWallet";
 import { sendSponsoredCalls, type Call } from "@/lib/aa";
 import { asViemProvider } from "@/lib/provider";
-import { ERC20_ABI, STAX_EXECUTOR_ABI } from "@/lib/abis";
+import { executorInvestCalls } from "@/lib/executorCalls";
 import { useChain } from "@/lib/chains/active";
 import { assertExecCallsAreSafe } from "@/lib/execution";
-import { STAX_TREASURY } from "@/lib/fees";
 import { usdToRaw } from "@/lib/units";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { DemoRefusal } from "@/lib/demo/bscVera";
@@ -51,7 +50,7 @@ export interface UseInvest {
    * goal screen instead of the red error banner. Cleared by the next attempt.
    */
   refusal: string | null;
-  /** Binance's check of the last plan's legs (BSC direct path), for PlanScreen to show. */
+  /** Binance's check of the last plan's legs (BNB Chain, either path), for PlanScreen to show. */
   dryRuns: DryRun[] | undefined;
   busy: boolean;
   allocate: (goal: string, amountUsd: number, riskTolerance?: string) => Promise<AllocateResult | null>;
@@ -135,8 +134,8 @@ export function useInvest(): UseInvest {
           return null;
         }
       }
-      // /api/allocate needs no executor — only the direct-path invest() below does. BSC
-      // (no executor at all yet, ADR-0005) still builds a plan; any other undeployed chain
+      // /api/allocate needs no executor. A Binance chain with no executor (ADR-0005) still
+      // builds a plan and invests on the direct path; any other undeployed chain
       // (Base pre-deploy) has nothing to invest into, so stop before spending an AI call.
       if (!chain.contracts.deployed && !chain.routers.binance) {
         setError(notLiveMessage);
@@ -228,7 +227,7 @@ export function useInvest(): UseInvest {
           }));
           // No on-chain risk-verification step on this path — nothing to show.
         } else {
-          // 2b. Executor path (Base/Mantle today): encode approve + investWithAI.
+          // 2b. Executor path (Base, Mantle, and BNB Chain since 2026-10-07): approve + investWithAI.
           if (!chain.contracts.deployed) {
             setError(notLiveMessage);
             setPhase("error");
@@ -248,49 +247,30 @@ export function useInvest(): UseInvest {
             swapData: l.swapData,
           }));
 
-          const usdc = chain.usdc.address;
-          const approveCall: Call = {
-            to: usdc,
-            data: encodeFunctionData({
-              abi: ERC20_ABI,
-              functionName: "approve",
-              args: [executor, usdcTotal],
-            }),
-          };
-          const investCall: Call = {
-            to: executor,
-            data: encodeFunctionData({
-              abi: STAX_EXECUTOR_ABI,
-              functionName: "investWithAI",
-              args: [
-                {
-                  planId: plan.plan.planId,
-                  recHash: plan.plan.recHash,
-                  riskScore: plan.plan.riskScore,
-                  agentId: BigInt(plan.plan.agentId),
-                },
-                {
-                  assessedRisk: plan.inference.assessedRisk,
-                  maxRisk: plan.inference.maxRisk,
-                  expiry: BigInt(plan.inference.expiry),
-                  signature: plan.inference.signature,
-                },
-                legs,
-                usdcTotal,
-              ],
-            }),
-          };
-
-          // Platform fee (gross − the net the server deployed) → treasury, batched first
-          // into the same sponsored UserOp. (Zero on any chain where the server deploys the
-          // full gross amount, e.g. BSC once the executor is live — ADR-0007.)
-          const grossRaw = usdToRaw(chain, amountUsd);
-          const feeRaw = grossRaw - usdcTotal;
-          const feeCall: Call | null = feeRaw > BigInt(0)
-            ? { to: usdc, data: encodeFunctionData({ abi: ERC20_ABI, functionName: "transfer", args: [STAX_TREASURY, feeRaw] }) }
-            : null;
-
-          calls = feeCall ? [feeCall, approveCall, investCall] : [approveCall, investCall];
+          // [fee -> treasury, approve(executor, exactly usdcTotal), investWithAI] through the one
+          // encoder the server also dry-runs on BNB Chain (lib/executorCalls.ts), so what Binance
+          // checked is byte for byte what is sent. The fee is gross minus the net the server
+          // deployed: zero on any chain where the server deploys the full gross (BSC, ADR-0007),
+          // and then there is no fee call at all.
+          const feeRaw = usdToRaw(chain, amountUsd) - usdcTotal;
+          calls = executorInvestCalls({
+            chain,
+            plan: {
+              planId: plan.plan.planId,
+              recHash: plan.plan.recHash,
+              riskScore: plan.plan.riskScore,
+              agentId: BigInt(plan.plan.agentId),
+            },
+            inference: {
+              assessedRisk: plan.inference.assessedRisk,
+              maxRisk: plan.inference.maxRisk,
+              expiry: BigInt(plan.inference.expiry),
+              signature: plan.inference.signature,
+            },
+            legs,
+            usdcTotal,
+            feeRaw,
+          });
           verification = {
             riskScore: plan.plan.riskScore,
             maxRisk: plan.inference.maxRisk,

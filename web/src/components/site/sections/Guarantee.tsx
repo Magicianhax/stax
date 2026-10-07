@@ -13,23 +13,20 @@
 // stays: no hex on the page, the proof one click away.
 import Image from "next/image";
 import { ArrowUpRight } from "lucide-react";
-import { BASE, MANTLE, explorerAddress, type StaxChain } from "@/lib/chains";
-import { CONTRACT_CLAUSE, REFUSALS, REFUSE_TITLE } from "@/lib/site/landing";
+import { explorerAddress } from "@/lib/chains";
+import { CONTRACT_CLAUSE, REFUSALS, REFUSE_TITLE, liveContractChains } from "@/lib/site/landing";
 import { Reveal } from "../ui/Reveal";
 import l from "../layout.module.css";
 import s from "./Guarantee.module.css";
 
-/** The chains the signed-plan contract can be live on. BNB Chain joins after its funded test. */
-const CHAINS: StaxChain[] = [BASE, MANTLE];
-
 /**
- * "On Mantle ↗, a contract also checks …". The executor is the contract that
+ * "On BNB Chain ↗ and Mantle ↗, a contract also checks …". The executor is the contract that
  * moves the money, so it is the one worth opening; naming the network rather
  * than printing the address keeps the proof and drops the forty characters
  * nobody reads.
  */
 function ContractLine() {
-  const live = CHAINS.filter((c) => c.contracts.deployed);
+  const live = liveContractChains();
   if (live.length === 0) return null;
   return (
     <p className={s.verified}>

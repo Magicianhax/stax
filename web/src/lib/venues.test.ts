@@ -3,7 +3,7 @@
 // need the same answer, so it is pure and tested here rather than re-derived in each caller.
 import { describe, expect, it } from "vitest";
 import { getChain } from "./chains";
-import { holdingKey, holdingToken, holdingVenue, pickHolding, resolveVenueAddress } from "./venues";
+import { assetSymbolForToken, holdingKey, holdingToken, holdingVenue, pickHolding, resolveVenueAddress } from "./venues";
 
 const bsc = getChain("bsc");
 const base = getChain("base");
@@ -112,5 +112,19 @@ describe("holdingToken", () => {
   it("is null for an issuer the asset doesn't list", () => {
     const amzn = bsc.assets.all.find((a) => a.symbol === "AMZN")!;
     expect(holdingToken(bsc, { asset: amzn, venue: "bstock" })).toBeNull();
+  });
+});
+
+describe("assetSymbolForToken", () => {
+  const bsc = getChain("bsc");
+  const nvda = bsc.assets.all.find((a) => a.symbol === "NVDA")!;
+
+  it("names the asset for either issuer's token, case-insensitively", () => {
+    expect(assetSymbolForToken(bsc, nvda.address!)).toBe("NVDA");
+    expect(assetSymbolForToken(bsc, nvda.twin!.address.toUpperCase() as `0x${string}`)).toBe("NVDA");
+  });
+
+  it("is undefined for a token the chain doesn't list", () => {
+    expect(assetSymbolForToken(bsc, "0x000000000000000000000000000000000000dEaD")).toBeUndefined();
   });
 });

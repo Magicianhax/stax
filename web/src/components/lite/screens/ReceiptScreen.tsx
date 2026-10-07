@@ -19,7 +19,7 @@ import { iconBtn } from "./primitives";
 import type { TradeOrder } from "../LiteApp";
 import type { ActivityLeg } from "@/lib/onchainHistory";
 import type { DryRun } from "@/lib/dryRun";
-import { dryRunReceiptRow, holdingWords } from "@/lib/plainCopy";
+import { dryRunReceiptRow, holdingWords, signedByExecutor } from "@/lib/plainCopy";
 
 /** "Sep 7, 2026 · 14:02" */
 function exactTime(ms: number): string {
@@ -63,6 +63,8 @@ export function ReceiptScreen({
   onClose?: () => void;
 }) {
   const chain = useChain();
+  // A manual trade (`order`) on BNB Chain never went through the executor; history receipts are plans.
+  const signed = signedByExecutor(chain, order ? "trade" : "plan");
   const { notify } = useToast();
   const explorerHref = txHash ? txUrl(txHash, chain) : undefined;
   const isSell = order?.side === "sell";
@@ -299,11 +301,11 @@ export function ReceiptScreen({
             <Seal size={24} />
             <div>
               <div style={{ fontWeight: 700, fontSize: 15.5, letterSpacing: "-.01em" }}>Permanent record</div>
-              <div style={{ fontSize: 12.5, color: "var(--ink-2)" }}>{chain.contracts.deployed ? <>Signed &amp; recorded on {chain.name}</> : <>Recorded on {chain.name}</>}</div>
+              <div style={{ fontSize: 12.5, color: "var(--ink-2)" }}>{signed ? <>Signed &amp; recorded on {chain.name}</> : <>Recorded on {chain.name}</>}</div>
             </div>
           </div>
           <p style={{ fontSize: 13.5, color: "var(--ink-2)", margin: "12px 0 14px", lineHeight: 1.55 }}>
-            {chain.contracts.deployed
+            {signed
               ? "This can’t be edited or deleted, and anyone can check it. It’s how Vera’s track record stays honest."
               : "This trade is on the public ledger: it can’t be edited or deleted, and anyone can check it."}
           </p>

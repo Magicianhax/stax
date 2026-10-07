@@ -28,6 +28,7 @@ import { getChain } from "@/lib/chains";
 import { usdToRaw } from "@/lib/units";
 import {
   decodeApproveAmount,
+  dryRunBscExecutorBatch,
   dryRunBscSwap,
   encodeSimpleAccountExecuteBatch,
   pairLegCalls,
@@ -248,5 +249,74 @@ describe("decodeApproveAmount", () => {
 
   it("returns undefined for garbage data instead of throwing", () => {
     expect(decodeApproveAmount("0xdeadbeef")).toBeUndefined();
+  });
+});
+
+describe("dryRunBscExecutorBatch (the executor path's one whole-plan check)", () => {
+  // On the executor path the account signs ONE batch for the whole plan —
+  // executeBatch([approve(USDT, executor, usdcTotal), investWithAI(...)]) — so it is simulated
+  // once, from the EntryPoint, exactly as sent; every leg's entry is read off that one result.
+  const EXECUTOR = bsc.contracts.executor;
+  const ONDO = "0x44444444444444444444444444444444444444dd" as const;
+  const calls = [
+    { to: bsc.usdc.address, data: encodeFunctionData({ abi: ERC20_ABI, functionName: "approve", args: [EXECUTOR, usdToRaw(bsc, 12)] }) },
+    { to: EXECUTOR, data: "0xc0ffee00" as const },
+  ];
+  const legs = [
+    { symbol: "NVDA", token: ONDO },
+    { symbol: "BTCB", token: TOKEN_OUT },
+  ];
+  const deployed = { isAccountDeployed: async () => true };
+
+  it("simulates the exact batch the account sends, from the EntryPoint, in one Binance call", async () => {
+    const simulate = vi.fn(async (): Promise<SimulateResult> => ({ status: "SUCCESS", failReason: "", balanceChanges: [], allowanceChanges: [] }));
+    await dryRunBscExecutorBatch({ chain: bsc, taker: TAKER, calls, legs }, { ...deployed, simulate });
+    expect(simulate).toHaveBeenCalledTimes(1);
+    expect(simulate).toHaveBeenCalledWith({ from: entryPoint07Address, to: TAKER, value: "0", data: encodeSimpleAccountExecuteBatch(calls) });
+  });
+
+  it("passes every leg, each with what the account itself receives of its own token", async () => {
+    const simulate = async (): Promise<SimulateResult> => ({
+      status: "SUCCESS",
+      failReason: "",
+      balanceChanges: [
+        { contractAddress: ONDO, tokenType: "ERC20", change: "17887000000000000", owner: EXECUTOR }, // the executor's hop
+        { contractAddress: ONDO, tokenType: "ERC20", change: "17887000000000000", owner: TAKER },
+        { contractAddress: TOKEN_OUT, tokenType: "ERC20", change: "51000", owner: TAKER },
+      ],
+      allowanceChanges: [],
+    });
+    const out = await dryRunBscExecutorBatch({ chain: bsc, taker: TAKER, calls, legs }, { ...deployed, simulate });
+    expect(out.map((d) => [d.status, d.symbol, d.token, d.receiveRaw])).toEqual([
+      ["passed", "NVDA", ONDO, "17887000000000000"],
+      ["passed", "BTCB", TOKEN_OUT, "51000"],
+    ]);
+  });
+
+  it("fails every leg in plain words when Binance says the batch would revert (it can't say which leg)", async () => {
+    const simulate = async (): Promise<SimulateResult> => ({ status: "FAILED", failReason: "execution reverted: SlippageExceeded", balanceChanges: [], allowanceChanges: [] });
+    const out = await dryRunBscExecutorBatch({ chain: bsc, taker: TAKER, calls, legs }, { ...deployed, simulate });
+    expect(out.every((d) => d.status === "failed")).toBe(true);
+    expect(out.map((d) => d.symbol)).toEqual(["NVDA", "BTCB"]);
+    expect(out[0].reason).not.toMatch(/revert|Slippage/i);
+  });
+
+  it("skips (never claims a check) for an account with no code yet, without spending a Binance call", async () => {
+    const simulate = vi.fn();
+    const out = await dryRunBscExecutorBatch({ chain: bsc, taker: TAKER, calls, legs }, { isAccountDeployed: async () => false, simulate });
+    expect(simulate).not.toHaveBeenCalled();
+    expect(out.map((d) => [d.status, d.symbol, d.token])).toEqual([
+      ["skipped", "NVDA", ONDO],
+      ["skipped", "BTCB", TOKEN_OUT],
+    ]);
+    expect(out[0].reason).toMatch(/first trade/);
+  });
+
+  it("skips rather than blocks when Binance itself can't be reached", async () => {
+    const out = await dryRunBscExecutorBatch(
+      { chain: bsc, taker: TAKER, calls, legs },
+      { ...deployed, simulate: async () => { throw new Error("429"); } },
+    );
+    expect(out.every((d) => d.status === "skipped")).toBe(true);
   });
 });

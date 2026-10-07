@@ -12,6 +12,7 @@ import { YieldTag } from "./primitives";
 import { assetBySymbol } from "@/lib/chains";
 import { usd, txUrl } from "@/lib/format";
 import { useChain } from "@/lib/chains/active";
+import { signedByExecutor } from "@/lib/plainCopy";
 import { haptic } from "@/lib/haptics";
 import type { InvestSuccess } from "@/lib/invest-types";
 
@@ -165,7 +166,7 @@ export function SuccessScreen({
               <Icon name="shield" size={22} />
             </span>
             <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 600, fontSize: 15.5 }}>{chain.contracts.deployed ? "Vera recorded this plan" : `Your plan is on ${chain.name}`}</div>
+              <div style={{ fontWeight: 600, fontSize: 15.5 }}>{signedByExecutor(chain, "plan") ? "Vera recorded this plan" : `Your plan is on ${chain.name}`}</div>
               <div className="mono" style={{ fontSize: 11.5, color: "var(--ink-2)", marginTop: 2 }}>
                 View the receipt on {chain.explorer.name}
               </div>

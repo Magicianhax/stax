@@ -32,8 +32,10 @@ import type { StaxChain } from "@/lib/chains/types";
 import type { RwaTickerView, VenueView } from "@/lib/rwa";
 
 const bsc = getChain("bsc");
-/** BSC with the executor flag flipped on, for exercising the rule path (real BSC stays false). */
+/** BSC with the executor pinned on (real BSC is live since 2026-10-07; pinned so these never drift). */
 const deployedBsc: StaxChain = { ...bsc, contracts: { ...bsc.contracts, deployed: true } };
+/** A Binance chain with no executor: the gate below must still hold for one. */
+const undeployedBsc: StaxChain = { ...bsc, contracts: { ...bsc.contracts, deployed: false } };
 const NOW_S = Math.floor(Date.parse("2026-09-24T15:00:00.000Z") / 1000);
 
 function cfg(overrides: Partial<AutopilotConfig> = {}): AutopilotConfig {
@@ -88,8 +90,8 @@ beforeEach(() => {
 });
 
 describe("planAutopilotRun: no rule encoded (every existing autopilot)", () => {
-  it("stays inert on BSC while the executor isn't deployed, exactly like planForAutopilot", async () => {
-    const plan = await planAutopilotRun(cfg(), bsc, NOW_S);
+  it("stays inert on a Binance chain whose executor isn't deployed, exactly like planForAutopilot", async () => {
+    const plan = await planAutopilotRun(cfg(), undeployedBsc, NOW_S);
     expect(plan).toEqual({ ok: false, status: "skipped", reason: expect.stringContaining("not deployed") });
     expect(generateObjectSpy).not.toHaveBeenCalled();
   });
@@ -114,9 +116,16 @@ describe("planAutopilotRun: schedule_buy (unchanged Autopilot DCA)", () => {
 describe("planAutopilotRun: a real rule", () => {
   it("skips while the executor isn't deployed, even with a rule encoded", async () => {
     const encoded = cfg({ goal: encodeRuleGoal({ type: "buy_discount", symbol: "NVDA", discountPct: 2 }, "Buy NVDA cheap") });
-    const plan = await planAutopilotRun(encoded, bsc, NOW_S);
+    const plan = await planAutopilotRun(encoded, undeployedBsc, NOW_S);
     expect(plan).toEqual(expect.objectContaining({ ok: false, reason: expect.stringContaining("not deployed") }));
     expect(bscCatalogSnapshotSpy).not.toHaveBeenCalled();
+  });
+
+  it("runs on real BNB Chain now: its executor is live", async () => {
+    bscCatalogSnapshotSpy.mockResolvedValue({ asOf: NOW_S * 1000, tickers: [ticker({ venues: [venue({ gapPct: -3 })] })] });
+    const encoded = cfg({ goal: encodeRuleGoal({ type: "buy_discount", symbol: "NVDA", discountPct: 2 }, "Buy NVDA cheap") });
+    const plan = await planAutopilotRun(encoded, bsc, NOW_S);
+    expect(plan.ok).toBe(true);
   });
 
   it("runs buy_discount through the rule engine once deployed, never calling Vera", async () => {

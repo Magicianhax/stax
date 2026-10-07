@@ -206,13 +206,14 @@ describe("aaveMinOut", () => {
   });
 });
 
-describe("buildLegs on BSC (ADR-0005: the executor path is inert until deploy)", () => {
-  // BSC's chain.contracts.deployed is false today, so a "binance"-via allocation must be
-  // dropped rather than routed to the executor's Binance branch — and dropped WITHOUT ever
-  // reaching a network client, since buildBinanceLeg would otherwise make a real Binance call
-  // during a Vera plan for a chain that has no executor to run it.
+describe("buildLegs on a Binance chain with no executor deployed (ADR-0005)", () => {
+  // With chain.contracts.deployed false, a "binance"-via allocation must be dropped rather than
+  // routed to the executor's Binance branch — and dropped WITHOUT ever reaching a network client,
+  // since buildBinanceLeg would otherwise make a real Binance call for a chain with no executor
+  // to run it. (BSC itself is live; legBuilder.bsc.test.ts covers its executor legs.)
   it("drops every BSC stock and reports why, never touching the client", async () => {
-    const chain = getChain("bsc");
+    const bsc = getChain("bsc");
+    const chain = { ...bsc, contracts: { ...bsc.contracts, deployed: false } };
     await expect(
       buildLegs({
         chain,

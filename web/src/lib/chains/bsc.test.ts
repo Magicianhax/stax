@@ -25,8 +25,14 @@ describe("bsc chain", () => {
     expect(investableAssets(c).length).toBeGreaterThan(0);
   });
 
-  it("starts undeployed, so the executor path stays off", () => {
-    expect(getChain("bsc").contracts.deployed).toBe(false);
+  it("is live on the executor path since the 2026-10-07 test, with the deployed addresses unchanged", () => {
+    const c = getChain("bsc").contracts;
+    expect(c.deployed).toBe(true);
+    expect(c.executor).toBe("0xc8b10b6be1ce78df53d2e3159d83dca113e4b133");
+    expect(c.verifier).toBe("0xc1efb92d4cdf6e2249038c7186ebc12cf42ef4d8");
+    expect(c.registry).toBe("0xb94a10cf369a0e83f102a6facd318497a338b77c");
+    expect(c.agentId).toBe(BigInt(1));
+    expect(c.executorBlock).toBe(BigInt(123802297));
   });
 
   it("leaves Base and Mantle exactly as they were", () => {

@@ -80,6 +80,12 @@ BSC_ASSETS_JSON=/path/to/bsc-assets.json npm run enable:bsc
 Then copy the printed addresses into `web/src/lib/chains/bsc.contracts.ts` and set `deployed: true`.
 That also switches Autopilot on for BSC, so only do it after a successful direct-path trade.
 
+**Done (2026-10-07):** deployed 2026-09-24, and `deployed: true` since the $6 AAPL (Ondo) executor
+test (tx `0x4e403fb3a2871c0973a076e61410dff42eb90702b97e80bdde97254ceaf8bc3a`, ADR-0015). Vera's
+plans, baskets and Autopilot now go through the executor; manual Buy/Sell stays direct. Before the
+first Autopilot run on BSC: Pimlico must sponsor chain 56 for the server-side user op, and Vera's
+BSC record needs `ETHERSCAN_API_KEY` with chain 56 access (or a keyed `NEXT_PUBLIC_BSC_RPC_URL`).
+
 ## 7. Make the repository public
 
 At least a day before the deadline. Scan the whole history first:

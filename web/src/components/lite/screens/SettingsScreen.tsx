@@ -302,8 +302,8 @@ export function SettingsScreen({
             ))}
           </div>
         </div>
-        {/* Only true on the executor path; BNB Chain plans go straight from your account, so
-            nothing is signed or recorded by Vera there until the executor is switched on. */}
+        {/* Only true on the executor path (BNB Chain since 2026-10-07); on a chain with no
+            executor, plans go straight from the account and nothing is signed or recorded. */}
         {ready ? (
           <p style={{ margin: "10px 4px 0", fontSize: 12.5, lineHeight: 1.5, color: "var(--ink-3)" }}>
             Every plan is signed and recorded on-chain, so this record can&apos;t be edited afterwards.
