@@ -56,7 +56,10 @@ export function useSmartAccount() {
     walletRef.current = wallet;
   });
 
+  const inDemo = demo !== null;
   useEffect(() => {
+    // The demo has no real wallet: never derive or register an account (no POST /api/me/account).
+    if (inDemo) return;
     let cancelled = false;
     (async () => {
       const w = walletRef.current;
@@ -90,7 +93,7 @@ export function useSmartAccount() {
     return () => {
       cancelled = true;
     };
-  }, [ownerAddress, chain]);
+  }, [ownerAddress, chain, inDemo]);
 
   if (demo) return { address: demo.address, loading: false, error: null, chain };
   return { address, loading, error, chain };
