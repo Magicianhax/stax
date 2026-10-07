@@ -44,3 +44,16 @@ describe("clearsReviewedFloor", () => {
     expect(clearsReviewedFloor(n(2_430_000), n(2_686_500))).toBe(false);
   });
 });
+
+import { reviewedFloorRequiredMessage } from "./slippage";
+
+describe("reviewedFloorRequiredMessage", () => {
+  it("asks for the reviewed floor when building without one", () => {
+    expect(reviewedFloorRequiredMessage({ build: true })).toMatch(/price/i);
+  });
+  it("is fine with a floor, or with a price check", () => {
+    expect(reviewedFloorRequiredMessage({ build: true, reviewedMinOut: "990" })).toBeNull();
+    expect(reviewedFloorRequiredMessage({ build: false })).toBeNull();
+    expect(reviewedFloorRequiredMessage({})).toBeNull();
+  });
+});

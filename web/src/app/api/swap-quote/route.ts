@@ -28,7 +28,7 @@ import { assetBySymbol, isRoutable } from "@/lib/chains";
 import { KyberError, KyberNoRoute, kyberBuild, kyberRoute } from "@/lib/server/kyber";
 import { BinanceLegError, BinanceLegRefusal, bscLegUsdValue, buildBinanceLeg, checkBscBuyable, cryptoLegUsdValue } from "@/lib/server/binanceLegs";
 import { priceAsset } from "@/lib/prices";
-import { anchoredSlippageBps, PRICE_MOVED_MESSAGE } from "@/lib/slippage";
+import { anchoredSlippageBps, PRICE_MOVED_MESSAGE, reviewedFloorRequiredMessage } from "@/lib/slippage";
 import { chainFromRequest, serverClient } from "@/lib/server/chain";
 import { getBinanceWeb3 } from "@/lib/server/binance";
 import { dryRunBscSwap } from "@/lib/server/dryRun";
@@ -161,6 +161,8 @@ export async function POST(req: NextRequest) {
   const binanceVenue = Boolean(chain.routers.binance && asset.via === "binance");
 
   if (binanceVenue) {
+    const floorMessage = reviewedFloorRequiredMessage(body);
+    if (floorMessage) return badRequest(floorMessage);
     // Review Focus #1: refuse before ever asking Binance for a quote when the issuer isn't
     // trading this token right now (fails closed if the catalog doesn't even list it).
     // Crypto (BTCB, ETH, BNB) has no RWA row and no market hours: it trades whenever the
