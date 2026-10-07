@@ -28,6 +28,7 @@ import { usePortfolio } from "@/hooks/useBalances";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { useChainKey } from "@/lib/chains/active";
 import { giftContractFor } from "@/lib/gifts";
+import { toneAfterNudge } from "@/lib/nudge";
 import { haptic } from "@/lib/haptics";
 import { TabBar, type TabId, useToast } from "@/components/design";
 import { InstallPrompt } from "@/components/app/InstallPrompt";
@@ -386,7 +387,10 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
       setTone(t);
       setRethinking(true);
       const adjustedGoal = goalRef.current + TONE_HINT[t];
-      void invest.allocate(adjustedGoal, amountRef.current, TONE_RISK[t]).then(() => {
+      // A refused or failed rebuild leaves the old plan on screen, so the chip goes back to the
+      // tone that plan was built with (the refusal itself shows on PlanScreen).
+      void toneAfterNudge(tone, t, () => invest.allocate(adjustedGoal, amountRef.current, TONE_RISK[t])).then((kept) => {
+        setTone(kept);
         setRethinking(false);
       });
     },
@@ -707,6 +711,7 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
           rethinking={rethinking}
           busy={invest.busy}
           dryRuns={invest.dryRuns}
+          refusal={invest.refusal}
           onNudge={onNudge}
           onInvest={onInvest}
           basket={basketPlan?.basket}

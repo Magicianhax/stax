@@ -8,6 +8,7 @@ import { AssetTile, BottomSheet, type TileAsset } from "@/components/design";
 import { HoldButton } from "@/components/motion";
 import { useChain } from "@/lib/chains/active";
 import { usd } from "@/lib/format";
+import { reviewFeeNote, showsFeeRow } from "@/lib/feeCopy";
 import type { TradeOrder } from "../LiteApp";
 
 export interface ReviewSheetProps {
@@ -35,7 +36,7 @@ export function ReviewSheet({ open, onClose, onConfirm, order, tile }: ReviewShe
       : [
           [qtyLabel, `≈ ${order.qty} ${order.ticker}`],
           ["Price", usd(order.priceUsd)],
-          ["Fee", usd(order.feeUsd)],
+          ...(showsFeeRow(chain.key) ? ([["Fee", usd(order.feeUsd)]] as [string, string][]) : []),
           ["Total", usd(order.amountUsd)],
           ["Network", chain.name],
         ]
@@ -78,7 +79,7 @@ export function ReviewSheet({ open, onClose, onConfirm, order, tile }: ReviewShe
       </div>
 
       <div style={{ textAlign: "center", margin: "14px 0 10px", fontSize: 12.5, color: "var(--ink-3)" }}>
-        {isSell ? "No fee · no network cost" : "Fee included · no network cost"}
+        {reviewFeeNote(chain.key, isSell)}
       </div>
       <HoldButton onComplete={onConfirm} ms={900} className="btn-lg" disabled={!order}>
         {isSell ? "Hold to sell" : "Hold to buy"}

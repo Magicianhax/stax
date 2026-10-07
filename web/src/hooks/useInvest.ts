@@ -169,6 +169,7 @@ export function useInvest(): UseInvest {
   const invest = useCallback(
     async (alloc: Allocation, amountUsd: number, address: string) => {
       setError(null);
+      setRefusal(null); // a refused nudge's note is about the plan being replaced, not this hold
       // Every hold is re-checked by the server; the last attempt's checks are replaced, not kept.
       setDryRuns(undefined);
       // Demo: walk the placing phases on a timer, then a canned success.

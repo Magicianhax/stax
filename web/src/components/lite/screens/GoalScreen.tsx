@@ -10,6 +10,7 @@ import { Icon, VeraOrb, ChainLaunching, AmountInput, Keypad } from "@/components
 import { useAmountKeypad, toAmountString } from "@/hooks/useAmountKeypad";
 import { usd } from "@/lib/format";
 import { iconBtn, VeraTag } from "./primitives";
+import { RefusalNote } from "./RefusalNote";
 import { useChainReady } from "../useChainReady";
 
 // Suggestions follow the amount typed above, so a chip never names a figure
@@ -115,16 +116,7 @@ export function GoalScreen({
         </p>
 
         {/* Vera's own "no": a normal answer, so a calm note, never the red error banner. */}
-        {refusal && (
-          <div
-            role="status"
-            className="card anim-rise"
-            style={{ marginTop: 20, padding: "13px 15px", display: "flex", gap: 11, alignItems: "flex-start" }}
-          >
-            <Icon name="clock" size={18} style={{ flex: "none", marginTop: 2, color: "var(--ink-2)" }} />
-            <div style={{ fontSize: 14.5, lineHeight: 1.5, color: "var(--ink)" }}>{refusal}</div>
-          </div>
-        )}
+        {refusal && <RefusalNote>{refusal}</RefusalNote>}
 
         {/* amount */}
         <div style={{ marginTop: refusal ? 22 : 28 }}>

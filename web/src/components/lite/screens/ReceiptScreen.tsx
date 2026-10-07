@@ -12,6 +12,7 @@ import { AssetTile, Icon, LogoCluster, Seal, useToast } from "@/components/desig
 import { DrawCheck, Money, Reveal } from "@/components/motion";
 import { toTile } from "@/lib/displayAssets";
 import { usd, txUrl } from "@/lib/format";
+import { showsFeeRow } from "@/lib/feeCopy";
 import { useChain } from "@/lib/chains/active";
 import { haptic } from "@/lib/haptics";
 import { iconBtn } from "./primitives";
@@ -112,7 +113,7 @@ export function ReceiptScreen({
         ]
       : [
           ["Shares & price", `${order.qty} ${order.ticker} @ ${usd(order.priceUsd)}`],
-          ["Fee", usd(order.feeUsd)],
+          ...(showsFeeRow(chain.key) ? ([["Fee", usd(order.feeUsd)]] as [string, React.ReactNode][]) : []),
           ["Status", status],
           ["Paid from", "Your cash balance"],
           ["Ownership", "Real shares, held by you"],

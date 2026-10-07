@@ -32,6 +32,7 @@ import { useRwa } from "@/hooks/useRwa";
 import type { DryRun } from "@/lib/dryRun";
 import type { AllocateResult } from "@/lib/invest-types";
 import { iconBtn, Spinner, ThinkingDots, YieldTag } from "./primitives";
+import { RefusalNote } from "./RefusalNote";
 import { useChainReady } from "../useChainReady";
 
 type Tone = "balanced" | "safer" | "bolder" | "simple";
@@ -65,6 +66,7 @@ export function PlanScreen({
   basket,
   goal,
   dryRuns,
+  refusal = null,
 }: {
   go: (screen: string, params?: Record<string, unknown>) => void;
   allocation: AllocateResult;
@@ -85,6 +87,12 @@ export function PlanScreen({
    * on every hold. Undefined before the first hold renders exactly what this screen already did.
    */
   dryRuns?: DryRun[];
+  /**
+   * Why the server turned down the last nudge (market closed since this plan was built, under $6
+   * a stock). The plan on screen is the previous one, still valid, so this is a calm note rather
+   * than the red error banner.
+   */
+  refusal?: string | null;
 }) {
   const risk = riskMeta(allocation.riskScore);
   const { chain, investable } = useChainReady();
@@ -204,6 +212,12 @@ export function PlanScreen({
         <div style={{ ...recompose, flexShrink: 0, display: "flex", gap: 7, alignItems: "flex-start", padding: "10px 22px 0 68px", fontSize: 13, lineHeight: 1.45, color: "var(--ink-2)" }}>
           <Icon name="clock" size={14} style={{ flex: "none", marginTop: 2 }} />
           <span>{openIssuerNote}</span>
+        </div>
+      )}
+
+      {refusal && (
+        <div style={{ padding: "0 22px" }}>
+          <RefusalNote marginTop={14}>{refusal}</RefusalNote>
         </div>
       )}
 
