@@ -201,6 +201,11 @@ export async function buildBinanceLeg(a: BinanceLegArgs): Promise<BinanceLeg> {
   if (built.tx.to.toLowerCase() !== router.toLowerCase()) {
     throw new BinanceLegRefusal(`${a.symbol}: Binance's swap calldata targeted an unexpected router.`, "route");
   }
+  // Binance builds its own minimum into the calldata. If it's below what the person reviewed
+  // (allowing 1 bp of rounding), the swap could settle for less than they agreed to: refuse.
+  if (a.reviewedMinOut !== undefined && built.tx.minReceiveAmount < (a.reviewedMinOut * (BPS - BigInt(1))) / BPS) {
+    throw new BinanceLegRefusal(PRICE_MOVED_MESSAGE, "price_moved");
+  }
   const minOut = built.tx.minReceiveAmount < slippageFloor ? built.tx.minReceiveAmount : slippageFloor;
 
   return {

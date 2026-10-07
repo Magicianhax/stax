@@ -351,6 +351,21 @@ describe("anchoring the build to the reviewed floor", () => {
     expect(buildSwapSpy).not.toHaveBeenCalled();
   });
 
+  it("refuses when Binance's built minReceiveAmount is below the reviewed floor", async () => {
+    // Reviewed floor 10000; the fresh quote is fine but Binance's calldata would accept 9000.
+    quoteSpy.mockResolvedValueOnce({ ...goodQuote, toTokenAmount: BigInt(10_100) });
+    buildSwapSpy.mockResolvedValueOnce({ ...goodSwap, tx: { ...goodSwap.tx, minReceiveAmount: BigInt(9000) } });
+    const err = await buildBinanceLeg(args({ slippageBps: 100, reviewedMinOut: BigInt(10_000) })).catch((e) => e);
+    expect(err).toBeInstanceOf(BinanceLegRefusal);
+    expect(err.code).toBe("price_moved");
+  });
+
+  it("allows 1 bp of rounding under the reviewed floor", async () => {
+    quoteSpy.mockResolvedValueOnce({ ...goodQuote, toTokenAmount: BigInt(10_100) });
+    buildSwapSpy.mockResolvedValueOnce({ ...goodSwap, tx: { ...goodSwap.tx, minReceiveAmount: BigInt(9_999) } });
+    await expect(buildBinanceLeg(args({ slippageBps: 100, reviewedMinOut: BigInt(10_000) }))).resolves.toBeDefined();
+  });
+
   it("leaves a price check (no build) alone", async () => {
     // A distinct amount, so the shared 15 s price-check cache can't answer from another test.
     quoteSpy.mockResolvedValueOnce({ ...goodQuote, fromTokenAmount: usdToRaw(bsc, 11), toTokenAmount: BigInt(900) });
