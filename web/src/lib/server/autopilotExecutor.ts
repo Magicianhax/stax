@@ -22,7 +22,6 @@ import "server-only";
 // rebalance/safety_switch/mix_keeper buy-only for exactly this reason (its own header has the
 // detail), so this refusal should be unreachable today; it stays as the last-resort safety net in
 // case a future rule type, or a bug in that buy-only conversion, ever hands this a sell anyway.
-import { encodeFunctionData } from "viem";
 import { checkBounds, type AutopilotConfig } from "@/lib/autopilot";
 import { getChain, assetBySymbol } from "@/lib/chains";
 import type { StaxChain } from "@/lib/chains/types";
@@ -39,9 +38,10 @@ import { ownsEmbeddedWallet } from "@/lib/server/privyWallets";
 import { getServerSmartAccountClient } from "@/lib/server/privySmartAccount";
 import { buildLegs } from "@/lib/legBuilder";
 import { buildPlanId, recHash, signRiskInference } from "@/lib/eip712";
-import { netOf, STAX_TREASURY } from "@/lib/fees";
+import { netOf } from "@/lib/fees";
+import { executorInvestCalls } from "@/lib/executorCalls";
 import { rawToUsd, usdToRaw } from "@/lib/units";
-import { ERC20_ABI, STAX_EXECUTOR_ABI } from "@/lib/abis";
+import { ERC20_ABI } from "@/lib/abis";
 
 const RISK_HEADROOM_BPS = 1500;
 const RISK_CEILING_BPS = 10000;
@@ -135,7 +135,6 @@ export async function runAutopilot(
   }
 
   const client = serverClient(chain);
-  const executor = chain.contracts.executor;
   const usdc = chain.usdc.address;
 
   // 1. Available cash in the smart account (this chain's cash asset, its own decimals).
@@ -260,30 +259,15 @@ export async function runAutopilot(
   const expiry = BigInt(now + EXPIRY_SECONDS);
   const signature = await signRiskInference(chain, { planId, assessedRisk: assessedRiskBps, maxRisk, expiry });
 
-  // 5. The same batched calls the app sends: [fee → treasury, approve, invest].
-  const calls: { to: `0x${string}`; data: `0x${string}`; value?: bigint }[] = [];
-  if (feeRaw > BigInt(0)) {
-    calls.push({
-      to: usdc,
-      data: encodeFunctionData({ abi: ERC20_ABI, functionName: "transfer", args: [STAX_TREASURY, feeRaw] }),
-    });
-  }
-  calls.push({
-    to: usdc,
-    data: encodeFunctionData({ abi: ERC20_ABI, functionName: "approve", args: [executor, usdcTotal] }),
-  });
-  calls.push({
-    to: executor,
-    data: encodeFunctionData({
-      abi: STAX_EXECUTOR_ABI,
-      functionName: "investWithAI",
-      args: [
-        { planId, recHash: recHash(allocation), riskScore: assessedRiskBps, agentId: chain.contracts.agentId },
-        { assessedRisk: assessedRiskBps, maxRisk, expiry, signature },
-        legs,
-        usdcTotal,
-      ],
-    }),
+  // 5. The same batched calls the app sends: [fee → treasury, approve, invest], from the one
+  //    encoder useInvest and /api/invest-plan's dry run use (no fee call on BSC, ADR-0007).
+  const calls = executorInvestCalls({
+    chain,
+    plan: { planId, recHash: recHash(allocation), riskScore: assessedRiskBps, agentId: chain.contracts.agentId },
+    inference: { assessedRisk: assessedRiskBps, maxRisk, expiry, signature },
+    legs,
+    usdcTotal,
+    feeRaw,
   });
 
   // 6. Sign (Privy server owner sig) + submit gaslessly via Pimlico on this chain.
