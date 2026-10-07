@@ -53,7 +53,7 @@ export interface InvestPlanResult {
   notes: string[];
   /**
    * Direct smart-account path (ADR-0005): present instead of being sent through the executor
-   * when `chain.contracts.deployed` is false (BSC today). The client sends these calls
+   * when a Binance chain's `chain.contracts.deployed` is false. The client sends these calls
    * verbatim, in order, as one sponsored user op — see `assertExecCallsAreSafe` in
    * `lib/execution.ts`. `plan`/`inference`/`legs`/`usdcTotal` above are still required by the
    * type (existing callers such as useGifts.ts read them unconditionally on the executor path)
@@ -61,9 +61,11 @@ export interface InvestPlanResult {
    */
   calls?: ExecCall[];
   /**
-   * Direct path only: one Binance Transaction API dry run per leg in `calls`, same order as
-   * the allocation's legs. Never claims a check that didn't run — the client must not send
-   * this plan if any entry here has status "failed" (see lib/dryRun.ts).
+   * BNB Chain only (either path): one Binance Transaction API dry run per leg, in the
+   * allocation's order, each tagged with its leg's symbol and token. The direct path checks each
+   * leg's [approve, swap]; the executor path checks the whole [approve, investWithAI] batch once
+   * and reports it per leg. Never claims a check that didn't run — the client must not send this
+   * plan if any entry here has status "failed" (see lib/dryRun.ts). Absent on Base and Mantle.
    */
   dryRuns?: DryRun[];
 }
