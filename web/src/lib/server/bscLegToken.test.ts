@@ -73,7 +73,7 @@ function row(address: `0x${string}`, open = true): RwaToken {
 }
 
 const bothOpen = [row(NVDA_B), row(NVDA_ONDO)];
-const resolve = (planned: { venue?: "bstock" | "ondo"; address?: string }, tokens = bothOpen, ticker: RwaTickerView | undefined = both) =>
+const resolve = (planned: { venue?: "bstock" | "ondo"; address?: string; strict?: boolean }, tokens = bothOpen, ticker: RwaTickerView | undefined = both) =>
   resolveBscStockToken({ chain: bsc, asset: nvda, planned, ticker, tokens, nowMs: NOW });
 
 describe("resolveBscStockToken", () => {
@@ -99,8 +99,16 @@ describe("resolveBscStockToken", () => {
     expect(resolve({ venue: "ondo" }, [row(NVDA_B), row(NVDA_ONDO, false)])).toBe(NVDA_B);
   });
 
-  it("falls back to the asset's own default when the catalog has no row for the ticker", () => {
-    expect(resolve({}, bothOpen, undefined)).toBe(NVDA_B);
+  it("refuses when the catalog has no row for the ticker, as the direct path does", () => {
+    expect(() => resolveBscStockToken({ chain: bsc, asset: nvda, planned: {}, ticker: undefined, tokens: bothOpen, nowMs: NOW })).toThrow();
+  });
+
+  it("a strict plan (an Autopilot rule) refuses instead of buying the other issuer when its issuer stopped trading", () => {
+    expect(() => resolve({ venue: "ondo", strict: true }, [row(NVDA_B), row(NVDA_ONDO, false)])).toThrow(/closed right now/);
+  });
+
+  it("a strict plan still buys its own issuer while it trades", () => {
+    expect(resolve({ venue: "ondo", strict: true })).toBe(NVDA_ONDO);
   });
 
   it("refuses, with the direct path's closed wording, when the resolved issuer isn't buyable right now", () => {

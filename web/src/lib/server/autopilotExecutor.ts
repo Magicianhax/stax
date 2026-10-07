@@ -250,7 +250,7 @@ export async function runAutopilot(
 
   let legs: Awaited<ReturnType<typeof buildLegs>>["legs"];
   try {
-    ({ legs } = await buildLegs({ chain, allocation, usdcTotal, client, nowSeconds: now }));
+    ({ legs } = await buildLegs({ chain, allocation, usdcTotal, client, nowSeconds: now, strictVenue: receiptOverride !== undefined }));
   } catch (err) {
     const reason = planningRefusalReason(err);
     if (!reason) throw err;

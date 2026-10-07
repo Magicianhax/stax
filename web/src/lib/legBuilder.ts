@@ -76,6 +76,11 @@ export interface BuildLegsArgs {
    * loaded on demand, and only when the plan has a stock leg on Binance.
    */
   bscMarket?: BscMarket;
+  /**
+   * BSC only: refuse a leg whose planned issuer stopped trading, instead of buying the other
+   * issuer. Autopilot rules set this: a buy-the-discount rule picked its issuer because it was cheap.
+   */
+  strictVenue?: boolean;
 }
 
 /**
@@ -447,6 +452,7 @@ async function resolveBinanceTokens(
   chain: StaxChain,
   given: BscMarket | undefined,
   nowSeconds: number,
+  strictVenue = false,
 ): Promise<void> {
   const stocks = entries.filter((e) => e.kind === "binance" && e.asset.tier !== "crypto");
   if (stocks.length === 0) return;
@@ -456,7 +462,7 @@ async function resolveBinanceTokens(
     e.tokenOut = resolveBscStockToken({
       chain,
       asset: e.asset,
-      planned: e.planned ?? {},
+      planned: { ...(e.planned ?? {}), strict: strictVenue },
       ticker: byTicker.get(e.asset.symbol),
       tokens: market.tokens,
       nowMs: market.nowMs,
@@ -579,7 +585,7 @@ export async function buildLegs(args: BuildLegsArgs): Promise<BuildLegsResult> {
     );
   }
 
-  await resolveBinanceTokens(entries, chain, args.bscMarket, nowSeconds);
+  await resolveBinanceTokens(entries, chain, args.bscMarket, nowSeconds, args.strictVenue === true);
 
   const deadline = BigInt(nowSeconds + DEADLINE_SECONDS);
   const legs = await buildAll(chain, client, entries, usdcTotal, slippageBps, deadline, notes);

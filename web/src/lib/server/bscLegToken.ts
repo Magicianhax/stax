@@ -46,7 +46,7 @@ export interface ResolveBscStockTokenArgs {
   chain: StaxChain;
   asset: Asset;
   /** The allocation entry's issuer choice, as the plan screen showed it ("From Ondo · ..."). */
-  planned: { venue?: RwaPlatform; address?: string };
+  planned: { venue?: RwaPlatform; address?: string; strict?: boolean };
   /** The live catalog row for this ticker (undefined when the catalog has none). */
   ticker: RwaTickerView | undefined;
   /** Binance's cached RWA token list: the buyable gate's source of truth. */
@@ -71,9 +71,16 @@ export function resolveBscStockToken(a: ResolveBscStockTokenArgs): `0x${string}`
   const { chain, asset, planned, ticker, tokens, nowMs } = a;
   const byVenue = planned.venue ? resolveVenueAddress(chain, asset, planned.venue)?.address : undefined;
   const chosen = ownToken(asset, byVenue) ?? ownToken(asset, planned.address);
-  if (chosen && checkBscBuyable(tokens, chosen, asset.symbol, nowMs).ok) return chosen;
+  if (chosen) {
+    const gate = checkBscBuyable(tokens, chosen, asset.symbol, nowMs);
+    if (gate.ok) return chosen;
+    // A rule chose this issuer for a reason (it was the discounted one): buying the other
+    // issuer instead would break the rule's promise, so a strict plan refuses rather than switch.
+    if (planned.strict) throw new BinanceLegRefusal(gate.message);
+  }
 
-  const fallback = ticker ? ownToken(asset, venueAddressFor(ticker)) : asset.address;
+  // No catalog row means Binance isn't listing this ticker right now: refuse, as the direct path does.
+  const fallback = ticker ? ownToken(asset, venueAddressFor(ticker)) : undefined;
   if (!fallback) throw new BinanceLegRefusal(closedMessage(asset.symbol, ticker, nowMs));
   const gate = checkBscBuyable(tokens, fallback, asset.symbol, nowMs);
   if (!gate.ok) throw new BinanceLegRefusal(gate.message);
