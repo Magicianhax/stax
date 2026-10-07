@@ -192,6 +192,7 @@ export async function POST(req: NextRequest) {
         taker: sender,
         slippageBps,
         usdValue,
+        side: body.side,
         build: Boolean(body.build),
       });
       // Dry run only when there is a real swap to check (build=true — right before the user

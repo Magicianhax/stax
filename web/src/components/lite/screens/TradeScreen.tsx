@@ -26,7 +26,7 @@ import { useAmountKeypad } from "@/hooks/useAmountKeypad";
 import { describeNextChange } from "@/lib/marketHours";
 import { stateLabel, dryRunLine, gapSentence } from "@/lib/plainCopy";
 import { otherOpenVenue } from "@/lib/assetVenuePicker";
-import { BSC_MIN_LEG_USD } from "@/lib/rwa";
+import { BSC_MIN_LEG_USD, sellShareClearsFloor } from "@/lib/rwa";
 import type { DryRun } from "@/lib/dryRun";
 import { usd, tokenQty, fromUnits } from "@/lib/format";
 import { feeUsd, feeOf } from "@/lib/fees";
@@ -587,9 +587,14 @@ export function TradeScreen({
           </div>
 
           <div style={{ display: "flex", gap: 8, padding: "18px 22px 0", justifyContent: "center" }}>
-            {[25, 50, 75, 100].map((p) => (
+            {[25, 50, 75, 100].map((p) => {
+              // A share that would come out under Binance's $5 floor can't be sold; "All" stays on
+              // so a small position always has a way out (the server has the final word).
+              const underFloor = bsc && p !== 100 && !sellShareClearsFloor(holding?.valueUsd ?? undefined, p);
+              return (
               <button
                 key={p}
+                disabled={underFloor}
                 className={`chip tap ${sellPct === p ? "is-dark" : ""}`}
                 onClick={() => {
                   haptic.select();
@@ -599,7 +604,8 @@ export function TradeScreen({
               >
                 {p === 100 ? "All" : `${p}%`}
               </button>
-            ))}
+              );
+            })}
           </div>
           {tolerance}
         </>

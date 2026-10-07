@@ -320,6 +320,27 @@ describe("buildBinanceLeg review fixes", () => {
   });
 });
 
+describe("the sell floor", () => {
+  it("lets a position bought at the $6 minimum (worth about $5.97) be sold", async () => {
+    // Binance's own floor is "over $5"; the $6 buffer is for buys only.
+    const leg = await buildBinanceLeg(args({ side: "sell", usdValue: 5.97, tokenIn: NVDA, tokenOut: bsc.usdc.address }));
+    expect(leg.amountIn).toBe(usdToRaw(bsc, 10));
+  });
+
+  it("still refuses a sale at or under $5, with words about selling, not a typed amount", async () => {
+    const err = await buildBinanceLeg(args({ side: "sell", usdValue: 4.99 })).catch((e) => e);
+    expect(err).toBeInstanceOf(BinanceLegRefusal);
+    expect(err.code).toBe("min_trade");
+    expect(err.message).not.toMatch(/Enter/);
+    expect(quoteSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps the $6 buffer for buys", async () => {
+    const err = await buildBinanceLeg(args({ side: "buy", usdValue: 5.97 })).catch((e) => e);
+    expect(err.code).toBe("min_trade");
+  });
+});
+
 describe("bscLegUsdValue", () => {
   const asset = assetBySymbol(bsc, "NVDA")!;
 

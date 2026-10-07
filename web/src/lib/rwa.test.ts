@@ -1,7 +1,7 @@
 // The two rules the whole market-hours layer rests on: what "buyable" means, and how the
 // gap between a token and the real share is measured.
 import { describe, expect, it } from "vitest";
-import { BSC_MIN_LEG_USD, gapPct, isBuyable, marketStateFrom } from "./rwa";
+import { BSC_MIN_LEG_USD, BSC_MIN_SELL_USD, gapPct, isBuyable, marketStateFrom, minLegUsd, sellShareClearsFloor, bscSellBlocked } from "./rwa";
 
 describe("isBuyable", () => {
   it("is true only when open AND trading", () => {
@@ -54,5 +54,37 @@ describe("marketStateFrom", () => {
   it("is null when the API gives no session, so the caller falls back to the US calendar", () => {
     // Every bStock row looks like this.
     expect(marketStateFrom({ marketStatus: null, reasonCode: "TRADING" })).toBeNull();
+  });
+});
+
+describe("the sell floor", () => {
+  it("is Binance's real floor, below the buy buffer", () => {
+    expect(minLegUsd("buy")).toBe(BSC_MIN_LEG_USD);
+    expect(minLegUsd("sell")).toBe(BSC_MIN_SELL_USD);
+    expect(BSC_MIN_SELL_USD).toBeGreaterThan(5);
+    expect(BSC_MIN_SELL_USD).toBeLessThan(BSC_MIN_LEG_USD);
+  });
+
+  it("lets All through on a $5.97 position but not 50%", () => {
+    expect(sellShareClearsFloor(5.97, 100)).toBe(true);
+    expect(sellShareClearsFloor(5.97, 50)).toBe(false);
+  });
+
+  it("disables 25% under $20.04 and leaves chips on when the value is unknown", () => {
+    expect(sellShareClearsFloor(24, 25)).toBe(true);
+    expect(sellShareClearsFloor(20, 25)).toBe(false);
+    expect(sellShareClearsFloor(undefined, 25)).toBe(true);
+    expect(sellShareClearsFloor(Number.NaN, 25)).toBe(true);
+  });
+});
+
+describe("bscSellBlocked", () => {
+  it("never blocks a crypto sell, which has no catalog row", () => {
+    expect(bscSellBlocked("crypto", undefined)).toBe(false);
+  });
+  it("blocks a stock until its issuer is buyable, and fails closed with no row", () => {
+    expect(bscSellBlocked("stock", undefined)).toBe(true);
+    expect(bscSellBlocked("stock", { buyable: false })).toBe(true);
+    expect(bscSellBlocked("stock", { buyable: true })).toBe(false);
   });
 });

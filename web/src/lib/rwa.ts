@@ -29,6 +29,27 @@ export type RwaReasonCode =
 /** Binance rejects quotes of $5 or less (40375), and the floor is exclusive, so a leg needs $6. */
 export const BSC_MIN_LEG_USD = 6;
 
+/**
+ * A sale only has to clear Binance's real floor (over $5). The $6 buffer exists so a BUY lands
+ * above the floor after fees and price moves; applying it to a sale trapped a position bought at
+ * the $6 minimum (worth about $5.97 after Binance's fee) with no way to sell it.
+ */
+export const BSC_MIN_SELL_USD = 5.01;
+
+/** The smallest leg Stax will send for `side` on BSC. */
+export function minLegUsd(side: "buy" | "sell"): number {
+  return side === "sell" ? BSC_MIN_SELL_USD : BSC_MIN_LEG_USD;
+}
+
+/**
+ * Sell-tab chips (25/50/75/All) that would come out under Binance's floor for a position worth
+ * `positionUsd`. An unknown value leaves every chip enabled; the server still decides.
+ */
+export function sellShareClearsFloor(positionUsd: number | undefined, pct: number): boolean {
+  if (positionUsd === undefined || !Number.isFinite(positionUsd)) return true;
+  return (positionUsd * pct) / 100 >= BSC_MIN_SELL_USD;
+}
+
 export interface VenueView {
   platform: RwaPlatform;
   symbol: string;
@@ -86,4 +107,14 @@ export function marketStateFrom(s: { marketStatus: RwaMarketStatus | null; reaso
     default:
       return s.marketStatus;
   }
+}
+
+/**
+ * Whether the BSC Sell button is off. A stock sells through its own issuer, so that issuer has to
+ * be trading; crypto (BTCB, ETH, BNB) has no catalog row and no market hours, so it is never
+ * blocked by the venue gate (the same exemption useBscBuyGate gives a crypto buy).
+ */
+export function bscSellBlocked(tier: string | undefined, venue: { buyable: boolean } | undefined): boolean {
+  if (tier === "crypto") return false;
+  return !venue?.buyable;
 }

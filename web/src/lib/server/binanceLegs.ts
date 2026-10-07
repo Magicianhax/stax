@@ -19,7 +19,7 @@ import { encodeFunctionData } from "viem";
 import { ERC20_ABI } from "@/lib/abis";
 import { fromUnits } from "@/lib/format";
 import { formatNextOpen, nextUsOpenMs } from "@/lib/marketHours";
-import { BSC_MIN_LEG_USD, isBuyable } from "@/lib/rwa";
+import { BSC_MIN_LEG_USD, isBuyable, minLegUsd } from "@/lib/rwa";
 import { rawToUsd } from "@/lib/units";
 import type { ExecCall } from "@/lib/execution";
 import type { Asset, StaxChain } from "@/lib/chains/types";
@@ -49,6 +49,8 @@ export interface BinanceLegArgs {
    * made just to size this guard.
    */
   usdValue: number;
+  /** Which way the leg trades; sells clear a lower floor than buys. Defaults to "buy". */
+  side?: "buy" | "sell";
   /** False for a price check: quote only, no swap build, and the leg's `swapData` is "0x". */
   build?: boolean;
 }
@@ -114,13 +116,18 @@ export async function buildBinanceLeg(a: BinanceLegArgs): Promise<BinanceLeg> {
   if (!Number.isFinite(a.usdValue)) {
     throw new BinanceLegRefusal("Couldn't price this trade right now. Try again in a moment.");
   }
-  if (a.usdValue < BSC_MIN_LEG_USD) {
-    // Design critique P1 #11: name the next step, not just the rule that was broken. Reviewer
-    // follow-up: side-neutral wording, and no leading "NVDA:" — buildBinanceLeg prices both buy
-    // and sell legs, and "the smallest buy is $6" told someone selling a $5.70 position (bought
-    // at the $6 floor, dipped since, no amount field on the Sell tab to "enter more" into) that
-    // they needed to make a bigger BUY.
-    throw new BinanceLegRefusal(`The smallest trade is $${BSC_MIN_LEG_USD}. Enter $${BSC_MIN_LEG_USD} or more.`, "min_trade");
+  const side = a.side ?? "buy";
+  if (a.usdValue < minLegUsd(side)) {
+    // Design critique P1 #11: name the next step, not just the rule that was broken. A buy has no
+    // amount to "enter" on a plan screen, so the words stay about the trade. A sale is checked
+    // against Binance's real floor ($5), not the $6 buffer buys carry, and its message points at
+    // what the Sell tab can actually do (a bigger share), never at an amount field it doesn't have.
+    throw new BinanceLegRefusal(
+      side === "sell"
+        ? "The smallest sale is $5. Sell more of it, or wait until it's worth more."
+        : `The smallest trade is $${BSC_MIN_LEG_USD}. Enter $${BSC_MIN_LEG_USD} or more.`,
+      "min_trade",
+    );
   }
   const router = a.chain.routers.binance;
   if (!router) throw new Error(`Binance aggregator isn't configured on ${a.chain.name}.`);
