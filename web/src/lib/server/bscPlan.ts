@@ -20,6 +20,12 @@ import type { RwaToken } from "./binance/types";
  * What a plan says when one of its holdings comes out under Binance's floor at invest time. The
  * single-trade refusal ("Enter $6 or more") points at an amount field a plan screen doesn't have.
  */
+/** The refusal for a plan bigger than the cash in the account, in plan words (retrying can't help). */
+export function notEnoughCashMessage(balanceUsd: number): string {
+  const have = balanceUsd.toLocaleString("en-US", { style: "currency", currency: "USD" });
+  return `That's more than the ${have} you have to invest. Add cash, or start smaller.`;
+}
+
 export const PLAN_MIN_LEG_MESSAGE = `Each holding in a plan needs at least $${BSC_MIN_LEG_USD}. Go back and invest a little more, or pick fewer holdings.`;
 
 /** How many legs $usd can fund on BSC while every leg still clears the $6 floor. */

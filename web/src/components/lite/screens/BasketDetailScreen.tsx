@@ -27,10 +27,11 @@ import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { useUsdcBalance } from "@/hooks/useBalances";
 import { getChain } from "@/lib/chains";
 import { setActiveChainKey } from "@/lib/chains/active";
-import { basketToAllocation, isBasketInvestable, reasonFor, riskWord, type Basket } from "@/lib/baskets";
+import { basketMinAmountUsd, basketToAllocation, isBasketInvestable, reasonFor, riskWord, type Basket } from "@/lib/baskets";
 import { assetLogo } from "@/lib/assetLogo";
 import { toTile, catFor } from "@/lib/displayAssets";
 import { usd } from "@/lib/format";
+import { BSC_MIN_LEG_USD } from "@/lib/rwa";
 import { haptic } from "@/lib/haptics";
 import { iconBtn } from "./primitives";
 import { riskMeta } from "./PlanScreen";
@@ -112,7 +113,13 @@ export function BasketDetailScreen({
   const risk = riskMeta(basket.riskScore);
   const basketChain = getChain(basket.chain);
   const canSave = basket.author === "shared" && !isMine;
-  const canReview = investable && ready && amount > 0;
+  // BNB Chain: every holding must get Binance's $6 minimum, so a basket has a smallest amount.
+  const minAmount = chain.key === "bsc" ? basketMinAmountUsd(basket.items) : null;
+  const tooSmall = minAmount !== null && amount > 0 && amount < minAmount;
+  // The sheet already shows "of $balance"; an amount over it can never be placed (the plan would
+  // fail at Binance's check and retrying can't help), same line the goal screen uses.
+  const overBalance = chain.key === "bsc" && Boolean(bal) && amount > balance + 1e-6;
+  const canReview = investable && ready && amount > 0 && !tooSmall && !overBalance;
 
   const onShare = async () => {
     haptic.light();
@@ -426,6 +433,15 @@ export function BasketDetailScreen({
             </button>
           ))}
         </div>
+        {overBalance ? (
+          <p role="alert" style={{ margin: "10px 2px 0", fontSize: 13, fontWeight: 500, color: "var(--neg)", lineHeight: 1.45 }}>
+            That’s more than the {usd(balance)} you have to invest. Add cash, or start smaller.
+          </p>
+        ) : tooSmall ? (
+          <p role="alert" style={{ margin: "10px 2px 0", fontSize: 13, fontWeight: 500, color: "var(--neg)", lineHeight: 1.45 }}>
+            This basket needs at least {usd(minAmount!)} so every holding gets ${BSC_MIN_LEG_USD}.
+          </p>
+        ) : null}
         <p style={{ fontSize: 13, color: "var(--ink-2)", margin: "14px 0 0", lineHeight: 1.5 }}>
           You&apos;ll see the full split and Vera&apos;s risk check before anything is placed.
         </p>

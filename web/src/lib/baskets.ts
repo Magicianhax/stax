@@ -14,6 +14,7 @@
 //                          trusts nothing: validates symbols, renormalizes, recomputes
 import { getChain, isChainKey, isRoutable, type ChainKey, type StaxChain } from "@/lib/chains";
 import { displayFor } from "@/lib/displayAssets";
+import { BSC_MIN_LEG_USD } from "@/lib/rwa";
 import type { Allocation } from "@/lib/allocation-schema";
 import type { AllocateResult } from "@/lib/invest-types";
 import { absoluteAppUrl } from "@/lib/urls";
@@ -418,6 +419,21 @@ export function reasonFor(symbol: string): string {
 }
 
 /** The AllocateResult shape PlanScreen + useInvest.invest expect. */
+/**
+ * The least a basket can be invested with on BNB Chain so every holding still gets Binance's
+ * minimum per leg (BSC_MIN_LEG_USD): the smallest whole dollar amount at which the smallest weight
+ * funds a full leg. Null when the basket has no holdings. A $100 default clears the curated
+ * baskets, but a typed $30 into a basket with a 15% holding would not.
+ */
+export function basketMinAmountUsd(items: readonly { weightPct: number }[], minLegUsd: number = BSC_MIN_LEG_USD): number | null {
+  const weights = items.map((i) => i.weightPct).filter((w) => w > 0);
+  if (weights.length === 0) return null;
+  const smallest = Math.min(...weights);
+  let n = Math.ceil((minLegUsd * 100) / smallest - 1e-9);
+  while ((n * smallest) / 100 < minLegUsd - 1e-9) n += 1;
+  return n;
+}
+
 export function basketToAllocation(basket: Basket, amountUsd: number): AllocateResult {
   return {
     summary: basket.name,

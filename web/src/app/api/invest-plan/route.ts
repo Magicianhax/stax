@@ -15,7 +15,9 @@ import { rateLimit } from "@/lib/server/rateLimit";
 import { getSmartAccount } from "@/lib/server/users";
 import { getBinanceWeb3 } from "@/lib/server/binance";
 import { bscCatalogSnapshot } from "@/lib/server/rwaCatalog";
-import { buildBscInvestLegs, PLAN_MIN_LEG_MESSAGE } from "@/lib/server/bscPlan";
+import { buildBscInvestLegs, notEnoughCashMessage, PLAN_MIN_LEG_MESSAGE } from "@/lib/server/bscPlan";
+import { ERC20_ABI } from "@/lib/abis";
+import { rawToUsd } from "@/lib/units";
 import { BinanceLegError, BinanceLegRefusal } from "@/lib/server/binanceLegs";
 import { decodeApproveAmount, dryRunBscSwap, pairLegCalls } from "@/lib/server/dryRun";
 import { unauthorized, badRequest, tooManyRequests, serverError, jsonError } from "@/lib/server/respond";
@@ -114,6 +116,21 @@ export async function POST(req: NextRequest) {
       let calls: ExecCall[];
       let dryRuns: DryRun[] = [];
       const taker = account.address as `0x${string}`;
+
+      // A plan for more than the account holds can only fail at Binance's check or in the bundler
+      // with words the person can't act on, so refuse it up front. If the balance can't be read,
+      // don't block: the chain still has the final word.
+      try {
+        const cash = (await serverClient(chain).readContract({
+          address: chain.usdc.address,
+          abi: ERC20_ABI,
+          functionName: "balanceOf",
+          args: [taker],
+        })) as bigint;
+        if (cash < grossTotal) return badRequest(notEnoughCashMessage(rawToUsd(chain, cash)));
+      } catch (err) {
+        console.warn("[invest-plan] couldn't read the cash balance:", err instanceof Error ? err.message : err);
+      }
       try {
         const [catalog, tokens] = await Promise.all([bscCatalogSnapshot(nowMs), getBinanceWeb3().rwaTokens()]);
         const builtLegs = await buildBscInvestLegs({
