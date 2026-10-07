@@ -42,10 +42,20 @@ import { netOf } from "@/lib/fees";
 import { executorInvestCalls } from "@/lib/executorCalls";
 import { rawToUsd, usdToRaw } from "@/lib/units";
 import { ERC20_ABI } from "@/lib/abis";
+import { sendOutcomeUnknown } from "@/lib/autopilotRetry";
+import type { Hex } from "viem";
 
 const RISK_HEADROOM_BPS = 1500;
 const RISK_CEILING_BPS = 10000;
 const EXPIRY_SECONDS = 15 * 60;
+
+/**
+ * Activity words for a run that was sent but never confirmed. Logged as "skipped" (the clock
+ * row) because autopilot_runs only allows success/skipped/error and this is neither a success
+ * nor a failure; the words carry the difference.
+ */
+export const UNCONFIRMED_REASON =
+  "Vera sent this run but couldn't confirm it yet. Check your holdings before you run Autopilot again.";
 
 export interface RunResult {
   ok: boolean;
@@ -270,22 +280,58 @@ export async function runAutopilot(
   });
 
   // 6. Sign (Privy server owner sig) + submit gaslessly via Pimlico on this chain.
-  let txHash: string;
+  //
+  //    Three outcomes, and "unknown" must never be read as "failed". Failed (nothing reached the
+  //    bundler, or it refused the op) is safe to retry. Unknown (the op was accepted, or may have
+  //    been, but no receipt came back) is not: the cron would run again in the same tick with a
+  //    stale spentThisPeriod, the balance can still cover it, and if the first op lands the
+  //    period's cap is silently exceeded. So an unknown outcome is counted as spent, logged, and
+  //    returned as not retryable (`unconfirmed` below).
+  const unconfirmed = async (userOpHash?: string): Promise<RunResult> => {
+    console.warn(
+      `[autopilot] ${working.id}: outcome unknown on ${chain.key}` +
+        (userOpHash ? ` (userOpHash ${userOpHash})` : " (send timed out)") +
+        "; counted against this period, not retried",
+    );
+    await recordRun(working.userId, {
+      lastRunAt: now,
+      runs: working.runs + 1,
+      spentThisPeriod: working.spentThisPeriod + spendUsd,
+    });
+    await log({ assessedRiskBps, status: "skipped", reason: UNCONFIRMED_REASON, amountUsd: spendUsd });
+    return { ok: false, reason: UNCONFIRMED_REASON, retryable: false };
+  };
+
+  let smartAccountClient: Awaited<ReturnType<typeof getServerSmartAccountClient>>["smartAccountClient"];
+  let userOpHash: Hex;
   try {
-    const { account, smartAccountClient } = await getServerSmartAccountClient(chain, working.walletId, working.owner);
-    const userOpHash = await smartAccountClient.sendUserOperation({ account, calls });
-    const receipt = await smartAccountClient.waitForUserOperationReceipt({ hash: userOpHash });
-    if (!receipt.success) {
-      const reason = `Run reverted (tx ${receipt.receipt.transactionHash}).`;
-      await log({ assessedRiskBps, status: "error", reason, txHash: receipt.receipt.transactionHash, amountUsd: spendUsd });
-      return { ok: false, reason };
-    }
-    txHash = receipt.receipt.transactionHash;
+    const built = await getServerSmartAccountClient(chain, working.walletId, working.owner);
+    smartAccountClient = built.smartAccountClient;
+    userOpHash = await smartAccountClient.sendUserOperation({ account: built.account, calls });
   } catch (e) {
+    if (sendOutcomeUnknown(e)) return unconfirmed();
     const reason = e instanceof Error ? e.message : "Submission failed.";
     await log({ assessedRiskBps, status: "error", reason, amountUsd: spendUsd });
     return { ok: false, reason };
   }
+
+  // The bundler accepted the op: from here on, a missing receipt is unknown, never failed.
+  let receipt: Awaited<ReturnType<typeof smartAccountClient.waitForUserOperationReceipt>> | null;
+  try {
+    receipt = await smartAccountClient.waitForUserOperationReceipt({ hash: userOpHash });
+  } catch (e) {
+    console.warn(`[autopilot] ${working.id}: no receipt yet for ${userOpHash}:`, e instanceof Error ? e.message : e);
+    // One last look before calling it unknown (the wait can time out a moment before inclusion).
+    receipt = await smartAccountClient.getUserOperationReceipt({ hash: userOpHash }).catch(() => null);
+  }
+  if (!receipt) return unconfirmed(userOpHash);
+  if (!receipt.success) {
+    // Landed and reverted: the batch is atomic, so nothing was spent and a retry is safe.
+    const reason = `Run reverted (tx ${receipt.receipt.transactionHash}).`;
+    await log({ assessedRiskBps, status: "error", reason, txHash: receipt.receipt.transactionHash, amountUsd: spendUsd });
+    return { ok: false, reason };
+  }
+  const txHash = receipt.receipt.transactionHash;
 
   // 7. Persist run accounting + audit log. The atomic claim already advanced
   //    next_run_at, so we only record the spend/count here.

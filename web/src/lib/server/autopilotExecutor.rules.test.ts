@@ -40,18 +40,25 @@ vi.mock("@/lib/eip712", () => ({
   signRiskInference: vi.fn().mockResolvedValue(SIG_65),
 }));
 
-const { sendUserOperationSpy, waitForReceiptSpy } = vi.hoisted(() => ({
+const { sendUserOperationSpy, waitForReceiptSpy, getReceiptSpy } = vi.hoisted(() => ({
   sendUserOperationSpy: vi.fn().mockResolvedValue("0xuserop"),
   waitForReceiptSpy: vi.fn().mockResolvedValue({ success: true, receipt: { transactionHash: "0xtx" } }),
+  getReceiptSpy: vi.fn(),
 }));
 vi.mock("./privySmartAccount", () => ({
   getServerSmartAccountClient: vi.fn().mockResolvedValue({
     account: "account",
-    smartAccountClient: { sendUserOperation: sendUserOperationSpy, waitForUserOperationReceipt: waitForReceiptSpy },
+    smartAccountClient: {
+      sendUserOperation: sendUserOperationSpy,
+      waitForUserOperationReceipt: waitForReceiptSpy,
+      getUserOperationReceipt: getReceiptSpy,
+    },
   }),
 }));
 
-import { runAutopilot } from "./autopilotExecutor";
+import { TimeoutError } from "viem";
+import { UnknownBundlerError, UserOperationExecutionError, WaitForUserOperationReceiptTimeoutError } from "viem/account-abstraction";
+import { runAutopilot, UNCONFIRMED_REASON } from "./autopilotExecutor";
 import { AllocationRefusal } from "./bscPlan";
 import { BinanceLegRefusal } from "./binanceLegs";
 import { getChain } from "@/lib/chains";
@@ -96,6 +103,7 @@ beforeEach(() => {
   buildLegsSpy.mockReset();
   sendUserOperationSpy.mockClear();
   waitForReceiptSpy.mockClear();
+  getReceiptSpy.mockReset().mockRejectedValue(new Error("UserOperationReceiptNotFoundError"));
   vi.mocked(signRiskInference).mockClear();
 });
 
@@ -286,5 +294,93 @@ describe("runAutopilot: the signing wallet is re-checked at run time", () => {
     expect(logRunSpy).toHaveBeenCalledWith(expect.objectContaining({ status: "skipped" }));
     expect(planAutopilotRunSpy).not.toHaveBeenCalled();
     expect(sendUserOperationSpy).not.toHaveBeenCalled();
+  });
+});
+
+// Review finding (bots checklist, "unknown vs failed"): once the bundler has the op, a missing
+// receipt is an UNKNOWN outcome, not a failure. Treating it as a failure let the cron re-run the
+// config twice more in the same tick with a stale spentThisPeriod, so a first op that did land
+// was followed by a second (and third) buy, silently past maxPerPeriodUsd.
+describe("runAutopilot: a submitted run whose receipt never comes back", () => {
+  const buyNvda = () => {
+    planAutopilotRunSpy.mockResolvedValue({
+      ok: true,
+      kind: "rule",
+      rule: { type: "buy_discount", symbol: "NVDA", discountPct: 2 },
+      intents: [{ symbol: "NVDA", action: "buy", usd: 25, reason: "NVDA is cheap" }],
+      receipt: "Vera bought the discount: bought $25 of NVDA.",
+    });
+    buildLegsSpy.mockResolvedValue({
+      legs: [{ router: "0xB44446b0c8E56988c34f7Ff73Ae904982b5FdDA5", tokenOut: "0x02fca66c1d1afb4e2a7884261eb00f63598a7436", usdcIn: BigInt(1), minOut: BigInt(1), swapData: "0x" }],
+      notes: [],
+    });
+  };
+
+  it("is unknown, not failed: not retryable, counted against the period, logged without 'failed'", async () => {
+    buyNvda();
+    waitForReceiptSpy.mockRejectedValueOnce(new WaitForUserOperationReceiptTimeoutError({ hash: "0xuserop" }));
+
+    const result = await runAutopilot(cfg({ spentThisPeriod: 0 }), { nowSeconds: NOW_S, manual: true }, deployedBsc);
+
+    expect(result).toEqual({ ok: false, reason: UNCONFIRMED_REASON, retryable: false });
+    // Looked once more before giving up.
+    expect(getReceiptSpy).toHaveBeenCalledWith({ hash: "0xuserop" });
+    // The spend is counted, so a second run in the same period sees the cap.
+    expect(recordRunSpy).toHaveBeenCalledWith("u1", expect.objectContaining({ spentThisPeriod: 25, runs: 1 }));
+    expect(logRunSpy).toHaveBeenCalledWith(expect.objectContaining({ status: "skipped", reason: UNCONFIRMED_REASON, amountUsd: 25 }));
+    expect(logRunSpy).not.toHaveBeenCalledWith(expect.objectContaining({ status: "error" }));
+    expect(sendUserOperationSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("a run counted as unknown blocks a second run that would pass the period cap", async () => {
+    buyNvda();
+    waitForReceiptSpy.mockRejectedValueOnce(new WaitForUserOperationReceiptTimeoutError({ hash: "0xuserop" }));
+    await runAutopilot(cfg({ maxPerPeriodUsd: 25 }), { nowSeconds: NOW_S, manual: true }, deployedBsc);
+    const [, patch] = recordRunSpy.mock.calls[0];
+
+    sendUserOperationSpy.mockClear();
+    const second = await runAutopilot(cfg({ maxPerPeriodUsd: 25, spentThisPeriod: patch.spentThisPeriod }), { nowSeconds: NOW_S, manual: true }, deployedBsc);
+
+    expect(second.ok).toBe(false);
+    expect(second.retryable).toBe(false);
+    expect(sendUserOperationSpy).not.toHaveBeenCalled();
+  });
+
+  it("records the run as a success when the last look finds the receipt", async () => {
+    buyNvda();
+    waitForReceiptSpy.mockRejectedValueOnce(new Error("bundler 502"));
+    getReceiptSpy.mockReset().mockResolvedValueOnce({ success: true, receipt: { transactionHash: "0xlanded" } });
+
+    const result = await runAutopilot(cfg(), { nowSeconds: NOW_S }, deployedBsc);
+
+    expect(result).toEqual({ ok: true, txHash: "0xlanded" });
+    expect(logRunSpy).toHaveBeenCalledWith(expect.objectContaining({ status: "success", txHash: "0xlanded" }));
+  });
+
+  it("treats a send that timed out on eth_sendUserOperation as unknown too", async () => {
+    buyNvda();
+    const timedOut = new UserOperationExecutionError(
+      new UnknownBundlerError({ cause: new TimeoutError({ body: {}, url: "https://api.pimlico.io/v2/56/rpc" }) }),
+      { sender: "0x2222222222222222222222222222222222222222", nonce: BigInt(0), callData: "0x", callGasLimit: BigInt(1), preVerificationGas: BigInt(1), verificationGasLimit: BigInt(1), maxFeePerGas: BigInt(1), maxPriorityFeePerGas: BigInt(1), signature: "0x" },
+    );
+    sendUserOperationSpy.mockRejectedValueOnce(timedOut);
+
+    const result = await runAutopilot(cfg(), { nowSeconds: NOW_S }, deployedBsc);
+
+    expect(result).toEqual({ ok: false, reason: UNCONFIRMED_REASON, retryable: false });
+    expect(recordRunSpy).toHaveBeenCalledWith("u1", expect.objectContaining({ spentThisPeriod: 25 }));
+    expect(waitForReceiptSpy).not.toHaveBeenCalled();
+  });
+
+  it("still fails (and stays retryable) when the bundler refused the op outright", async () => {
+    buyNvda();
+    sendUserOperationSpy.mockRejectedValueOnce(new Error("AA21 didn't pay prefund"));
+
+    const result = await runAutopilot(cfg(), { nowSeconds: NOW_S }, deployedBsc);
+
+    expect(result.ok).toBe(false);
+    expect(result.retryable).toBeUndefined();
+    expect(recordRunSpy).not.toHaveBeenCalled();
+    expect(logRunSpy).toHaveBeenCalledWith(expect.objectContaining({ status: "error" }));
   });
 });
