@@ -150,3 +150,17 @@ export function planOpenIssuerNote(usMarketOpen: boolean | undefined, venues: re
   if (names.length === 0) return "";
   return `The US market is closed. Vera buys from ${names.join(" and ")}, which ${names.length > 1 ? "are" : "is"} open now.`;
 }
+
+/**
+ * The trust line under a plan, a basket or the activity feed. "Vera signs and records" is true
+ * only on the executor path (`chain.contracts.deployed`): on BNB Chain the plan goes straight
+ * from the person's own account and nothing is signed with Vera's key or written on-chain, so
+ * there the line says what does happen, Binance checking each trade first.
+ */
+export type TrustLineKind = "every" | "plan" | "basket";
+export function trustLine(kind: TrustLineKind, executorPath: boolean): string {
+  if (!executorPath) return kind === "every" ? "Every trade is checked by Binance first" : "Binance checks each trade before it's sent";
+  if (kind === "every") return "Every plan signed & recorded by Vera";
+  if (kind === "plan") return "Vera will sign & record this plan";
+  return "Vera signs the risk before each invest";
+}

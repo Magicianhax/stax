@@ -42,7 +42,8 @@ interface Slide {
 
 export function HomeBanners({ go }: { go: (screen: string, params?: Record<string, unknown>) => void }) {
   const chain = useChain();
-  const { ready } = useChainReady();
+  // `investable`, not `ready`: BNB Chain invests straight from the smart account with no executor.
+  const { investable } = useChainReady();
   const giftsOn = useGiftsEnabled();
 
   const slides = useMemo<Slide[]>(() => {
@@ -50,7 +51,7 @@ export function HomeBanners({ go }: { go: (screen: string, params?: Record<strin
       {
         id: "vera",
         title: "Invest with Vera",
-        body: ready
+        body: investable
           ? "Tell me a goal, and I’ll build the plan."
           : `Opening shortly on ${chain.name}. Browse prices meanwhile.`,
         art: <VeraOrb size={50} pulse />,
@@ -71,7 +72,7 @@ export function HomeBanners({ go }: { go: (screen: string, params?: Record<strin
       });
     }
     return out;
-  }, [chain.name, giftsOn, go, ready]);
+  }, [chain.name, giftsOn, go, investable]);
 
   const count = slides.length;
   const [rawIndex, setIndex] = useState(0);

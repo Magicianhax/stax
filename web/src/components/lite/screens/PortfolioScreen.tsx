@@ -37,6 +37,8 @@ import { PLATFORM_LABEL } from "@/components/lite/rwa/VenuePicker";
 import { rampColor } from "./basketPrimitives";
 import { changeOf, readoutDate, useSymbolSeries, type MarketRange } from "./useRangeSeries";
 import type { LoopParams } from "../LiteApp";
+import { useChainReady } from "../useChainReady";
+import { trustLine } from "@/lib/plainCopy";
 
 // No 5Y: this account's value line starts when our snapshots did, and offering a
 // range we cannot fill invites the reader to trust a shape that is not there.
@@ -57,6 +59,7 @@ export function PortfolioScreen({
   loop?: LoopParams;
 }) {
   const chain = useChain();
+  const { ready } = useChainReady();
   const { address } = useSmartAccount();
   // Cash, invested, and total all arrive pre-computed from /api/portfolio —
   // this screen renders them verbatim (no client-side money math).
@@ -395,7 +398,7 @@ export function PortfolioScreen({
         </div>
 
         <div style={{ padding: "18px 22px 0", display: "flex", justifyContent: "center" }}>
-          <VerifiedBadge label="Every plan signed & recorded by Vera" onClick={() => go("settings")} />
+          <VerifiedBadge label={trustLine("every", ready)} onClick={() => go("settings")} />
         </div>
       </Reveal>
     </div>

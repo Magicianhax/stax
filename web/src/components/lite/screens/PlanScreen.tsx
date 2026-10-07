@@ -24,7 +24,7 @@ import { usd } from "@/lib/format";
 import { assetBySymbol } from "@/lib/chains";
 import { STAX_FEE_LABEL, feeUsd } from "@/lib/fees";
 import { planCheckFailedMessage, planDryRunView } from "@/lib/planDryRuns";
-import { gapToRealShare, planOpenIssuerNote } from "@/lib/plainCopy";
+import { gapToRealShare, planOpenIssuerNote, trustLine } from "@/lib/plainCopy";
 import { platformLabel } from "@/lib/spread";
 import { usMarketClock } from "@/lib/marketHours";
 import { useRwa } from "@/hooks/useRwa";
@@ -86,7 +86,7 @@ export function PlanScreen({
   dryRuns?: DryRun[];
 }) {
   const risk = riskMeta(allocation.riskScore);
-  const { chain, investable } = useChainReady();
+  const { chain, ready: executorPath, investable } = useChainReady();
   const dryRunView = planDryRunView(allocation.allocations, dryRuns, (s) => assetBySymbol(chain, s)?.decimals ?? 18);
   const failedMessage = planCheckFailedMessage(
     dryRunView.failedSymbols.map((sym) => toTile(sym).name),
@@ -330,7 +330,7 @@ export function PlanScreen({
 
       {/* trust line */}
       <div style={{ padding: "14px 22px 0", display: "flex", justifyContent: "center" }}>
-        <VerifiedBadge label="Vera will sign & record this plan" onClick={() => go("settings")} />
+        <VerifiedBadge label={trustLine("plan", executorPath)} onClick={() => go("settings")} />
       </div>
 
       {/* quiet text actions — keep this mix, or hand it to a friend */}

@@ -26,6 +26,7 @@ import { todayMarketLine } from "@/lib/homeToday";
 import { portfolioSeries } from "@/lib/demoSeries";
 import { iconBtn } from "./primitives";
 import { useChainReady } from "../useChainReady";
+import { trustLine } from "@/lib/plainCopy";
 import { HomeBanners } from "../HomeBanners";
 import { useBaskets } from "@/hooks/useBaskets";
 import { BasketRailTile } from "./basketPrimitives";
@@ -91,7 +92,7 @@ export function HomeScreen({
   loop?: LoopParams;
 }) {
   const { address } = useSmartAccount();
-  const { chain, ready } = useChainReady();
+  const { chain, ready, investable } = useChainReady();
   const demo = useDemo();
   // Cash, invested, and total all arrive pre-computed from /api/portfolio —
   // this screen renders them verbatim (no client-side money math).
@@ -353,7 +354,7 @@ export function HomeScreen({
                 Nothing here yet
               </div>
               <div style={{ fontSize: 13.5, marginTop: 4, lineHeight: 1.5 }}>
-                {ready
+                {investable
                   ? "Tell Vera a goal and place your first plan in one tap."
                   : `Nothing on ${chain.name} yet. Earlier investments live under Mantle in Settings.`}
               </div>
@@ -476,7 +477,7 @@ export function HomeScreen({
 
         {/* trust footer */}
         <div style={{ padding: "18px 22px 0", display: "flex", justifyContent: "center" }}>
-          <VerifiedBadge label="Every plan signed & recorded by Vera" onClick={() => go("settings")} />
+          <VerifiedBadge label={trustLine("every", ready)} onClick={() => go("settings")} />
         </div>
       </Reveal>
     </div>

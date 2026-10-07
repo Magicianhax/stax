@@ -35,6 +35,7 @@ import { haptic } from "@/lib/haptics";
 import { iconBtn } from "./primitives";
 import { riskMeta } from "./PlanScreen";
 import { useChainReady } from "../useChainReady";
+import { trustLine } from "@/lib/plainCopy";
 import { RampWeightBar, clusterOf, fmtPct, shareBasket } from "./basketPrimitives";
 import { useSymbolSeries, blendSeries, changeOf, readoutDate } from "./useRangeSeries";
 
@@ -53,7 +54,7 @@ export function BasketDetailScreen({
   /** A basket decoded from a share link (not in storage yet). */
   shared?: Basket;
 }) {
-  const { chain, investable: ready } = useChainReady();
+  const { chain, ready: executorPath, investable: ready } = useChainReady();
   const { byId, mine, save, remove, publish } = useBaskets();
   const { notify } = useToast();
   const giftsOn = useGiftsEnabled(); // gift-ui
@@ -356,8 +357,9 @@ export function BasketDetailScreen({
         <div className="card" style={{ padding: 16 }}>
           <div style={{ fontWeight: 700, fontSize: 15 }}>How this is built</div>
           <p style={{ fontSize: 13.5, color: "var(--ink-2)", margin: "6px 0 0", lineHeight: 1.55 }}>
-            The weights are fixed: every dollar you put in is split exactly as shown. Before each invest, Vera
-            checks the risk and signs it, and the plan is recorded so its track record can&apos;t be edited later.
+            The weights are fixed: every dollar you put in is split exactly as shown. {executorPath
+              ? "Before each invest, Vera checks the risk and signs it, and the plan is recorded so its track record can’t be edited later."
+              : "Binance checks each trade before it’s sent, so you see a problem before any money moves."}
             {basket.source?.goal && (
               <>
                 {" "}
@@ -369,7 +371,7 @@ export function BasketDetailScreen({
       </div>
 
       <div style={{ padding: "14px 22px 0", display: "flex", justifyContent: "center" }}>
-        <VerifiedBadge label="Vera signs the risk before each invest" onClick={() => go("settings")} />
+        <VerifiedBadge label={trustLine("basket", executorPath)} onClick={() => go("settings")} />
       </div>
 
       {/* Pinned invest bar — sticky, like PlanScreen. */}

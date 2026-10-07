@@ -2,7 +2,7 @@
 // of these functions instead of formatting a number inline, so the wording (and the threshold
 // under which a gap reads as "same as the real share") lives in one tested place.
 import { describe, expect, it } from "vitest";
-import { gapSentence, gapWords, stateLabel, dryRunLine, venuePickerExplainer, riskLine, shortGapLine, gapToRealShare, closedBuyLabel, planOpenIssuerNote } from "./plainCopy";
+import { gapSentence, gapWords, stateLabel, dryRunLine, venuePickerExplainer, riskLine, shortGapLine, gapToRealShare, closedBuyLabel, planOpenIssuerNote, trustLine } from "./plainCopy";
 import type { DryRun } from "./dryRun";
 
 describe("gapSentence", () => {
@@ -234,5 +234,16 @@ describe("planOpenIssuerNote", () => {
     expect(planOpenIssuerNote(false, ["bstock", "ondo"])).toBe(
       "The US market is closed. Vera buys from bStock and Ondo, which are open now.",
     );
+  });
+});
+
+describe("trustLine", () => {
+  it("claims a signature and an on-chain record only on the executor path", () => {
+    expect(trustLine("plan", true)).toMatch(/sign/);
+    expect(trustLine("every", true)).toMatch(/recorded/);
+    for (const kind of ["every", "plan", "basket"] as const) {
+      expect(trustLine(kind, false)).not.toMatch(/sign|record/i);
+      expect(trustLine(kind, false)).toMatch(/Binance/);
+    }
   });
 });
