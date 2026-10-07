@@ -5,8 +5,12 @@
 // the fixture doesn't cover on its own (a Sunday snapshot, a curated venue missing from the
 // token list, and a best-venue pick pinned against a synthetic gap so a naive "just take the
 // default venue" implementation can't pass by accident).
-import { beforeEach, describe, expect, it } from "vitest";
-import { buildCatalog, cachedWithFallback } from "./rwaCatalog";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const rwaTokensSpy = vi.fn();
+vi.mock("./binance", () => ({ getBinanceWeb3: () => ({ rwaTokens: () => rwaTokensSpy() }) }));
+
+import { bscCatalogSnapshot, buildCatalog, cachedWithFallback } from "./rwaCatalog";
 import type { Asset } from "../chains/types";
 import type { RwaToken } from "./binance/types";
 import rwaTokensFixture from "./binance/__fixtures__/rwa_tokens.json";
@@ -283,5 +287,46 @@ describe("cachedWithFallback", () => {
         throw new Error("binance down");
       }),
     ).rejects.toThrow("binance down");
+  });
+});
+
+// Review fix: the catalog used to be built once and cached for 45 s (up to 10 min on an outage),
+// with open/closed baked in from the clock at build time. A snapshot built at 15:59:50 ET kept
+// saying "Open now" after the close. Only the raw pull is cached now; the view is rebuilt per read.
+describe("bscCatalogSnapshot: the clock is applied on every read, not frozen at build time", () => {
+  const CLOSE_TUESDAY = new Date("2026-09-22T20:30:00.000Z").getTime(); // 16:30 ET, after the close
+
+  it("reads open before the close and after-hours after it, from the same cached pull", async () => {
+    // Every row says it is trading and gives no session: the state can only come from the clock.
+    const trading = tokens.map((t) => ({
+      ...t,
+      statusInfo: { ...t.statusInfo, openState: true, marketStatus: null, reasonCode: "TRADING" as const },
+    }));
+    rwaTokensSpy.mockResolvedValue(trading);
+
+    const before = await bscCatalogSnapshot(NOW);
+    const nvdaBefore = before.tickers.find((t) => t.ticker === "NVDA")!;
+    expect(nvdaBefore.venues.every((v) => v.state === "open" && v.buyable)).toBe(true);
+
+    const after = await bscCatalogSnapshot(CLOSE_TUESDAY);
+    const nvdaAfter = after.tickers.find((t) => t.ticker === "NVDA")!;
+    // A snapshot frozen at build time would still say "open" here.
+    expect(nvdaAfter.venues.every((v) => v.state === "postmarket")).toBe(true);
+    // The pull itself is the same one (cached), so `asOf` still says how old the PRICES are.
+    expect(after.asOf).toBe(before.asOf);
+    expect(rwaTokensSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("buildCatalog: an outage snapshot older than a session boundary", () => {
+  it("fails closed instead of offering a stale 'Open now' across the close", () => {
+    const trading = tokens.map((t) => ({
+      ...t,
+      statusInfo: { ...t.statusInfo, openState: true, marketStatus: null, reasonCode: "TRADING" as const },
+    }));
+    const fetchedAt = new Date("2026-09-22T19:55:00.000Z").getTime(); // 15:55 ET, open
+    const now = new Date("2026-09-22T20:30:00.000Z").getTime(); // 16:30 ET, 35 min of outage later
+    const rows = buildCatalog(trading, assets, now, fetchedAt);
+    expect(rows.flatMap((r) => r.venues).every((v) => !v.buyable)).toBe(true);
   });
 });

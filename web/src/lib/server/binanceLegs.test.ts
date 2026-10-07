@@ -263,6 +263,18 @@ describe("checkBscBuyable", () => {
     if (!gate.ok) expect(gate.nextOpenMs).toBe(explicit);
   });
 
+  it("refuses a bStock buy on a day the NYSE is shut, even though the issuer's own flags still say TRADING", () => {
+    const AFTER_CLOSE = Date.parse("2026-09-26T16:00:00.000Z"); // Saturday noon ET
+    const gate = checkBscBuyable(
+      [row({ statusInfo: { ...row().statusInfo, marketStatus: null, openState: true, reasonCode: "TRADING" } })],
+      NVDA,
+      "NVDA",
+      AFTER_CLOSE,
+    );
+    expect(gate.ok).toBe(false);
+    if (!gate.ok) expect(gate.message).toMatch(/^NVDA is closed right now/);
+  });
+
   it("fails closed when the token isn't in the catalog at all, and says unavailable, not closed", () => {
     const gate = checkBscBuyable([], NVDA, "NVDA", NOW);
     expect(gate.ok).toBe(false);

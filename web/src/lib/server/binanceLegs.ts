@@ -19,7 +19,7 @@ import { encodeFunctionData } from "viem";
 import { ERC20_ABI } from "@/lib/abis";
 import { fromUnits } from "@/lib/format";
 import { formatNextOpen, nextUsOpenMs } from "@/lib/marketHours";
-import { BSC_MIN_LEG_USD, isBuyable, minLegUsd } from "@/lib/rwa";
+import { BSC_MIN_LEG_USD, minLegUsd, venueBuyable } from "@/lib/rwa";
 import { rawToUsd } from "@/lib/units";
 import { anchoredSlippageBps, PRICE_MOVED_MESSAGE } from "@/lib/slippage";
 import type { ExecCall } from "@/lib/execution";
@@ -228,7 +228,7 @@ export function checkBscBuyable(
   nowMs: number,
 ): { ok: true; row: RwaToken } | { ok: false; message: string; nextOpenMs?: number } {
   const row = tokens.find((t) => t.tokenContractAddress.toLowerCase() === tokenAddress.toLowerCase());
-  if (!row || !isBuyable(row.statusInfo)) {
+  if (!row || !venueBuyable(row.statusInfo, nowMs)) {
     // No row at all means Binance has nothing to say about this address — there is no session to
     // report, so this is the one case that carries no `nextOpenMs` (design critique P0 #1: the
     // client falls back to its own "check back" copy rather than inventing a time).

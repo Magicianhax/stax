@@ -2,6 +2,7 @@
 // token's on-chain price next to the underlying share's reference price, plus whether the
 // issuer will trade it right now. Everything that shows or buys a BSC stock reads these.
 import type { RwaPlatform } from "./chains";
+import { usMarketState } from "./marketHours";
 
 /** Stax's own display state. The API calls the regular session "regular"; Stax calls it "open". */
 export type MarketState = "open" | "premarket" | "postmarket" | "overnight" | "closed" | "paused" | "unsupported";
@@ -117,4 +118,37 @@ export function marketStateFrom(s: { marketStatus: RwaMarketStatus | null; reaso
 export function bscSellBlocked(tier: string | undefined, venue: { buyable: boolean } | undefined): boolean {
   if (tier === "crypto") return false;
   return !venue?.buyable;
+}
+
+/** The slice of a Binance row's `statusInfo` that decides its state and whether it can be bought. */
+export interface RwaStatusLike {
+  openState: boolean;
+  marketStatus: RwaMarketStatus | null;
+  reasonCode: RwaReasonCode;
+}
+
+/**
+ * `state` for one row at `nowMs`. `marketStateFrom` reads the API's own session — bStock's
+ * statusInfo carries no session at all (`marketStatus` always null) so it always falls through,
+ * but so does an Ondo row that gives no session either, and both need the same two fallbacks in
+ * order: first, a non-TRADING reason the issuer already flagged as not open (`openState` false) is
+ * Stax's own "paused" state, not a guess. Only when the row gives no signal at all does the
+ * US-hours calendar stand in. One rule for the catalog AND the trade gate, so a row can't read
+ * "open" on Market and then be bought after the close (or the reverse).
+ */
+export function venueState(s: RwaStatusLike, nowMs: number): MarketState {
+  const fromApi = marketStateFrom(s);
+  if (fromApi !== null) return fromApi;
+  if (!s.openState && s.reasonCode !== "TRADING") return "paused";
+  return usMarketState(nowMs);
+}
+
+/**
+ * Whether a buy of this row is allowed at `nowMs`. `state` and `isBuyable` come from independent
+ * signals (the calendar vs. the issuer's own flags) and can disagree: an issuer that still claims
+ * TRADING after Stax's own clock says the market is closed must never read as buyable, because
+ * that is exactly the weekend-premium buy Vera is supposed to refuse. The calendar wins.
+ */
+export function venueBuyable(s: RwaStatusLike, nowMs: number): boolean {
+  return venueState(s, nowMs) === "closed" ? false : isBuyable(s);
 }

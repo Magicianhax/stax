@@ -10,8 +10,8 @@ import { nextUsOpenMs, usMarketState } from "../marketHours";
 import { compareForBuyer } from "../spread";
 import {
   gapPct,
-  isBuyable,
-  marketStateFrom,
+  venueBuyable,
+  venueState,
   type MarketState,
   type RwaListResponse,
   type RwaTickerView,
@@ -41,29 +41,19 @@ function nextOpenMsFor(platform: RwaPlatform, state: MarketState, nextOpenTime: 
   return nextUsOpenMs(nowMs);
 }
 
-/**
- * `state` for one row. `marketStateFrom` reads the API's own session — bStock's statusInfo
- * carries no session at all (`marketStatus` always null) so it always falls through, but so
- * does an Ondo row that gives no session either, and both need the same two fallbacks in
- * order: first, a non-TRADING reason the issuer already flagged as not open (`openState`
- * false) is Stax's own "paused" state, not a guess — e.g. bStock's MARKET_PAUSED/ASSET_PAUSED
- * days, which used to read as whatever the US clock said, TRADING reason or not. Only when
- * the row gives no signal at all does the US-hours calendar stand in.
- */
-function stateFor(token: RwaToken, nowMs: number): MarketState {
-  const fromApi = marketStateFrom(token.statusInfo);
-  if (fromApi !== null) return fromApi;
-  if (!token.statusInfo.openState && token.statusInfo.reasonCode !== "TRADING") return "paused";
-  return usMarketState(nowMs);
-}
+/** A pull older than this is outage-fallback data, not a normal read (the cache holds one for ~45 s, plus the Binance client's own ~45 s). */
+const STALE_TOKENS_MS = 3 * 60_000;
 
-function buildVenue(token: RwaToken, nowMs: number): VenueView {
-  const state = stateFor(token, nowMs);
-  // `state` and `isBuyable` come from independent signals (the calendar vs. the issuer's own
-  // flags) and can disagree — an issuer that still claims TRADING after Stax's own clock says
-  // the market is closed must never read as buyable: that is exactly the weekend-premium buy
-  // Vera is supposed to refuse. The calendar wins.
-  const buyable = state === "closed" ? false : isBuyable(token.statusInfo);
+function buildVenue(token: RwaToken, nowMs: number, fetchedAtMs: number, sessionCrossed: boolean): VenueView {
+  let state = venueState(token.statusInfo, nowMs);
+  let buyable = venueBuyable(token.statusInfo, nowMs);
+  // The pull is from before a US session boundary (a Binance outage kept serving an old snapshot
+  // across the 9:30 open or the 16:00 close): the issuer's own open/closed flags describe the old
+  // session. Fail closed rather than offer a stale "Open now", and say closed when the calendar does.
+  if (sessionCrossed) {
+    buyable = false;
+    if (usMarketState(nowMs) === "closed") state = "closed";
+  }
   return {
     platform: token.platformId,
     symbol: token.tokenSymbol,
@@ -75,8 +65,8 @@ function buildVenue(token: RwaToken, nowMs: number): VenueView {
     buyable,
     nextOpenMs: buyable ? null : nextOpenMsFor(token.platformId, state, token.statusInfo.nextOpenTime, nowMs),
     // /tokens carries no per-row timestamp; the whole pull is one snapshot, so every venue's
-    // "as of" is the moment the catalog was built, same as RwaListResponse.asOf.
-    updatedAt: nowMs,
+    // "as of" is when the pull was fetched, same as RwaListResponse.asOf.
+    updatedAt: fetchedAtMs,
   };
 }
 
@@ -97,7 +87,8 @@ function pickBestVenue(venues: VenueView[]): RwaPlatform | null {
  * (docs/BINANCE-WEB3.md §7.2, AAPLB), so a missing venue is dropped rather than failing the
  * whole ticker, and a ticker with no venue at all is left out of the result.
  */
-export function buildCatalog(tokens: RwaToken[], assets: Asset[], nowMs: number): RwaTickerView[] {
+export function buildCatalog(tokens: RwaToken[], assets: Asset[], nowMs: number, fetchedAtMs: number = nowMs): RwaTickerView[] {
+  const sessionCrossed = nowMs - fetchedAtMs > STALE_TOKENS_MS && usMarketState(fetchedAtMs) !== usMarketState(nowMs);
   const byAddress = new Map<string, RwaToken>();
   for (const t of tokens) byAddress.set(t.tokenContractAddress.toLowerCase(), t);
 
@@ -113,7 +104,7 @@ export function buildCatalog(tokens: RwaToken[], assets: Asset[], nowMs: number)
     }
     if (present.length === 0) continue;
 
-    const venues = present.map((t) => buildVenue(t, nowMs));
+    const venues = present.map((t) => buildVenue(t, nowMs, fetchedAtMs, sessionCrossed));
     out.push({
       ticker: asset.symbol,
       name: asset.name,
@@ -159,21 +150,27 @@ export async function cachedWithFallback<T>(
   }
 }
 
-const CATALOG_KEY = "rwa:catalog:bsc";
-const CATALOG_TTL_S = 45; // matches rwaTokens()'s own Redis cache; this layer never calls Binance itself
-const CATALOG_FALLBACK_TTL_S = 600;
+const TOKENS_KEY = "rwa:tokens:bsc";
+const TOKENS_TTL_S = 45; // matches rwaTokens()'s own Redis cache; this layer never calls Binance itself
+const TOKENS_FALLBACK_TTL_S = 600;
 
 /**
  * `GET /api/rwa?chain=bsc`'s payload: the curated catalog built from one cached `rwaTokens()`
  * call. `rwaTokens()` already holds the Binance-facing cache (Task 7); the wrapping cache here
- * only exists to keep the last good snapshot around for `cachedWithFallback`'s outage path, and
- * to avoid rebuilding the view from the same tokens on every request within the window.
+ * only exists to keep the last good PULL around for `cachedWithFallback`'s outage path.
+ *
+ * What is cached is the raw pull, never the built catalog. A catalog bakes in what the clock says
+ * (open or closed, buyable or not), so a snapshot built at 15:59:50 ET kept saying "Open now" for
+ * minutes after the close, and an outage replayed it for up to ten. The view is rebuilt from the
+ * cached tokens on every read, against that read's own `nowMs`; `asOf` stays the pull's time so
+ * staleness remains visible.
  */
 export async function bscCatalogSnapshot(nowMs: number): Promise<RwaListResponse> {
-  return cachedWithFallback(CATALOG_KEY, CATALOG_TTL_S, CATALOG_FALLBACK_TTL_S, async () => {
-    const tokens = await getBinanceWeb3().rwaTokens();
-    return { tickers: buildCatalog(tokens, BSC.assets.all, nowMs), asOf: nowMs };
-  });
+  const pull = await cachedWithFallback(TOKENS_KEY, TOKENS_TTL_S, TOKENS_FALLBACK_TTL_S, async () => ({
+    tokens: await getBinanceWeb3().rwaTokens(),
+    at: nowMs,
+  }));
+  return { tickers: buildCatalog(pull.tokens, BSC.assets.all, nowMs, pull.at), asOf: pull.at };
 }
 
 // Profile is near-static company info and candles move slowly at 1h+ bars; both share the one
