@@ -29,6 +29,11 @@ export function feeOf(amountRaw: bigint, chainKey?: ChainKey): bigint {
   return (amountRaw * BigInt(STAX_FEE_BPS)) / BPS;
 }
 
+/** The fee rate in basis points on a chain: zero on BSC (ADR-0007), the platform fee elsewhere. */
+export function feeBpsFor(chainKey?: ChainKey): number {
+  return chainKey === "bsc" ? 0 : Math.max(0, STAX_FEE_BPS);
+}
+
 /** Amount actually deployed after the fee. */
 export function netOf(amountRaw: bigint, chainKey?: ChainKey): bigint {
   return amountRaw - feeOf(amountRaw, chainKey);

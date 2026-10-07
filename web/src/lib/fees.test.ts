@@ -3,7 +3,7 @@
 // existing Base/Mantle call sites (PlanScreen, AutopilotScreen, GiftScreen, invest-plan route,
 // autopilotExecutor, positions) call these with no chain key at all and must never regress.
 import { describe, expect, it } from "vitest";
-import { feeOf, feeUsd, netOf, STAX_FEE_BPS } from "./fees";
+import { feeBpsFor, feeOf, feeUsd, netOf, STAX_FEE_BPS } from "./fees";
 
 const raw = (usdc: number) => BigInt(Math.round(usdc * 1_000_000));
 
@@ -40,5 +40,16 @@ describe("feeUsd", () => {
 
   it("matches today's percentage with no chain given", () => {
     expect(feeUsd(500)).toBe((500 * STAX_FEE_BPS) / 10_000);
+  });
+});
+
+describe("feeBpsFor", () => {
+  // Portfolio history adds the fee back onto Vera's executor legs when it can't see the treasury
+  // transfer. On BNB Chain there is no fee (ADR-0007), so nothing may be added back there.
+  it("is zero on BSC and the platform fee elsewhere, matching feeOf", () => {
+    expect(feeBpsFor("bsc")).toBe(0);
+    expect(feeBpsFor("base")).toBe(STAX_FEE_BPS);
+    expect(feeBpsFor("mantle")).toBe(STAX_FEE_BPS);
+    expect(feeBpsFor()).toBe(STAX_FEE_BPS);
   });
 });
