@@ -20,16 +20,17 @@ import { z } from "zod";
 import { isAddress } from "viem";
 import { chainKeyFromRequest } from "@/lib/server/chain";
 import { requireApproved } from "@/lib/server/admin";
-import { verifyRequest } from "@/lib/server/privyAuth";
+import { fetchPrivyEmbeddedWallets, verifyRequest } from "@/lib/server/privyAuth";
+import { ownsEmbeddedWallet } from "@/lib/server/privyWallets";
 import { rateLimit } from "@/lib/server/rateLimit";
 import { unauthorized, badRequest, tooManyRequests, serverError, jsonError } from "@/lib/server/respond";
 import { getAutopilot, upsertAutopilot, deleteAutopilot } from "@/lib/server/autopilotStore";
 import { resolveAutopilotBasket } from "@/lib/server/autopilotPlan";
 import { getOwnedBasket } from "@/lib/server/basketsStore";
 import { getSmartAccount, touchUser } from "@/lib/server/users";
-import { curatedBasketById, isBasketShortId, type Basket } from "@/lib/baskets";
+import { basketMinAmountUsd, curatedBasketById, isBasketShortId, type Basket } from "@/lib/baskets";
 import { getChain, investableAssets, type ChainKey } from "@/lib/chains";
-import { encodeRuleGoal, looksLikeEncodedRuleGoal, RULES_NEEDING_HOLDINGS, RULE_COMING_SOON_REASON, sanitizeRule, type Rule } from "@/lib/rules";
+import { encodeRuleGoal, looksLikeEncodedRuleGoal, minAutopilotAmountUsd, RULES_NEEDING_HOLDINGS, RULE_COMING_SOON_REASON, sanitizeRule, type Rule } from "@/lib/rules";
 import {
   AUTOPILOT_DEFAULTS,
   CADENCE_SECONDS,
@@ -158,6 +159,28 @@ export async function POST(req: NextRequest) {
         }
       }
       goal = encodeRuleGoal(sanitizeRule(body.rule as Rule), body.goal);
+    }
+
+    // BNB Chain: every trade needs Binance's $6 minimum, so a run that can't give each holding that
+    // would be skipped every time with nothing in Activity. Say so now, at save time.
+    if (chain === "bsc") {
+      const min = minAutopilotAmountUsd(body.rule?.type ?? "schedule_buy", basket ? basketMinAmountUsd(basket.items) : null);
+      if (body.amountUsd < min) {
+        return badRequest(`Autopilot needs at least $${min} per run on BNB Chain, so every holding gets Binance's $6 minimum.`);
+      }
+    }
+
+    // Autopilot signs server-side for (walletId, owner). Both come from the request, so they must be
+    // one of THIS user's own embedded wallets: otherwise a caller could pair their own smart-account
+    // address with another user's wallet id and have Stax sign from that person's account.
+    try {
+      const wallets = await fetchPrivyEmbeddedWallets(user.userId);
+      if (!ownsEmbeddedWallet(wallets, body.walletId, body.owner)) {
+        return jsonError(403, "Autopilot must use your own wallet.");
+      }
+    } catch (err) {
+      console.error("[autopilot] couldn't verify wallet ownership:", err instanceof Error ? err.message : err);
+      return jsonError(503, "We couldn't check your wallet just now. Try again in a moment.");
     }
 
     // The smart account Autopilot reads balances and holdings for must be the caller's own on

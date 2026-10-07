@@ -18,6 +18,8 @@ import {
   describeRule,
   RULES_NEEDING_HOLDINGS,
   HOLDINGS_RULE_TYPES,
+  SAFER_SYMBOLS,
+  minAutopilotAmountUsd,
   type Rule,
   type RuleIntent,
 } from "./rules";
@@ -427,5 +429,20 @@ describe("formatRuleReceipt", () => {
     expect(formatRuleReceipt({ type: "rebalance", driftPct: 10 }, [], "AI chips basket")).toBe(
       "Vera checked your AI chips basket: already on target, nothing to do.",
     );
+  });
+});
+
+describe("minAutopilotAmountUsd", () => {
+  it("needs one minimum trade per name on the steadier list for the safety switch", () => {
+    expect(minAutopilotAmountUsd("safety_switch")).toBe(6 * SAFER_SYMBOLS.length);
+  });
+  it("is one minimum trade for a single-name rule or a goal schedule", () => {
+    expect(minAutopilotAmountUsd("buy_discount")).toBe(6);
+    expect(minAutopilotAmountUsd("earnings")).toBe(6);
+    expect(minAutopilotAmountUsd("schedule_buy")).toBe(6);
+  });
+  it("follows a basket schedule's own smallest amount", () => {
+    expect(minAutopilotAmountUsd("schedule_buy", 43)).toBe(43);
+    expect(minAutopilotAmountUsd("schedule_buy", 4)).toBe(6);
   });
 });

@@ -84,6 +84,8 @@ export interface RuleRunContext {
   /** Target weights for a rebalance rule — the basket it targets. */
   targets?: { symbol: string; weightPct: number }[];
   basketName?: string;
+  /** When this autopilot last placed a run (ms), for a rule that must act once per window. */
+  lastRunMs?: number;
 }
 
 export type RulePlanResult = { ok: true; intents: RuleIntent[]; receipt: string } | { ok: false; reason: string };
@@ -205,8 +207,11 @@ export async function planRuleForAutopilot(chain: StaxChain, rule: EvaluableRule
 /**
  * Buy a stock a few days before it reports results. The date comes from lib/server/earnings.ts
  * (Binance has none); no announced date means no trade, never a guess. The "sell after" half
- * can't run yet: StaxExecutor only buys, so after earnings Vera holds and says so. A position
- * already held means this window's buy has happened, so the rule doesn't buy again every day.
+ * can't run yet: StaxExecutor only buys, so after earnings Vera holds and says so. The rule runs
+ * daily, so "already bought this window" is recorded, not inferred from holdings: a run placed
+ * since the window opened (`ctx.lastRunMs`) means the buy has happened. Holdings were the wrong
+ * signal both ways: this rule never gets a holdings read (so it re-bought every day of the
+ * window), and someone who already owned the stock was never allowed to buy at all.
  */
 async function planEarnings(chain: StaxChain, rule: Extract<Rule, { type: "earnings" }>, ctx: RuleRunContext): Promise<RulePlanResult> {
   const info = (await getNextEarnings([rule.symbol]))[rule.symbol];
@@ -214,7 +219,8 @@ async function planEarnings(chain: StaxChain, rule: Extract<Rule, { type: "earni
   const action = evaluateEarnings(ctx.nowMs, info.nextMs, rule.buyDaysBefore, rule.sellDaysAfter);
   if (action === "hold") return ok(rule, []);
   if (action === "sell") return skip(`Vera can't sell yet, so your ${rule.symbol} stays put after its results.`);
-  if (ctx.holdings?.some((h) => h.symbol === rule.symbol && h.usdValue > 0)) return ok(rule, []);
+  const windowOpensMs = info.nextMs - rule.buyDaysBefore * DAY_MS;
+  if (ctx.lastRunMs !== undefined && ctx.lastRunMs >= windowOpensMs) return ok(rule, []);
   if (!assetBySymbol(chain, rule.symbol)) return skip(`${rule.symbol} isn't listed on ${chain.name} right now.`);
   const usd = round2(ctx.budgetUsd);
   if (usd <= 0) return ok(rule, []);

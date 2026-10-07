@@ -19,6 +19,7 @@
 // basket's id/name into the `reason` column for a run log row — `encodeRuleGoal`/`decodeRuleGoal`
 // below are that same trick for the config, not a new pattern.
 import type { RwaPlatform } from "./chains";
+import { BSC_MIN_LEG_USD } from "./rwa";
 
 export type RuleType = "schedule_buy" | "rebalance" | "buy_discount" | "safety_switch" | "mix_keeper" | "earnings";
 
@@ -541,3 +542,17 @@ export function describeRule(rule: Rule): string {
 // isn't filtered out by name here because it's a different tier entirely (evaluateSafetySwitch
 // is only ever called with stock-tier holdings; see rulesEngine.ts).
 export const SAFER_SYMBOLS: readonly string[] = ["SPY", "QQQ"];
+
+/**
+ * The least one Autopilot run can spend on BNB Chain and still give every holding Binance's
+ * minimum per trade (BSC_MIN_LEG_USD). A $5 daily plan, or a safety switch of $10 that splits
+ * into two $5 buys, saved fine and then failed every run with a refusal nobody saw. The safety
+ * switch buys each name on the steadier list; a basket schedule needs its own smallest amount
+ * (`basketMinUsd`, from basketMinAmountUsd); everything else is one or a few legs Vera sizes
+ * herself, so one minimum trade is the floor.
+ */
+export function minAutopilotAmountUsd(ruleType: Rule["type"], basketMinUsd?: number | null): number {
+  if (ruleType === "safety_switch") return BSC_MIN_LEG_USD * SAFER_SYMBOLS.length;
+  if (ruleType === "schedule_buy" && basketMinUsd) return Math.max(BSC_MIN_LEG_USD, basketMinUsd);
+  return BSC_MIN_LEG_USD;
+}

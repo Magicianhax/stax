@@ -26,8 +26,9 @@ import {
   type Cadence,
   type AutopilotConfig,
 } from "@/lib/autopilot";
-import { riskWord, type Basket } from "@/lib/baskets";
-import { RULE_DEFAULTS, RULES_NEEDING_HOLDINGS, RULE_COMING_SOON_REASON, decodeRuleGoal, type Rule, type RuleType } from "@/lib/rules";
+import { basketMinAmountUsd, riskWord, type Basket } from "@/lib/baskets";
+import { BSC_MIN_LEG_USD } from "@/lib/rwa";
+import { RULE_DEFAULTS, RULES_NEEDING_HOLDINGS, RULE_COMING_SOON_REASON, decodeRuleGoal, minAutopilotAmountUsd, type Rule, type RuleType } from "@/lib/rules";
 import { AUTOPILOT_CHOICES, buyOnlyNote, cadenceForRule, choiceTitle, clampRuleField, stockChoices, whatVeraWillDo } from "@/lib/autopilotChoices";
 import { StockPicker } from "./StockPicker";
 import { useBaskets } from "@/hooks/useBaskets";
@@ -310,6 +311,12 @@ export function AutopilotScreen({
   // Fixed weights = known risk: refuse up front instead of letting every run be skipped.
   const ceiling = basketMode && pick ? checkBasketCeiling(pick.riskScore, riskBps) : { ok: true };
   const basketBlocked = basketMode ? !pick || !ceiling.ok : isBsc && ruleType === "rebalance" ? !pick : false;
+  // BNB Chain: each holding needs Binance's $6 minimum, so a run has a smallest amount ($6, $12 for
+  // the safety switch, a basket's own). Below it every run would be skipped.
+  const minAmount = isBsc ? minAutopilotAmountUsd(ruleType, basketMode && pick ? basketMinAmountUsd(pick.items) : null) : 0;
+  const belowMin = isBsc && amountNum > 0 && amountNum < minAmount;
+  // The idea cards, with their amounts lifted to what a BNB Chain run can actually trade.
+  const templates = TEMPLATES.map((t) => (isBsc ? { ...t, amount: String(Math.max(Number(t.amount), BSC_MIN_LEG_USD)) } : t));
   // Picker lists, computed once per chain: every stock for a discount, companies only for results.
   const stockList = isBsc ? stockChoices(chain) : [];
   const companyList = isBsc ? stockChoices(chain, { companiesOnly: true }) : [];
@@ -427,6 +434,10 @@ export function AutopilotScreen({
       notify("Set an amount", "info");
       return;
     }
+    if (belowMin) {
+      notify(`Each run needs at least ${usd(minAmount)}`, "info");
+      return;
+    }
     // Belt-and-suspenders: the picker already disables these three cards, so this only matters
     // for a state the UI didn't anticipate. The server refuses the same three either way.
     if (isBsc && RULES_NEEDING_HOLDINGS.includes(ruleType)) {
@@ -480,7 +491,9 @@ export function AutopilotScreen({
           rule: isBsc ? currentRule : undefined,
           amountUsd: amountNum,
           cadence: runCadence,
-          riskCeilingBps: RISK_TIERS[risk].bps,
+          // A rule names what it buys and its screen hides the risk limit, so it must not be gated
+          // by a limit nobody sees (a Balanced default silently skipped every crypto buy).
+          riskCeilingBps: ruleActive ? 10_000 : RISK_TIERS[risk].bps,
         }),
       });
       const json = await res.json();
@@ -525,6 +538,10 @@ export function AutopilotScreen({
       const json = await res.json();
       if (!res.ok || json?.ok === false) {
         notify(json?.reason ?? json?.error ?? "The run didn't go through.", "info");
+      } else if (!json?.txHash) {
+        // A run that checked and found nothing to do: say that, not "invested".
+        notify(typeof json?.receipt === "string" && json.receipt ? json.receipt : "Vera checked: nothing to do right now.", "info");
+        void loadRuns();
       } else {
         haptic.success();
         notify("Vera invested for you", "check");
@@ -864,7 +881,7 @@ export function AutopilotScreen({
           <div style={{ padding: isBsc ? "22px 22px 0" : "20px 22px 0" }}>
             <div style={sectionLabel}>{isBsc ? "Start from an idea" : "Start from a template"}</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              {TEMPLATES.map((t) => {
+              {templates.map((t) => {
                 const on = activeTemplate === t.name;
                 return (
                   <button
@@ -982,6 +999,11 @@ export function AutopilotScreen({
                     style={{ flex: 1, minWidth: 0, height: 40, border: "none", background: "transparent", outline: "none", fontSize: 20, fontWeight: 700, color: "var(--ink)" }}
                   />
                 </label>
+                {belowMin && (
+                  <p role="alert" style={{ margin: "8px 2px 0", fontSize: 12.5, fontWeight: 500, color: "var(--neg)", lineHeight: 1.45 }}>
+                    Each run needs at least {usd(minAmount)}, so every holding gets Binance’s ${BSC_MIN_LEG_USD} minimum.
+                  </p>
+                )}
               </div>
 
               {/* Earnings is always checked daily (cadenceForRule), so it has no "how often". */}
@@ -1084,7 +1106,7 @@ export function AutopilotScreen({
           <div style={{ padding: "22px 22px 0" }}>
             {!active ? (
               // One CTA: it authorizes when that's the next step, and starts once it's done.
-              <button className="btn btn-primary btn-block btn-lg tap" disabled={busy || (delegated && basketBlocked)} onClick={delegated ? save : authorize}>
+              <button className="btn btn-primary btn-block btn-lg tap" disabled={busy || (delegated && (basketBlocked || belowMin))} onClick={delegated ? save : authorize}>
                 {busy ? <Spinner small /> : delegated ? "Start autopilot" : "Give Vera permission"}
               </button>
             ) : (

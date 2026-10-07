@@ -153,7 +153,7 @@ export async function planAutopilotRun(
   const holdings = HOLDINGS_RULE_TYPES.includes(rule.type)
     ? ((await getBscHoldings(chain, cfg.smartAccount, nowSeconds * 1000)) ?? undefined)
     : undefined;
-  const result = await planRuleForAutopilot(chain, rule, { nowMs: nowSeconds * 1000, budgetUsd: cfg.amountUsd, targets, basketName, holdings });
+  const result = await planRuleForAutopilot(chain, rule, { nowMs: nowSeconds * 1000, budgetUsd: cfg.amountUsd, targets, basketName, holdings, lastRunMs: cfg.lastRunAt !== undefined ? cfg.lastRunAt * 1000 : undefined });
   if (!result.ok) return { ok: false, kind: "rule", status: "skipped", reason: result.reason };
   return { ok: true, kind: "rule", rule, intents: result.intents, receipt: result.receipt };
 }

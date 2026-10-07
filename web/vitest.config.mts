@@ -13,6 +13,10 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
+    // Several route tests `await import("./route")` inside the test, which loads the route's whole
+    // module graph. With dozens of files transforming in parallel (and again inside Vercel's build)
+    // that first import can pass 5 s on a busy machine and fail a test that has nothing wrong.
+    testTimeout: 20_000,
     // Tests must never reach real services. Vercel runs this suite inside `npm run build` with the
     // project's env loaded, so without this a test would read and write the shared production
     // Redis (and see keys left by an earlier build). Blank values make every module take its
