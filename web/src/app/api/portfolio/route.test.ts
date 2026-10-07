@@ -116,7 +116,7 @@ describe("GET /api/portfolio on BSC", () => {
     expect(multicallSpy).not.toHaveBeenCalled();
   });
 
-  it("folds a Savings balance into investedUsd and totalUsd instead of dropping it from net worth", async () => {
+  it("counts a Savings balance once: in totalUsd, not in investedUsd", async () => {
     const fullMap = new Map(allBscReadAddresses().map((a) => [a.toLowerCase(), BigInt(0)]));
     fullMap.set(usdt, BigInt(10) * BigInt(10) ** BigInt(18));
     cachedBscBalancesSpy.mockResolvedValueOnce(fullMap);
@@ -127,7 +127,7 @@ describe("GET /api/portfolio on BSC", () => {
 
     expect(body.cashUsd).toBe(10);
     expect(body.savingsUsd).toBe(6.5);
-    expect(body.investedUsd).toBeCloseTo(6.5, 6);
+    expect(body.investedUsd).toBe(0);
     expect(body.totalUsd).toBeCloseTo(16.5, 6);
   });
 

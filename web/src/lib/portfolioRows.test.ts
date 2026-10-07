@@ -5,7 +5,7 @@
 // that true without re-reading the whole route by eye.
 import { describe, expect, it } from "vitest";
 import type { Asset } from "./chains";
-import { buildAssetRows } from "./portfolioRows";
+import { buildAssetRows, portfolioTotals } from "./portfolioRows";
 
 // `2_000000000000000000n` needs an ES2020 target this repo doesn't build with (see
 // decimals.regression.test.ts), and `BigInt(2_000000000000000000)` would round-trip the literal
@@ -130,5 +130,16 @@ describe("buildAssetRows", () => {
     expect(buildAssetRows({ asset: nvda, defaultRaw: BigInt(0), defaultPriceUsd: 100, dayChangePct: null, spark: null, apy: null })).toEqual(
       [],
     );
+  });
+});
+
+describe("portfolioTotals", () => {
+  it("counts Savings once: in the total, never in invested", () => {
+    const t = portfolioTotals({ holdings: [{ valueUsd: 100 }, { valueUsd: null }], cashUsd: 40, savingsUsd: 25 });
+    expect(t).toEqual({ investedUsd: 100, savingsUsd: 25, totalUsd: 165 });
+  });
+  it("treats missing Savings as zero, so a savings-only account has nothing invested", () => {
+    expect(portfolioTotals({ holdings: [], cashUsd: 5, savingsUsd: null })).toEqual({ investedUsd: 0, savingsUsd: 0, totalUsd: 5 });
+    expect(portfolioTotals({ holdings: [], cashUsd: 0, savingsUsd: 25 }).investedUsd).toBe(0);
   });
 });

@@ -59,7 +59,9 @@ export interface Portfolio {
   investedUsd: number;
   /** Spendable USDC (USD). */
   cashUsd: number;
-  /** investedUsd + cashUsd — the headline number, computed server-side. */
+  /** BSC only: money in Savings (Venus), counted in totalUsd but not in investedUsd. */
+  savingsUsd?: number;
+  /** investedUsd + cashUsd + savingsUsd — the headline number, computed server-side. */
   totalUsd: number;
 }
 
@@ -101,6 +103,7 @@ interface PortfolioApiResponse {
   cashUsd: number;
   investedUsd: number;
   totalUsd: number;
+  savingsUsd?: number;
   holdings: PortfolioApiHolding[];
 }
 
@@ -142,6 +145,7 @@ export function usePortfolio(address?: string) {
         investedUsd: api.investedUsd,
         cashUsd: api.cashUsd,
         totalUsd: api.totalUsd,
+        savingsUsd: api.savingsUsd,
       };
     },
   });

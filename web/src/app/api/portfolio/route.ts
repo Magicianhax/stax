@@ -12,7 +12,7 @@ import { isAddress } from "viem";
 import type { ChainKey, StaxChain } from "@/lib/chains/types";
 import { priceAll } from "@/lib/prices";
 import { fromUnits } from "@/lib/format";
-import { buildAssetRows, type PortfolioHoldingRow } from "@/lib/portfolioRows";
+import { buildAssetRows, portfolioTotals, type PortfolioHoldingRow } from "@/lib/portfolioRows";
 import { chainFromRequest, serverClient } from "@/lib/server/chain";
 import { getBinanceWeb3 } from "@/lib/server/binance";
 import { bscBalanceMap } from "@/lib/server/bscBalances";
@@ -123,17 +123,19 @@ export async function GET(req: NextRequest) {
     // Largest value first, unpriced last.
     holdings.sort((a, b) => (b.valueUsd ?? 0) - (a.valueUsd ?? 0));
     // Savings isn't a holding row (it has no matching chain.assets entry — it's a vUSDT position,
-    // not a stock or a twin), but it's still the user's money: folded straight into the total so
-    // moving cash into Savings never makes net worth look like it dropped.
-    const investedUsd = holdings.reduce((s, h) => s + (h.valueUsd ?? 0), 0) + (savingsUsd ?? 0);
+    // not a stock or a twin), but it's still the user's money: it counts in the total so moving
+    // cash into Savings never makes net worth look like it dropped. It stays OUT of investedUsd,
+    // and `savingsUsd` is returned on its own, so every screen adds it exactly once instead of
+    // Home and Wallet each adding it on top of a total that already held it.
+    const { investedUsd, savingsUsd: savings, totalUsd } = portfolioTotals({ holdings, cashUsd, savingsUsd });
 
     return Response.json(
       {
         chain: chain.key,
         cashUsd,
         investedUsd,
-        totalUsd: cashUsd + investedUsd,
-        savingsUsd: savingsUsd ?? 0,
+        totalUsd,
+        savingsUsd: savings,
         holdings,
         asOf: new Date().toISOString(),
       },

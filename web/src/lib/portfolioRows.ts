@@ -99,3 +99,19 @@ export function buildAssetRows(p: BuildAssetRowsParams): PortfolioHoldingRow[] {
   }
   return rows;
 }
+
+/**
+ * The three numbers /api/portfolio returns. Savings (Venus, BSC) is part of the person's money
+ * but is not an investment holding, so it is added to the total once and kept out of `investedUsd`;
+ * screens render `totalUsd` as-is and show `savingsUsd` as its own line. Before this was one
+ * function, Home and Wallet each added Savings on top of a total that already contained it.
+ */
+export function portfolioTotals(params: {
+  holdings: ReadonlyArray<Pick<PortfolioHoldingRow, "valueUsd">>;
+  cashUsd: number;
+  savingsUsd?: number | null;
+}): { investedUsd: number; savingsUsd: number; totalUsd: number } {
+  const investedUsd = params.holdings.reduce((s, h) => s + (h.valueUsd ?? 0), 0);
+  const savingsUsd = params.savingsUsd ?? 0;
+  return { investedUsd, savingsUsd, totalUsd: params.cashUsd + investedUsd + savingsUsd };
+}

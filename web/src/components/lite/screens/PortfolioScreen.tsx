@@ -184,7 +184,8 @@ export function PortfolioScreen({
     );
   }
 
-  const donutTotal = priced.reduce((s, h) => s + (h.valueUsd ?? 0), 0) + cash || 1;
+  const savings = port?.savingsUsd ?? 0;
+  const donutTotal = priced.reduce((s, h) => s + (h.valueUsd ?? 0), 0) + cash + savings || 1;
   const legend = [
     ...priced.map((h, i) => ({
       key: h.asset.symbol,
@@ -193,6 +194,9 @@ export function PortfolioScreen({
       color: rampColor(i),
     })),
     ...(cash > 0 ? [{ key: "cash", name: "Cash", value: cash, color: "color-mix(in srgb, var(--ink-3) 45%, var(--surface-2))" }] : []),
+    // Savings counts in the donut's centre total, so it gets its own slice instead of leaving the
+    // legend percentages short of 100.
+    ...(savings > 0 ? [{ key: "savings", name: "Savings", value: savings, color: "color-mix(in srgb, var(--primary) 35%, var(--surface-2))" }] : []),
   ];
   const chartReady = (points?.length ?? 0) > 1;
 
@@ -277,7 +281,7 @@ export function PortfolioScreen({
               )}
             </div>
             <div style={{ fontSize: 12.5, color: "var(--ink-3)", padding: "10px 4px 0", lineHeight: 1.45 }}>
-              {usd(invested)} invested · {usd(cash)} cash.{" "}
+              {usd(invested)} invested · {usd(cash)} cash{savings > 0 ? ` · ${usd(savings)} in Savings` : ""}.{" "}
               {real
                 ? covered
                   ? "Change is your gain over the range, not deposits."
