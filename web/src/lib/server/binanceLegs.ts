@@ -21,6 +21,7 @@ import { fromUnits } from "@/lib/format";
 import { formatNextOpen, nextUsOpenMs } from "@/lib/marketHours";
 import { BSC_MIN_LEG_USD, isBuyable, minLegUsd } from "@/lib/rwa";
 import { rawToUsd } from "@/lib/units";
+import { anchoredSlippageBps, PRICE_MOVED_MESSAGE } from "@/lib/slippage";
 import type { ExecCall } from "@/lib/execution";
 import type { Asset, StaxChain } from "@/lib/chains/types";
 import { getBinanceWeb3 } from "./binance";
@@ -49,6 +50,13 @@ export interface BinanceLegArgs {
    * made just to size this guard.
    */
   usdValue: number;
+  /**
+   * The floor the person reviewed (expected output minus their tolerance), raw units of tokenOut.
+   * When set on a build, the swap is built with slippage tightened so its minimum can't fall
+   * below it, or refused with "price_moved" when the fresh quote is already under it
+   * (lib/slippage.ts).
+   */
+  reviewedMinOut?: bigint;
   /** Which way the leg trades; sells clear a lower floor than buys. Defaults to "buy". */
   side?: "buy" | "sell";
   /** False for a price check: quote only, no swap build, and the leg's `swapData` is "0x". */
@@ -88,7 +96,7 @@ export class BinanceLegRefusal extends Error {
    */
   constructor(
     message: string,
-    readonly code?: "min_trade" | "route",
+    readonly code?: "min_trade" | "route" | "price_moved",
   ) {
     super(message);
   }
@@ -150,7 +158,14 @@ export async function buildBinanceLeg(a: BinanceLegArgs): Promise<BinanceLeg> {
     throw new BinanceLegRefusal(`${a.symbol}: Binance quoted a different amount than requested.`, "route");
   }
 
-  const slippageFloor = (q.toTokenAmount * (BPS - BigInt(a.slippageBps))) / BPS;
+  // Anchor the build's tolerance to what the person reviewed (price checks have nothing to anchor).
+  let slippageBps = a.slippageBps;
+  if (a.build !== false) {
+    const anchored = anchoredSlippageBps({ freshExpectedOut: q.toTokenAmount, reviewedMinOut: a.reviewedMinOut, slippageBps });
+    if (anchored === null) throw new BinanceLegRefusal(PRICE_MOVED_MESSAGE, "price_moved");
+    slippageBps = anchored;
+  }
+  const slippageFloor = (q.toTokenAmount * (BPS - BigInt(slippageBps))) / BPS;
   // A price check (TradeScreen polls every 15 s) needs only the quote. Building the swap is a
   // second call against the shared 5-per-window budget, so it happens only when the user is
   // about to sign, and a price-only leg carries no calldata.
@@ -167,7 +182,7 @@ export async function buildBinanceLeg(a: BinanceLegArgs): Promise<BinanceLeg> {
     };
   }
 
-  const slippagePercent = (a.slippageBps / 100).toString();
+  const slippagePercent = (slippageBps / 100).toString();
   const built = await binance
     .buildSwap({
       fromToken: a.tokenIn,
