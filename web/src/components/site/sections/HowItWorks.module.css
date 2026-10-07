@@ -152,3 +152,89 @@
     display: block;
   }
 }
+
+/* ── the real app: three phones on 4+4+4, the label centred under each ───── */
+.phones {
+  list-style: none;
+  margin: 72px 0 0;
+  padding: 0;
+  align-items: start;
+}
+.phoneItem {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+}
+.tilt {
+  width: 100%;
+  display: block;
+}
+.phone {
+  width: 100%;
+}
+.phoneTitle {
+  margin: 28px 0 0;
+  max-width: 18ch;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+  color: var(--s-ink);
+  text-align: center;
+  text-wrap: balance;
+}
+.phonesNote {
+  margin: 36px 0 0;
+  text-align: center;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--s-ink-2);
+}
+.phonesLink {
+  color: var(--s-primary-d);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+:global(.site[data-mode="dark"]) .phonesLink {
+  color: var(--s-primary);
+}
+
+@media (min-width: 900px) {
+  .phoneItem {
+    grid-column: span 4;
+  }
+}
+@media (max-width: 899px) {
+  ul.phones {
+    display: flex;
+    gap: 16px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    /* bleed to the viewport edges; side padding lets every frame, first and
+       last included, snap to the exact centre of the screen */
+    margin: 56px -24px 0;
+    padding: 4px calc(50vw - min(36vw, 150px)) 12px;
+    scroll-padding: 0 calc(50vw - min(36vw, 150px));
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  ul.phones::-webkit-scrollbar {
+    display: none;
+  }
+  .phoneItem {
+    flex: 0 0 min(72vw, 300px);
+    scroll-snap-align: center;
+  }
+  .phoneTitle {
+    margin-top: 20px;
+    font-size: 18px;
+  }
+}
+@media (max-width: 479px) {
+  ul.phones {
+    margin: 56px -16px 0;
+  }
+}

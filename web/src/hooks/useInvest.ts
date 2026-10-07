@@ -30,6 +30,7 @@ import { assertExecCallsAreSafe } from "@/lib/execution";
 import { STAX_TREASURY } from "@/lib/fees";
 import { usdToRaw } from "@/lib/units";
 import { useDemo } from "@/components/demo/DemoProvider";
+import { DemoRefusal } from "@/lib/demo/bscVera";
 import { useRefreshBalances } from "@/hooks/useBalances";
 import { authedFetch } from "@/lib/authedFetch";
 import type { Allocation } from "@/lib/allocation-schema";
@@ -44,6 +45,12 @@ export interface UseInvest {
   error: string | null;
   allocation: AllocateResult | null;
   success: InvestSuccess | null;
+  /**
+   * Why Vera won't build this plan, worded for the person: the US market is shut, or the amount
+   * can't give every stock $6. A normal answer, not a fault, so it is shown as a calm note on the
+   * goal screen instead of the red error banner. Cleared by the next attempt.
+   */
+  refusal: string | null;
   /** Binance's check of the last plan's legs (BSC direct path), for PlanScreen to show. */
   dryRuns: DryRun[] | undefined;
   busy: boolean;
@@ -51,7 +58,12 @@ export interface UseInvest {
   invest: (allocation: Allocation, amountUsd: number, address: string) => Promise<void>;
   reset: () => void;
   clearError: () => void;
+  clearRefusal: () => void;
 }
+
+/** A 4xx from the plan routes that means "not this plan", as opposed to a fault or a sign-in problem. */
+export class PlanRefusal extends Error {}
+const REFUSAL_STATUSES = new Set([400, 409, 422]);
 
 async function postJson<T>(url: string, body: unknown): Promise<T> {
   const res = await authedFetch(url, {
@@ -61,7 +73,8 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   });
   const json = await res.json();
   if (!res.ok) {
-    throw new Error(typeof json?.error === "string" ? json.error : "Something went wrong.");
+    const message = typeof json?.error === "string" ? json.error : "Something went wrong.";
+    throw REFUSAL_STATUSES.has(res.status) ? new PlanRefusal(message) : new Error(message);
   }
   return json as T;
 }
@@ -76,16 +89,19 @@ export function useInvest(): UseInvest {
   const [allocation, setAllocation] = useState<AllocateResult | null>(null);
   const [success, setSuccess] = useState<InvestSuccess | null>(null);
   const [dryRuns, setDryRuns] = useState<DryRun[] | undefined>(undefined);
+  const [refusal, setRefusal] = useState<string | null>(null);
 
   const reset = useCallback(() => {
     setPhase("idle");
     setError(null);
+    setRefusal(null);
     setAllocation(null);
     setSuccess(null);
     setDryRuns(undefined);
   }, []);
 
   const clearError = useCallback(() => setError(null), []);
+  const clearRefusal = useCallback(() => setRefusal(null), []);
 
   // Calm, honest stop when the chain's executor isn't live yet (Base pre-deploy).
   const notLiveMessage = `${chain.name} is being switched on. Investing there opens soon — you can switch networks in Settings meanwhile.`;
@@ -93,6 +109,7 @@ export function useInvest(): UseInvest {
   const allocate = useCallback(
     async (goal: string, amountUsd: number, riskTolerance?: string) => {
       setError(null);
+      setRefusal(null);
       setSuccess(null);
       // A new plan (first build or a nudge) never inherits the last plan's Binance checks: a
       // stale "failed" leg used to stay pinned to the rebuilt plan (design critique P0 #1).
@@ -108,6 +125,11 @@ export function useInvest(): UseInvest {
           return result;
         } catch (e) {
           // Vera's own refusals (market closed, under $6 a stock) read as the real ones do.
+          if (e instanceof DemoRefusal) {
+            setRefusal(e.message);
+            setPhase("idle");
+            return null;
+          }
           setError(e instanceof Error ? e.message : "The copilot couldn't build a plan.");
           setPhase("error");
           return null;
@@ -131,6 +153,11 @@ export function useInvest(): UseInvest {
         setPhase("idle");
         return result;
       } catch (e) {
+        if (e instanceof PlanRefusal) {
+          setRefusal(e.message);
+          setPhase("idle");
+          return null;
+        }
         setError(e instanceof Error ? e.message : "The copilot couldn't build a plan.");
         setPhase("error");
         return null;
@@ -306,11 +333,13 @@ export function useInvest(): UseInvest {
     error,
     allocation,
     success,
+    refusal,
     dryRuns,
     busy: phase === "thinking" || phase === "planning" || phase === "approving" || phase === "investing",
     allocate,
     invest,
     reset,
     clearError,
+    clearRefusal,
   };
 }

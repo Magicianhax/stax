@@ -606,8 +606,10 @@ export function AssetDetailScreen({
           bottom: 0,
           zIndex: 5,
           marginTop: "auto",
-          padding: "16px 22px calc(18px + env(safe-area-inset-bottom))",
-          background: "linear-gradient(to top, var(--paper), var(--paper) 62%, transparent)",
+          padding: "22px 22px calc(18px + env(safe-area-inset-bottom))",
+          // Opaque except for the top fade: the reason line (a closed market, a paused issuer) sits
+          // in it, and with a fade that long the line printed over the card scrolling underneath.
+          background: "linear-gradient(to top, var(--paper), var(--paper) calc(100% - 22px), transparent)",
         }}
       >
         {reason && (

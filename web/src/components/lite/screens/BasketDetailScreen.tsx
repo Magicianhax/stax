@@ -378,8 +378,8 @@ export function BasketDetailScreen({
           position: "sticky",
           bottom: 0,
           marginTop: "auto",
-          padding: "16px 22px calc(18px + env(safe-area-inset-bottom))",
-          background: "linear-gradient(to top, var(--paper), var(--paper) 62%, transparent)",
+          padding: "22px 22px calc(18px + env(safe-area-inset-bottom))",
+          background: "linear-gradient(to top, var(--paper), var(--paper) calc(100% - 22px), transparent)",
         }}
       >
         {!ready ? (

@@ -661,7 +661,15 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
       view = <AutopilotScreen go={go} />;
       break;
     case "goal":
-      view = <GoalScreen go={go} />;
+      view = (
+        <GoalScreen
+          go={go}
+          refusal={invest.refusal}
+          onDismissRefusal={invest.clearRefusal}
+          initialGoal={invest.refusal ? goal : undefined}
+          initialAmount={invest.refusal ? amount : undefined}
+        />
+      );
       break;
     case "thinking":
       view = <ThinkingScreen />;
@@ -705,7 +713,13 @@ export function LiteApp({ demoPlay = null }: { demoPlay?: "invest" | "vera" | nu
           goal={goal || undefined}
         />
       ) : (
-        <GoalScreen go={go} />
+        <GoalScreen
+          go={go}
+          refusal={invest.refusal}
+          onDismissRefusal={invest.clearRefusal}
+          initialGoal={invest.refusal ? goal : undefined}
+          initialAmount={invest.refusal ? amount : undefined}
+        />
       );
       break;
     case "placing":
