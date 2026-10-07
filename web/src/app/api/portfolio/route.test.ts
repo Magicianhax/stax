@@ -13,6 +13,11 @@ vi.mock("@/lib/server/rateLimit", () => ({
   clientIp: () => "203.0.113.40",
 }));
 
+const verifyRequestSpy = vi.fn();
+vi.mock("@/lib/server/privyAuth", () => ({ verifyRequest: (...a: unknown[]) => verifyRequestSpy(...a) }));
+const getSmartAccountSpy = vi.fn();
+vi.mock("@/lib/server/users", () => ({ getSmartAccount: (...a: unknown[]) => getSmartAccountSpy(...a) }));
+
 const cachedBscBalancesSpy = vi.fn();
 const invalidateSpy = vi.fn();
 vi.mock("@/lib/server/binance/wallet", () => ({
@@ -61,6 +66,8 @@ function allBscReadAddresses(): string[] {
 }
 
 beforeEach(() => {
+  verifyRequestSpy.mockReset().mockResolvedValue({ userId: "u1" });
+  getSmartAccountSpy.mockReset().mockResolvedValue({ address: ADDR });
   cachedBscBalancesSpy.mockReset();
   invalidateSpy.mockReset();
   multicallSpy.mockReset();
@@ -160,6 +167,25 @@ describe("GET /api/portfolio?fresh=1 on BSC (right after the person's own trade)
     expect(invalidateSpy).toHaveBeenCalledTimes(1);
     expect(body.cashUsd).toBe(24);
     expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("ignores fresh for an unauthenticated caller and serves the cached read", async () => {
+    verifyRequestSpy.mockResolvedValue(null);
+    cachedBscBalancesSpy.mockResolvedValueOnce(new Map(allBscReadAddresses().map((a) => [a.toLowerCase(), BigInt(0)])));
+    const res = await GET(reqFor("bsc", "&fresh=1"));
+    expect(res.status).toBe(200);
+    expect(invalidateSpy).not.toHaveBeenCalled();
+    expect(multicallSpy).not.toHaveBeenCalled();
+    expect(res.headers.get("cache-control")).not.toBe("no-store");
+  });
+
+  it("ignores fresh when the address isn't the caller's own account", async () => {
+    getSmartAccountSpy.mockResolvedValue({ address: "0x3333333333333333333333333333333333333333" });
+    cachedBscBalancesSpy.mockResolvedValueOnce(new Map(allBscReadAddresses().map((a) => [a.toLowerCase(), BigInt(0)])));
+    const res = await GET(reqFor("bsc", "&fresh=1"));
+    expect(invalidateSpy).not.toHaveBeenCalled();
+    expect(multicallSpy).not.toHaveBeenCalled();
+    expect(res.headers.get("cache-control")).not.toBe("no-store");
   });
 
   it("leaves the cache alone on an ordinary poll", async () => {
