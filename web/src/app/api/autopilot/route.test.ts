@@ -13,7 +13,7 @@ vi.mock("@/lib/server/privyAuth", () => ({
 }));
 vi.mock("@/lib/server/admin", () => ({ requireApproved: vi.fn().mockResolvedValue(null) }));
 vi.mock("@/lib/server/rateLimit", () => ({ rateLimit: vi.fn().mockResolvedValue({ ok: true }) }));
-const getSmartAccountMock = vi.fn().mockResolvedValue(null);
+const getSmartAccountMock = vi.fn();
 vi.mock("@/lib/server/users", () => ({
   touchUser: vi.fn().mockResolvedValue(undefined),
   getSmartAccount: (...args: unknown[]) => getSmartAccountMock(...args),
@@ -53,6 +53,8 @@ function req(b: Record<string, unknown>): NextRequest {
 }
 
 beforeEach(() => {
+  // A normal user has registered the smart account body() sends.
+  getSmartAccountMock.mockReset().mockResolvedValue({ address: "0x2222222222222222222222222222222222222222" });
   // The caller's own embedded wallet is exactly what body() sends.
   fetchWalletsMock.mockReset().mockResolvedValue([{ id: "w1", address: "0x1111111111111111111111111111111111111111" }]);
   getAutopilotSpy.mockReset().mockResolvedValue(null);
@@ -117,6 +119,16 @@ describe("POST /api/autopilot: the signing wallet must be the caller's own", () 
     fetchWalletsMock.mockRejectedValueOnce(new Error("privy down"));
     const res = await POST(req(body()));
     expect(res.status).toBe(503);
+    expect(upsertAutopilotSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/autopilot: a registered smart account is required", () => {
+  it("returns a plain 409 when the user has no smart account on this chain", async () => {
+    getSmartAccountMock.mockResolvedValue(null);
+    const res = await POST(req(body()));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/Open your wallet once/);
     expect(upsertAutopilotSpy).not.toHaveBeenCalled();
   });
 });

@@ -185,8 +185,13 @@ export async function POST(req: NextRequest) {
 
     // The smart account Autopilot reads balances and holdings for must be the caller's own on
     // this chain (security review 2026-09-25), the same check /api/swap-quote makes.
+    // A registered account is required: with no row there is nothing to compare against, and any
+    // address would be accepted. The app registers it (/api/me/account) whenever the wallet opens.
     const registered = await getSmartAccount(user.userId, chain);
-    if (registered && registered.address.toLowerCase() !== body.smartAccount.toLowerCase()) {
+    if (!registered) {
+      return jsonError(409, "Open your wallet once on this network first, then try again.");
+    }
+    if (registered.address.toLowerCase() !== body.smartAccount.toLowerCase()) {
       return jsonError(403, "Autopilot must use your own account.");
     }
 
