@@ -13,6 +13,8 @@
 // they added is treated as always there), which keeps first→last equal to the
 // gain on positions. Times: `at` is unix seconds; series `t` is ms.
 
+import type { StaxChain } from "./chains/types";
+
 export type LotKind = "vera" | "manual";
 export type LotSide = "buy" | "sell";
 
@@ -207,4 +209,21 @@ export function totalsOf(positions: PositionHistory[]): HistoryTotals {
     realized += p.realizedUsd;
   }
   return { costBasisUsd: round2(cost), unrealizedUsd: round2(unrealized), realizedUsd: round2(realized) };
+}
+
+/**
+ * Every token an executor leg can deliver on `chain`, by lowercased address: each asset's own
+ * token and, on BNB Chain, its twin issuer's (a Vera plan or an Autopilot rule can buy either
+ * bStock or Ondo), each with that token's own decimals. Off BSC this is exactly one entry per
+ * asset address, as before.
+ */
+export function legTokenIndex(chain: Pick<StaxChain, "assets">): Map<string, { symbol: string; decimals: number }> {
+  const index = new Map<string, { symbol: string; decimals: number }>(
+    chain.assets.all.filter((a) => !!a.address).map((a) => [a.address!.toLowerCase(), { symbol: a.symbol, decimals: a.decimals ?? 18 }]),
+  );
+  for (const a of chain.assets.all) {
+    const twin = a.twin?.address.toLowerCase();
+    if (twin && !index.has(twin)) index.set(twin, { symbol: a.symbol, decimals: a.twin!.decimals });
+  }
+  return index;
 }

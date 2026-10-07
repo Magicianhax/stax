@@ -33,6 +33,7 @@ import {
   usdcToNumber,
 } from "@/lib/onchainHistory";
 import { IDENTITY_REGISTRY_ABI } from "@/lib/abis";
+import { legTokenIndex } from "@/lib/positions";
 
 const ETHERSCAN_KEY = process.env.ETHERSCAN_API_KEY;
 
@@ -54,7 +55,9 @@ const CHUNK_BACKOFF_MS = 600;
 const LOG_RPC_FALLBACKS: Record<ChainKey, string[]> = {
   base: ["https://mainnet.base.org"],
   mantle: ["https://mantle-rpc.publicnode.com"],
-  // No executor on BSC yet (ADR-0005), so nothing to scan; add a keyless getLogs RPC with the deploy.
+  // None that work: checked 2026-10-07, bsc-dataseed* answer eth_getLogs with "limit exceeded" even
+  // for 1,000 blocks, publicnode wants a token, drpc and 1rpc cap the range. BSC's record needs
+  // ETHERSCAN_API_KEY (V2, chain 56) or a keyed NEXT_PUBLIC_BSC_RPC_URL.
   bsc: [],
 };
 /** Etherscan pages per event per fetch (1000 logs each). */
@@ -342,9 +345,8 @@ async function readRecommendationRows(chain: StaxChain, user?: `0x${string}`): P
 export async function legsByTx(chain: StaxChain, txHashes: string[]): Promise<Map<string, ActivityLeg[]>> {
   const out = new Map<string, ActivityLeg[]>();
   if (!txHashes.length) return out;
-  const byAddr = new Map<string, { symbol: string; decimals: number }>(
-    chain.assets.all.filter((a) => !!a.address).map((a) => [a.address!.toLowerCase(), { symbol: a.symbol, decimals: a.decimals ?? 18 }]),
-  );
+  // Either issuer's token on BNB Chain (an executor leg can buy the twin), in its own decimals.
+  const byAddr = legTokenIndex(chain);
   const legs = await db
     .select()
     .from(executorEvents)

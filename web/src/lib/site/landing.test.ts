@@ -22,6 +22,7 @@ import {
   bscName,
   bscStocks,
   contractLine,
+  liveContractChains,
   jargonIn,
   landingAssetRow,
   landingBaskets,
@@ -157,14 +158,26 @@ describe("copy", () => {
     expect(FAQ.find((f) => f.q.startsWith("How much"))!.a).toContain(`$${BSC_MIN_LEG_USD} per stock`);
   });
 
-  it("never calls Autopilot live on BNB Chain", () => {
+  it("says plainly that Autopilot is live on BNB Chain, and that rules only buy", () => {
     const a = FAQ.find((f) => f.a.includes("Autopilot"))!.a;
-    expect(a).toMatch(/rolling out/);
+    expect(a).toMatch(/^Yes\. Autopilot is live on BNB Chain/);
+    expect(a).not.toMatch(/rolling out|coming soon|after a funded test/i);
+    expect(a).toMatch(/only ever buy/);
   });
 
   it("names only the networks the contract is live on", () => {
     expect(contractLine([])).toBe("");
     expect(contractLine([BSC])).toMatch(/^On BNB Chain, a contract/);
+  });
+
+  it("puts BNB Chain first among the networks the signed-plan contract is live on", () => {
+    const live = liveContractChains();
+    expect(live[0].key).toBe("bsc");
+    expect(live.every((c) => c.contracts.deployed)).toBe(true);
+    expect(contractLine(live)).toMatch(/^On BNB Chain(,| and) /);
+    // A network whose executor isn't deployed is never named.
+    const undeployed = { ...BSC, contracts: { ...BSC.contracts, deployed: false } };
+    expect(liveContractChains([undeployed])).toEqual([]);
   });
 
   it("mentions the BNB Hack as built for, not as a win", () => {

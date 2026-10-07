@@ -18,6 +18,7 @@ import { useEffect, useState } from "react";
 import { VeraOrb, Seal } from "@/components/design";
 import { DrawCheck } from "@/components/motion";
 import { useChain } from "@/lib/chains/active";
+import { placingTrustNote } from "@/lib/plainCopy";
 import { Spinner } from "./primitives";
 
 const INVEST_STEPS = ["Confirming your plan", "Buying each holding", "Securing it to your account"];
@@ -173,8 +174,9 @@ export function PlacingScreen({
             color: "var(--ink-2)",
           }}
         >
-          {/* "Signed & recorded" is only true on the executor path; BNB Chain trades go straight from the account. */}
-          <Seal size={18} /> No network cost · {chain.contracts.deployed ? <>signed &amp; recorded on {chain.name}</> : "checked by Binance first"}
+          {/* "Signed & recorded" only for what goes through the executor: a Vera plan. A manual
+              BNB Chain trade goes straight from the account to Binance (lib/plainCopy.ts). */}
+          <Seal size={18} /> No network cost · {placingTrustNote(chain, kind === "trade" ? "trade" : "plan")}
         </div>
       </div>
     </div>

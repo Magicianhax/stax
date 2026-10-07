@@ -21,7 +21,7 @@ import { and, asc, eq, gte, inArray, sql } from "drizzle-orm";
 import type { StaxChain } from "@/lib/chains/types";
 import { db, executorEvents, priceSnapshots } from "@/lib/db";
 import { ERC20_ABI } from "@/lib/abis";
-import { STAX_FEE_BPS, STAX_TREASURY } from "@/lib/fees";
+import { feeBpsFor, STAX_TREASURY } from "@/lib/fees";
 import { fromUnits } from "@/lib/format";
 import { priceAll } from "@/lib/prices";
 import { manualTrades, type TxGroup } from "@/lib/manualTrades";
@@ -31,6 +31,7 @@ import type { MarketRange } from "@/hooks/useMarket";
 import {
   buildPositions,
   downsample,
+  legTokenIndex,
   sortTrades,
   totalsOf,
   valueSeries,
@@ -120,9 +121,8 @@ async function veraFills(chain: StaxChain, account: `0x${string}`): Promise<{ tr
   for (const e of execs) txs.add(e.txHash.toLowerCase());
   if (!txs.size) return { trades: [], txs };
 
-  const bySymbolAddr = new Map<string, { symbol: string; decimals: number }>(
-    chain.assets.all.filter((a) => !!a.address).map((a) => [a.address!.toLowerCase(), { symbol: a.symbol, decimals: a.decimals ?? 18 }]),
-  );
+  // Either issuer's token on BNB Chain (an executor leg can buy the twin), in its own decimals.
+  const bySymbolAddr = legTokenIndex(chain);
   const legs = await db
     .select()
     .from(executorEvents)
@@ -209,7 +209,8 @@ async function loadLedger(chain: StaxChain, account: `0x${string}`): Promise<Led
   // Add the platform fee back onto Vera legs, pro rata, from the treasury transfer
   // in the same tx when the explorer shows it, else from the fee constant.
   const { groups } = transfers;
-  const grossUp = 10_000 / (10_000 - STAX_FEE_BPS);
+  // No fee on BSC (ADR-0007), so nothing is added back there.
+  const grossUp = 10_000 / (10_000 - feeBpsFor(chain.key));
   const byTx = new Map<string, Trade[]>();
   for (const t of vera.trades) byTx.set(t.txHash, [...(byTx.get(t.txHash) ?? []), t]);
   for (const [hash, legs] of byTx) {

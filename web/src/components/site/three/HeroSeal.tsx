@@ -5,9 +5,9 @@
 // holdings from the BNB Chain registry, the risk line, her mark). The mark
 // draws itself, a terracotta wax seal drops and lands with a small squash (the
 // slab dips on impact), then a faint "Checked with Binance" line fades in.
-// Holds five seconds, then restarts. On BNB Chain the plan isn't signed on
-// chain yet (the executor path is off until a funded test), so the caption
-// says "Planned by Vera", not "Signed".
+// Holds five seconds, then restarts. Vera's BNB Chain plans are signed and
+// checked by the executor since 2026-10-07; the caption stays "Planned by Vera"
+// because the seal animation already carries the "signed" beat.
 import { useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { RoundedBox } from "@react-three/drei/core/RoundedBox";

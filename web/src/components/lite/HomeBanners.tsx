@@ -42,7 +42,7 @@ interface Slide {
 
 export function HomeBanners({ go }: { go: (screen: string, params?: Record<string, unknown>) => void }) {
   const chain = useChain();
-  // `investable`, not `ready`: BNB Chain invests straight from the smart account with no executor.
+  // `investable`, not `ready`: a Binance chain with no executor still invests from the account.
   const { investable } = useChainReady();
   const giftsOn = useGiftsEnabled();
 

@@ -16,10 +16,14 @@ import { getSmartAccount } from "@/lib/server/users";
 import { getBinanceWeb3 } from "@/lib/server/binance";
 import { bscCatalogSnapshot } from "@/lib/server/rwaCatalog";
 import { buildBscInvestLegs, notEnoughCashMessage, PLAN_MIN_LEG_MESSAGE } from "@/lib/server/bscPlan";
+import { loadBscMarket } from "@/lib/server/bscMarket";
+import { executorInvestCalls } from "@/lib/executorCalls";
+import { assetSymbolForToken } from "@/lib/venues";
+import type { StaxChain } from "@/lib/chains/types";
 import { ERC20_ABI } from "@/lib/abis";
 import { rawToUsd } from "@/lib/units";
 import { BinanceLegError, BinanceLegRefusal } from "@/lib/server/binanceLegs";
-import { decodeApproveAmount, dryRunBscSwap, pairLegCalls } from "@/lib/server/dryRun";
+import { decodeApproveAmount, dryRunBscExecutorBatch, dryRunBscSwap, pairLegCalls } from "@/lib/server/dryRun";
 import { unauthorized, badRequest, tooManyRequests, serverError, jsonError } from "@/lib/server/respond";
 import type { ExecCall } from "@/lib/execution";
 import type { DryRun } from "@/lib/dryRun";
@@ -42,6 +46,63 @@ const InvestPlanRequestSchema = z.object({
   amountUsd: z.number().positive().max(MAX_AMOUNT_USD),
 });
 
+/**
+ * BNB Chain plans (either path) are built for, and dry-run from, the caller's own registered
+ * smart account, and refused up front when it holds less cash than the plan spends: a plan for
+ * more than the account holds can only fail at Binance's check or in the bundler with words the
+ * person can't act on. If the balance can't be read, don't block: the chain still has the final
+ * word. Returns the account to plan for, or the refusal to send back.
+ */
+async function bscAccountGate(
+  userId: string,
+  chain: StaxChain,
+  address: string,
+  grossTotal: bigint,
+): Promise<{ taker: `0x${string}` } | { refusal: Response }> {
+  const account = await getSmartAccount(userId, chain.key);
+  if (!account) {
+    return { refusal: badRequest("No account found for this network. Please sign in again.") };
+  }
+  if (account.address.toLowerCase() !== address.toLowerCase()) {
+    return { refusal: jsonError(403, "Plan must be for your own account.") };
+  }
+  const taker = account.address as `0x${string}`;
+  try {
+    const cash = (await serverClient(chain).readContract({
+      address: chain.usdc.address,
+      abi: ERC20_ABI,
+      functionName: "balanceOf",
+      args: [taker],
+    })) as bigint;
+    if (cash < grossTotal) return { refusal: badRequest(notEnoughCashMessage(rawToUsd(chain, cash))) };
+  } catch (err) {
+    console.warn("[invest-plan] couldn't read the cash balance:", err instanceof Error ? err.message : err);
+  }
+  return { taker };
+}
+
+/**
+ * A BNB Chain leg Stax or Binance refused, as the response the plan screen shows: any leg failing
+ * fails the whole plan, naming that leg, never a partial batch. Null for anything else (a real
+ * fault, which goes through serverError). Base/Mantle legs never throw these.
+ */
+function legRefusalResponse(err: unknown): Response | null {
+  if (err instanceof BinanceLegRefusal) {
+    // A "route" refusal's words are for the log, never Vera's plan screen (P0 #3).
+    if (err.code === "route") {
+      console.error("[invest-plan]", err.message);
+      return jsonError(502, "We couldn't get a price just now. Try again in a moment.");
+    }
+    // The leg-level "enter $6 or more" copy points at an amount field a plan doesn't have.
+    return badRequest(err.code === "min_trade" ? PLAN_MIN_LEG_MESSAGE : err.message);
+  }
+  if (err instanceof BinanceLegError) {
+    console.error("[invest-plan]", err.message);
+    return jsonError(502, "We couldn't get a price just now. Try again in a moment.");
+  }
+  return null;
+}
+
 export async function POST(req: NextRequest) {
   // C-2: only a signed-in user can have the agent sign a plan.
   const user = await verifyRequest(req);
@@ -56,9 +117,9 @@ export async function POST(req: NextRequest) {
 
   // Which chain the plan is for (x-stax-chain header / ?chain=; Base default).
   const chain = chainFromRequest(req);
-  // The executor isn't the only way to invest: BSC (ADR-0005) has no executor at all yet and
-  // goes through the direct smart-account path below instead. Any other undeployed chain
-  // (Base pre-deploy) still has nothing to fall back to.
+  // The executor isn't the only way to invest: a chain with a Binance router but no deployed
+  // executor (BSC before 2026-10-07, ADR-0005) goes through the direct smart-account path below
+  // instead. Any other undeployed chain (Base pre-deploy) still has nothing to fall back to.
   if (!chain.contracts.deployed && !chain.routers.binance) {
     return jsonError(503, `Stax is not deployed on ${chain.name} yet`);
   }
@@ -105,32 +166,13 @@ export async function POST(req: NextRequest) {
       // sign verbatim (assertExecCallsAreSafe checks every recipient client-side). The taker
       // must be the caller's own registered smart account — there is no executor in between to
       // hold funds, so signing for anyone else's account is never on the table.
-      const account = await getSmartAccount(user.userId, chain.key);
-      if (!account) {
-        return badRequest("No account found for this network. Please sign in again.");
-      }
-      if (account.address.toLowerCase() !== address.toLowerCase()) {
-        return jsonError(403, "Plan must be for your own account.");
-      }
+      const gate = await bscAccountGate(user.userId, chain, address, grossTotal);
+      if ("refusal" in gate) return gate.refusal;
+      const { taker } = gate;
 
       let calls: ExecCall[];
       let dryRuns: DryRun[] = [];
-      const taker = account.address as `0x${string}`;
 
-      // A plan for more than the account holds can only fail at Binance's check or in the bundler
-      // with words the person can't act on, so refuse it up front. If the balance can't be read,
-      // don't block: the chain still has the final word.
-      try {
-        const cash = (await serverClient(chain).readContract({
-          address: chain.usdc.address,
-          abi: ERC20_ABI,
-          functionName: "balanceOf",
-          args: [taker],
-        })) as bigint;
-        if (cash < grossTotal) return badRequest(notEnoughCashMessage(rawToUsd(chain, cash)));
-      } catch (err) {
-        console.warn("[invest-plan] couldn't read the cash balance:", err instanceof Error ? err.message : err);
-      }
       try {
         const [catalog, tokens] = await Promise.all([bscCatalogSnapshot(nowMs), getBinanceWeb3().rwaTokens()]);
         const builtLegs = await buildBscInvestLegs({
@@ -179,19 +221,8 @@ export async function POST(req: NextRequest) {
         );
       } catch (err) {
         // Any leg failing fails the whole plan, naming that leg — never a partial batch.
-        if (err instanceof BinanceLegRefusal) {
-          // A "route" refusal's words are for the log, never Vera's plan screen (P0 #3).
-          if (err.code === "route") {
-            console.error("[invest-plan]", err.message);
-            return jsonError(502, "We couldn't get a price just now. Try again in a moment.");
-          }
-          // The leg-level "enter $6 or more" copy points at an amount field a plan doesn't have.
-          return badRequest(err.code === "min_trade" ? PLAN_MIN_LEG_MESSAGE : err.message);
-        }
-        if (err instanceof BinanceLegError) {
-          console.error("[invest-plan]", err.message);
-          return jsonError(502, "We couldn't get a price just now. Try again in a moment.");
-        }
+        const refusal = legRefusalResponse(err);
+        if (refusal) return refusal;
         throw err;
       }
 
@@ -215,14 +246,37 @@ export async function POST(req: NextRequest) {
       return Response.json(result);
     }
 
+    // BNB Chain's executor path (a Binance router behind a live executor, ADR-0005): the same
+    // account and cash gate as the direct path, and the catalog + token list read once so every
+    // stock leg buys the issuer the plan showed, re-checked buyable (lib/legBuilder.ts). Base and
+    // Mantle have no Binance router and skip all of this, exactly as before.
+    const bscExecutor = Boolean(chain.routers.binance);
+    let taker: `0x${string}` | undefined;
+    if (bscExecutor) {
+      const gate = await bscAccountGate(user.userId, chain, address, grossTotal);
+      if ("refusal" in gate) return gate.refusal;
+      taker = gate.taker;
+    }
+
     // serverClient batches the per-leg pool reads into one multicall eth_call.
-    const { legs, notes } = await buildLegs({
-      chain,
-      allocation,
-      usdcTotal,
-      client: serverClient(chain),
-      nowSeconds,
-    });
+    let legs: Awaited<ReturnType<typeof buildLegs>>["legs"];
+    let notes: string[];
+    try {
+      ({ legs, notes } = await buildLegs({
+        chain,
+        allocation,
+        usdcTotal,
+        client: serverClient(chain),
+        nowSeconds,
+        ...(bscExecutor ? { bscMarket: await loadBscMarket(nowMs) } : {}),
+      }));
+    } catch (err) {
+      // BNB Chain: a closed, paused, under-$6 or unpriceable leg stops the whole plan before
+      // anything is signed, in the direct path's own words.
+      const refusal = legRefusalResponse(err);
+      if (refusal) return refusal;
+      throw err;
+    }
 
     if (legs.length === 0) {
       return badRequest("Could not build any swap legs for this allocation.");
@@ -242,6 +296,28 @@ export async function POST(req: NextRequest) {
     const expiry = BigInt(nowSeconds + EXPIRY_SECONDS);
 
     const signature = await signRiskInference(chain, { planId, assessedRisk, maxRisk, expiry });
+
+    // BNB Chain: one Binance dry run of exactly what the client will send, the account's
+    // executeBatch([approve(USDT, executor, usdcTotal), investWithAI(...)]) built by the same
+    // encoder useInvest uses, reported per leg so useInvest refuses to send a "failed" plan and
+    // PlanScreen shows each stock's check. Never claims a check that didn't run (lib/server/dryRun.ts).
+    let dryRuns: DryRun[] | undefined;
+    if (bscExecutor && taker) {
+      const batch = executorInvestCalls({
+        chain,
+        plan: { planId, recHash: recHash(allocation), riskScore: assessedRisk, agentId: chain.contracts.agentId },
+        inference: { assessedRisk, maxRisk, expiry, signature },
+        legs,
+        usdcTotal,
+        feeRaw: grossTotal - usdcTotal,
+      });
+      dryRuns = await dryRunBscExecutorBatch({
+        chain,
+        taker,
+        calls: batch,
+        legs: legs.map((l) => ({ symbol: assetSymbolForToken(chain, l.tokenOut) ?? "", token: l.tokenOut })),
+      });
+    }
 
     const result: InvestPlanResult = {
       plan: {
@@ -268,6 +344,7 @@ export async function POST(req: NextRequest) {
       executor: chain.contracts.executor,
       explorer: chain.explorer.url,
       notes,
+      ...(dryRuns ? { dryRuns } : {}),
     };
     return Response.json(result);
   } catch (err) {

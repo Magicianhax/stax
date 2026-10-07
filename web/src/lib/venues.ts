@@ -89,3 +89,13 @@ export function holdingToken(
   if (decimals === undefined) return null;
   return { address: resolved.address, decimals };
 }
+
+/**
+ * Which listed asset `token` is, matching either issuer's address (a BSC leg can buy the twin).
+ * Undefined for a token the chain doesn't list. Used to tag an executor plan's legs — which carry
+ * only the token they buy — with the symbol PlanScreen matches its checks by.
+ */
+export function assetSymbolForToken(chain: StaxChain, token: `0x${string}`): string | undefined {
+  const t = token.toLowerCase();
+  return chain.assets.all.find((a) => a.address?.toLowerCase() === t || a.twin?.address.toLowerCase() === t)?.symbol;
+}

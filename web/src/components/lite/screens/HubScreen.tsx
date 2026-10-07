@@ -26,7 +26,7 @@ export function HubScreen({
 }: {
   go: (target: string | number, params?: Record<string, unknown>) => void;
 }) {
-  // `investable`, not `ready`: BNB Chain invests straight from the account without an executor.
+  // `investable`, not `ready`: a Binance chain with no executor still invests from the account.
   const { chain, investable } = useChainReady();
   const giftsOn = useGiftsEnabled();
   const { claimableCount } = useGifts();

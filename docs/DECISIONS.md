@@ -146,3 +146,19 @@ calls ("Invalid Crumb").
 **Decision:** Read the date from Yahoo's public quote page, cache 12 h, and show "not announced" on
 any failure. Never a guessed date.
 **Consequences:** Fragile if Yahoo reshapes the page; the feature degrades to "not announced".
+
+## ADR-0015 Vera and Autopilot on the BSC executor (2026-10-07)
+**Status:** accepted (supersedes the "deploy later" half of ADR-0005)
+**Context:** A $6 AAPL (Ondo) `investWithAI` from an EOA delivered 0.017887 AAPLon (min 0.017708)
+with nothing left in the executor (tx `0x4e403fb3a2871c0973a076e61410dff42eb90702b97e80bdde97254ceaf8bc3a`).
+**Decision:** `deployed: true` on BSC. Vera's plans, baskets and Autopilot go through the executor:
+each stock leg buys the issuer the plan showed (venue, then address, then the catalog's best, then
+the default), re-checked buyable first; a closed leg refuses the whole plan in the direct path's
+words. `/api/invest-plan` dry-runs the exact `executeBatch([approve(USDT, executor, usdcTotal),
+investWithAI])` once per plan and reports it per leg. Manual Buy/Sell stays on the direct path
+(`/api/swap-quote`), and only executor flows say "signed & recorded". The direct path stays as the
+fallback for a Binance chain with no executor.
+**Consequences:** One Binance simulate per plan instead of per leg. Autopilot rules can buy the
+twin issuer. Vera's BSC record needs `ETHERSCAN_API_KEY` (V2, chain 56) or a keyed BSC RPC: public
+BSC RPCs refuse `eth_getLogs`. Saved BSC Autopilots start running on the next 15:00 UTC cron after
+this ships.

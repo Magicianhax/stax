@@ -1,8 +1,9 @@
 import "server-only";
 
 // A Binance Transaction API dry run for a BSC trade, right before the user signs it (the
-// brief's "Dry-run with the Transaction API"). Wired into /api/swap-quote (build=true) and
-// /api/invest-plan's direct path, one per leg.
+// brief's "Dry-run with the Transaction API"). Wired into /api/swap-quote (build=true),
+// /api/invest-plan's direct path (one per leg) and its executor path on BNB Chain (one per plan,
+// dryRunBscExecutorBatch, reported per leg).
 //
 // The known obstacle (docs/BINANCE-WEB3.md §5, §10, live 2026-09-24): `POST
 // /pre-transaction/simulate` takes ONE unsigned tx — its request body is a single `evmTx`
@@ -140,6 +141,44 @@ export function plainFailReason(failReason: string): string {
   return "Binance checked this trade and it wouldn't go through right now. Try again in a moment.";
 }
 
+type BatchOutcome =
+  | { kind: "skipped"; reason: string; checkedAt: number }
+  | { kind: "failed"; reason: string; checkedAt: number }
+  | { kind: "passed"; result: SimulateResult; checkedAt: number };
+
+const COULD_NOT_CHECK = "Couldn't check this trade with Binance just now.";
+const NOT_DEPLOYED_YET = "This check turns on after your wallet's very first trade sets it up on-chain.";
+
+/**
+ * Simulates `calls` exactly as the smart account will execute them — one executeBatch call from
+ * the EntryPoint — spending at most one Binance call. Zero when the account has no code yet (a
+ * read-only RPC check first); a failed deployment check or a Binance error skip rather than block.
+ */
+async function simulateAccountBatch(
+  chain: StaxChain,
+  taker: `0x${string}`,
+  calls: { to: `0x${string}`; data: `0x${string}` }[],
+  deps: DryRunDeps,
+): Promise<BatchOutcome> {
+  let deployed: boolean;
+  try {
+    deployed = await deps.isAccountDeployed(chain, taker);
+  } catch {
+    return { kind: "skipped", reason: COULD_NOT_CHECK, checkedAt: Date.now() };
+  }
+  if (!deployed) return { kind: "skipped", reason: NOT_DEPLOYED_YET, checkedAt: Date.now() };
+
+  let result: SimulateResult;
+  try {
+    result = await deps.simulate({ from: entryPoint07Address, to: taker, value: "0", data: encodeSimpleAccountExecuteBatch(calls) });
+  } catch {
+    return { kind: "skipped", reason: COULD_NOT_CHECK, checkedAt: Date.now() };
+  }
+  const checkedAt = Date.now();
+  if (result.status !== "SUCCESS") return { kind: "failed", reason: plainFailReason(result.failReason), checkedAt };
+  return { kind: "passed", result, checkedAt };
+}
+
 /**
  * The one entry point every caller uses. Spends at most one Binance call: zero when the
  * account hasn't sent its first on-chain trade yet (no deployed bytecode to simulate against),
@@ -150,47 +189,61 @@ export function plainFailReason(failReason: string): string {
  */
 export async function dryRunBscSwap(args: DryRunSwapArgs, deps: DryRunDeps = defaultDeps): Promise<DryRun> {
   const { chain, taker, router, tokenIn, tokenOut, amountIn, swapData } = args;
-
-  let deployed: boolean;
-  try {
-    deployed = await deps.isAccountDeployed(chain, taker);
-  } catch {
-    return { status: "skipped", reason: "Couldn't check this trade with Binance just now.", checkedAt: Date.now() };
-  }
-
-  if (!deployed) {
-    return {
-      status: "skipped",
-      reason: "This check turns on after your wallet's very first trade sets it up on-chain.",
-      checkedAt: Date.now(),
-    };
-  }
-
   const approveData = encodeFunctionData({ abi: ERC20_ABI, functionName: "approve", args: [router, amountIn] });
-  const batchData = encodeSimpleAccountExecuteBatch([
-    { to: tokenIn, data: approveData },
-    { to: router, data: swapData },
-  ]);
+  const outcome = await simulateAccountBatch(
+    chain,
+    taker,
+    [
+      { to: tokenIn, data: approveData },
+      { to: router, data: swapData },
+    ],
+    deps,
+  );
+  if (outcome.kind !== "passed") return { status: outcome.kind, reason: outcome.reason, checkedAt: outcome.checkedAt };
 
-  let result: SimulateResult;
-  try {
-    result = await deps.simulate({ from: entryPoint07Address, to: taker, value: "0", data: batchData });
-  } catch {
-    return { status: "skipped", reason: "Couldn't check this trade with Binance just now.", checkedAt: Date.now() };
-  }
-
-  const checkedAt = Date.now();
-  if (result.status !== "SUCCESS") {
-    return { status: "failed", reason: plainFailReason(result.failReason), checkedAt };
-  }
-
-  const receiveRaw = parseReceivedAmount(result.balanceChanges, tokenOut, taker);
+  const receiveRaw = parseReceivedAmount(outcome.result.balanceChanges, tokenOut, taker);
   return {
     status: "passed",
     token: tokenOut,
-    checkedAt,
+    checkedAt: outcome.checkedAt,
     ...(receiveRaw !== undefined ? { receiveRaw: receiveRaw.toString() } : {}),
   };
+}
+
+export interface DryRunExecutorBatchArgs {
+  chain: StaxChain;
+  /** The smart account that signs and sends the batch (the executor forwards every leg to it). */
+  taker: `0x${string}`;
+  /** The exact batch the client sends: [approve(cash, executor, usdcTotal), investWithAI(...)]. */
+  calls: { to: `0x${string}`; data: `0x${string}` }[];
+  /** One entry per plan leg: which stock it is and the token it buys, in plan order. */
+  legs: { symbol: string; token: `0x${string}` }[];
+}
+
+/**
+ * The executor path's Binance check (/api/invest-plan on BNB Chain): the account sends ONE batch
+ * for the whole plan — approve the executor for exactly usdcTotal, then investWithAI — so that
+ * batch is simulated once, byte for byte, from the EntryPoint (one Binance call per plan, not per
+ * leg). The response keeps the direct path's shape: one DryRun per leg, tagged with its symbol and
+ * token, so useInvest's "a failed check is never sent" and PlanScreen's per-leg lines read it
+ * unchanged. A pass reads each leg's own receipt off the account's row (the executor forwards what
+ * it measured); a revert can't be pinned to one leg, so every leg reads "failed"; a skip says why,
+ * on every leg. Never "passed" for anything Binance didn't simulate.
+ */
+export async function dryRunBscExecutorBatch(args: DryRunExecutorBatchArgs, deps: DryRunDeps = defaultDeps): Promise<DryRun[]> {
+  const { chain, taker, calls, legs } = args;
+  const outcome = await simulateAccountBatch(chain, taker, calls, deps);
+  return legs.map((leg): DryRun => {
+    const tag = { symbol: leg.symbol, token: leg.token };
+    if (outcome.kind !== "passed") return { status: outcome.kind, reason: outcome.reason, checkedAt: outcome.checkedAt, ...tag };
+    const receiveRaw = parseReceivedAmount(outcome.result.balanceChanges, leg.token, taker);
+    return {
+      status: "passed",
+      checkedAt: outcome.checkedAt,
+      ...tag,
+      ...(receiveRaw !== undefined ? { receiveRaw: receiveRaw.toString() } : {}),
+    };
+  });
 }
 
 /**

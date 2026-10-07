@@ -34,8 +34,10 @@ import { priceLimitSqrtX96 } from "./swapGuards";
 import { assetBySymbol } from "./chains";
 import { kyberBuild, kyberRoute } from "./server/kyber";
 import { buildBinanceLeg } from "./server/binanceLegs";
+import { resolveBscStockToken } from "./server/bscLegToken";
+import { loadBscMarket, type BscMarket } from "./server/bscMarket";
 import { rawToUsd } from "./units";
-import type { Asset, AssetRoute, RouteHop, StaxChain } from "./chains/types";
+import type { Asset, AssetRoute, RouteHop, RwaPlatform, StaxChain } from "./chains/types";
 import type { Allocation } from "./allocation-schema";
 
 const ZERO = BigInt(0);
@@ -68,6 +70,17 @@ export interface BuildLegsArgs {
   client: PublicClient;
   nowSeconds: number; // request-time clock, passed in (never read at module scope)
   slippageBps?: number;
+  /**
+   * BSC only: the RWA catalog + Binance token list a stock leg's issuer and buyable gate are read
+   * from. /api/invest-plan passes the snapshot it already read; when absent (Autopilot) it is
+   * loaded on demand, and only when the plan has a stock leg on Binance.
+   */
+  bscMarket?: BscMarket;
+  /**
+   * BSC only: refuse a leg whose planned issuer stopped trading, instead of buying the other
+   * issuer. Autopilot rules set this: a buy-the-discount rule picked its issuer because it was cheap.
+   */
+  strictVenue?: boolean;
 }
 
 /**
@@ -386,29 +399,32 @@ async function buildKyberLeg(
 type LegKind = "single" | "route" | "aave" | "kyber" | "binance";
 
 /**
- * BSC executor leg (ADR-0005): unreachable today because `chain.contracts.deployed` is false
- * for BSC until the human runs the deploy script (Task 10) — Vera's BSC invests go through the
- * direct smart-account path instead. `binanceLegs.directCallsForLeg` is exported for
- * `/api/invest-plan` to call server-side and return as `InvestPlanResult.calls`; `useInvest.ts`
- * already forwards whatever `calls` a plan response carries, verbatim, as one sponsored user op
- * (after `assertExecCallsAreSafe` in `lib/execution.ts` checks every recipient) — wiring
- * `directCallsForLeg` into `/api/invest-plan` itself is the piece still missing. Kept here,
- * inert, so the executor path needs no further plumbing on the day it is switched on: `buildLegs`
- * already routes a "binance"-via asset here once `chain.contracts.deployed` flips to true (see
- * the entry-classification loop below).
+ * BSC executor leg (ADR-0005, live since the 2026-10-07 test): one Binance aggregator swap with
+ * the executor as taker — Binance delivers to whoever calls its router, which is the executor,
+ * and the executor forwards the measured amount to the user. `tokenOut` is the token buildLegs
+ * already resolved for this entry (the issuer the plan showed, re-checked buyable — see
+ * resolveBscStockToken), never re-derived from `asset.address` here. The executor whitelists
+ * both issuers' tokens and the coins, so either is a valid `tokenOut`. The $6 floor, an RFQ
+ * route and an unexpected router are all refused inside buildBinanceLeg (BinanceLegRefusal).
  */
-async function buildBinanceExecutorLeg(chain: StaxChain, asset: Asset, usdcIn: bigint, slippageBps: bigint): Promise<Leg> {
+async function buildBinanceExecutorLeg(
+  chain: StaxChain,
+  asset: Asset,
+  tokenOut: `0x${string}`,
+  usdcIn: bigint,
+  slippageBps: bigint,
+): Promise<Leg> {
   const leg = await buildBinanceLeg({
     chain,
     symbol: asset.symbol,
     tokenIn: chain.usdc.address,
-    tokenOut: asset.address!,
+    tokenOut,
     amountIn: usdcIn,
     taker: chain.contracts.executor,
     slippageBps: Number(slippageBps),
     usdValue: rawToUsd(chain, usdcIn),
   });
-  return { router: leg.router, tokenOut: asset.address!, usdcIn, minOut: leg.minOut, swapData: leg.swapData };
+  return { router: leg.router, tokenOut, usdcIn, minOut: leg.minOut, swapData: leg.swapData };
 }
 
 interface LegEntry {
@@ -416,6 +432,42 @@ interface LegEntry {
   kind: LegKind;
   route?: AssetRoute;
   weightPct: number;
+  /** "binance" legs: the token this leg buys, resolved before any leg is built. */
+  tokenOut?: `0x${string}`;
+  /** "binance" legs: the issuer the allocation entry named (what the plan screen showed). */
+  planned?: { venue?: RwaPlatform; address?: string };
+}
+
+/**
+ * BSC: settle every "binance" entry's `tokenOut` before a single leg is quoted. A stock leg buys
+ * the issuer its allocation entry named (resolveBscStockToken: venue, then address, then the
+ * catalog's best, then the asset's default), re-checked buyable against Binance's cached RWA token
+ * list; a closed or paused one throws the direct path's own BinanceLegRefusal and the whole plan
+ * stops here — nothing is quoted, nothing partial is returned. Crypto has no catalog row and no
+ * market hours, so it keeps its own address and skips the gate (same as /api/swap-quote). The
+ * market snapshot is read once, and only when there is a stock leg to resolve.
+ */
+async function resolveBinanceTokens(
+  entries: LegEntry[],
+  chain: StaxChain,
+  given: BscMarket | undefined,
+  nowSeconds: number,
+  strictVenue = false,
+): Promise<void> {
+  const stocks = entries.filter((e) => e.kind === "binance" && e.asset.tier !== "crypto");
+  if (stocks.length === 0) return;
+  const market = given ?? (await loadBscMarket(nowSeconds * 1000));
+  const byTicker = new Map(market.catalog.map((t) => [t.ticker, t]));
+  for (const e of stocks) {
+    e.tokenOut = resolveBscStockToken({
+      chain,
+      asset: e.asset,
+      planned: { ...(e.planned ?? {}), strict: strictVenue },
+      ticker: byTicker.get(e.asset.symbol),
+      tokens: market.tokens,
+      nowMs: market.nowMs,
+    });
+  }
 }
 
 /**
@@ -452,7 +504,7 @@ async function buildAll(
         case "aave":
           return buildAaveLeg(chain, asset, usdcIn);
         case "binance":
-          return buildBinanceExecutorLeg(chain, asset, usdcIn, slippageBps);
+          return buildBinanceExecutorLeg(chain, asset, entry.tokenOut!, usdcIn, slippageBps);
         case "route":
           return buildRouteLeg(chain, client, asset, entry.route!, usdcIn, slippageBps, deadline);
         case "kyber": {
@@ -506,13 +558,13 @@ export async function buildLegs(args: BuildLegsArgs): Promise<BuildLegsResult> {
     } else if (asset.via === "aave_v3" && asset.address && chain.routers.aavePool) {
       entries.push({ asset, kind: "aave", weightPct: a.weightPct });
     } else if (asset.via === "binance" && asset.address && chain.routers.binance) {
-      // BSC (ADR-0005): the executor path only exists once the human deploys StaxExecutor —
-      // until then this is unreachable in practice (`chain.contracts.deployed` is false), and
-      // Vera's BSC invests build direct smart-account calls instead, outside `buildLegs`.
+      // BSC (ADR-0005): the executor path is live (bsc.contracts.ts). A chain with a Binance
+      // router but no deployed executor builds direct smart-account calls instead, outside
+      // `buildLegs` (bscPlan.ts), so here every such leg is dropped.
       if (chain.contracts.deployed) {
-        entries.push({ asset, kind: "binance", weightPct: a.weightPct });
+        entries.push({ asset, kind: "binance", weightPct: a.weightPct, tokenOut: asset.address, planned: { venue: a.venue, address: a.address } });
       } else {
-        notes.push(`Skipped ${a.symbol} (${a.weightPct}%): the BSC executor isn't deployed yet.`);
+        notes.push(`Skipped ${a.symbol} (${a.weightPct}%): the executor isn't deployed on ${chain.name} yet.`);
       }
     } else if (chain.routers.kyber && asset.address && asset.via !== "route") {
       // Aggregator chain: Kyber first, direct pool (if any) as the fallback inside buildAll.
@@ -532,6 +584,8 @@ export async function buildLegs(args: BuildLegsArgs): Promise<BuildLegsResult> {
       `Re-normalized weights to 100% after dropping ${droppedWeight.toFixed(1)}% of unsupported assets.`,
     );
   }
+
+  await resolveBinanceTokens(entries, chain, args.bscMarket, nowSeconds, args.strictVenue === true);
 
   const deadline = BigInt(nowSeconds + DEADLINE_SECONDS);
   const legs = await buildAll(chain, client, entries, usdcTotal, slippageBps, deadline, notes);
