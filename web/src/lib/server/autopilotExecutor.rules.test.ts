@@ -23,6 +23,9 @@ vi.mock("./autopilotStore", () => ({
   pauseAutopilot: (...args: unknown[]) => pauseAutopilotSpy(...args),
 }));
 
+const fetchWalletsSpy = vi.fn();
+vi.mock("./privyAuth", () => ({ fetchPrivyEmbeddedWallets: (...args: unknown[]) => fetchWalletsSpy(...args) }));
+
 const buildLegsSpy = vi.fn();
 vi.mock("@/lib/legBuilder", () => ({ buildLegs: (...args: unknown[]) => buildLegsSpy(...args) }));
 
@@ -84,6 +87,7 @@ function cfg(overrides: Partial<AutopilotConfig> = {}): AutopilotConfig {
 }
 
 beforeEach(() => {
+  fetchWalletsSpy.mockReset().mockResolvedValue([{ id: "w1", address: "0x1111111111111111111111111111111111111111" }]);
   planAutopilotRunSpy.mockReset();
   readContractSpy.mockClear();
   recordRunSpy.mockReset().mockResolvedValue(undefined);
@@ -232,5 +236,32 @@ describe("runAutopilot: a run that found nothing to do", () => {
     planAutopilotRunSpy.mockResolvedValue({ ok: true, kind: "rule", rule: { type: "buy_discount", symbol: "NVDA", discountPct: 2 }, intents: [], receipt: "Vera checked your plan: nothing to do." });
     const result = await runAutopilot(cfg(), { nowSeconds: NOW_S }, deployedBsc);
     expect(result).toEqual({ ok: true, receipt: "Vera checked your plan: nothing to do." });
+  });
+});
+
+describe("runAutopilot: the signing wallet is re-checked at run time", () => {
+  it("pauses and signs nothing when the stored wallet isn't the user's own", async () => {
+    fetchWalletsSpy.mockResolvedValue([{ id: "w_other", address: "0x9999999999999999999999999999999999999999" }]);
+
+    const result = await runAutopilot(cfg(), { nowSeconds: NOW_S }, deployedBsc);
+
+    expect(result.ok).toBe(false);
+    expect(result.retryable).toBe(false);
+    expect(pauseAutopilotSpy).toHaveBeenCalledWith("ap_1");
+    expect(logRunSpy).toHaveBeenCalledWith(expect.objectContaining({ status: "error", reason: expect.stringMatching(/isn't one of yours/) }));
+    expect(planAutopilotRunSpy).not.toHaveBeenCalled();
+    expect(sendUserOperationSpy).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when Privy can't be reached: skips the run without signing or pausing", async () => {
+    fetchWalletsSpy.mockRejectedValue(new Error("privy down"));
+
+    const result = await runAutopilot(cfg(), { nowSeconds: NOW_S }, deployedBsc);
+
+    expect(result.ok).toBe(false);
+    expect(pauseAutopilotSpy).not.toHaveBeenCalled();
+    expect(logRunSpy).toHaveBeenCalledWith(expect.objectContaining({ status: "skipped" }));
+    expect(planAutopilotRunSpy).not.toHaveBeenCalled();
+    expect(sendUserOperationSpy).not.toHaveBeenCalled();
   });
 });
