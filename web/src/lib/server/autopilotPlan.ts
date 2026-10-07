@@ -71,11 +71,11 @@ export type AutopilotPlan =
  * risk is gated later by checkBounds with the balance in hand.
  */
 export async function planForAutopilot(cfg: AutopilotConfig, chain: StaxChain = getChain(cfg.chain)): Promise<AutopilotPlan> {
-  // BSC (ADR-0005): the direct smart-account path autopilot uses for a one-tap invest is a
-  // user-present flow (they're holding the wallet). A scheduled run has no one watching, so a
-  // sizing mistake there would repeat silently every period — Autopilot on BSC stays off until
-  // the executor (with its on-chain risk gate) is deployed. `runAutopilot` already checks this
-  // before it ever calls here; this mirrors it so nothing that calls `planForAutopilot`
+  // ADR-0005: Autopilot only ever runs through the executor, with its on-chain risk gate. A
+  // chain's direct smart-account path is a user-present flow; a scheduled run has no one
+  // watching, so a sizing mistake there would repeat silently every period. BSC's executor is live
+  // since 2026-10-07, so BSC passes; any chain without one stays off. `runAutopilot` already checks
+  // this before it ever calls here; this mirrors it so nothing that calls `planForAutopilot`
   // directly (a future preview endpoint, a test) can skip the gate by accident.
   if (!chain.contracts.deployed) {
     return { ok: false, status: "skipped", reason: `Stax is not deployed on ${chain.name} yet.` };

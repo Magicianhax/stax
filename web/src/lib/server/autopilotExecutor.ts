@@ -199,9 +199,8 @@ export async function runAutopilot(
         const intent = plan.intents[idx];
         // Carries the venue a buy_discount intent actually priced (review finding #2) onto the
         // allocation entry, same shape Vera's own BSC allocations already use (allocation-schema
-        // ts's `venue`/`address`). rulesEngine.ts only ever hands back the asset's own platform
-        // here (anything else is refused before this point), so this is display-accurate, not
-        // yet load-bearing for buildLegs below.
+        // ts's `venue`/`address`). Load-bearing: buildLegs buys exactly this issuer (either one
+        // of the asset's own tokens, both whitelisted on the executor), re-checked buyable.
         const asset = intent.platform ? assetBySymbol(chain, intent.symbol) : undefined;
         const resolved = asset ? resolveVenueAddress(chain, asset, intent.platform) : null;
         return {

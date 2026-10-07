@@ -134,8 +134,8 @@ export function useInvest(): UseInvest {
           return null;
         }
       }
-      // /api/allocate needs no executor — only the direct-path invest() below does. BSC
-      // (no executor at all yet, ADR-0005) still builds a plan; any other undeployed chain
+      // /api/allocate needs no executor. A Binance chain with no executor (ADR-0005) still
+      // builds a plan and invests on the direct path; any other undeployed chain
       // (Base pre-deploy) has nothing to invest into, so stop before spending an AI call.
       if (!chain.contracts.deployed && !chain.routers.binance) {
         setError(notLiveMessage);

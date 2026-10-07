@@ -558,7 +558,7 @@ export async function buildLegs(args: BuildLegsArgs): Promise<BuildLegsResult> {
       if (chain.contracts.deployed) {
         entries.push({ asset, kind: "binance", weightPct: a.weightPct, tokenOut: asset.address, planned: { venue: a.venue, address: a.address } });
       } else {
-        notes.push(`Skipped ${a.symbol} (${a.weightPct}%): the BSC executor isn't deployed yet.`);
+        notes.push(`Skipped ${a.symbol} (${a.weightPct}%): the executor isn't deployed on ${chain.name} yet.`);
       }
     } else if (chain.routers.kyber && asset.address && asset.via !== "route") {
       // Aggregator chain: Kyber first, direct pool (if any) as the fallback inside buildAll.

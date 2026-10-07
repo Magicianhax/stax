@@ -2,7 +2,8 @@
 // of these functions instead of formatting a number inline, so the wording (and the threshold
 // under which a gap reads as "same as the real share") lives in one tested place.
 import { describe, expect, it } from "vitest";
-import { gapSentence, gapWords, stateLabel, dryRunReceiptRow, venuePickerExplainer, riskLine, shortGapLine, gapToRealShare, closedBuyLabel, planOpenIssuerNote, trustLine, holdingWords } from "./plainCopy";
+import { gapSentence, gapWords, stateLabel, dryRunReceiptRow, venuePickerExplainer, riskLine, shortGapLine, gapToRealShare, closedBuyLabel, planOpenIssuerNote, trustLine, holdingWords, signedByExecutor, placingTrustNote } from "./plainCopy";
+import { getChain } from "./chains";
 import type { DryRun } from "./dryRun";
 
 describe("gapSentence", () => {
@@ -233,6 +234,38 @@ describe("trustLine", () => {
       expect(trustLine(kind, false)).not.toMatch(/sign|record/i);
       expect(trustLine(kind, false)).toMatch(/Binance/);
     }
+  });
+});
+
+describe("signedByExecutor", () => {
+  // "Signed & recorded" is a claim about the executor: Vera's signed risk check and the on-chain
+  // plan record. On BNB Chain, Vera plans, baskets and Autopilot go through it (since 2026-10-07);
+  // a manual Buy or Sell still goes straight from the account to Binance's router and never does.
+  const bsc = getChain("bsc");
+  const liveBsc = { ...bsc, contracts: { ...bsc.contracts, deployed: true } };
+  const directBsc = { ...bsc, contracts: { ...bsc.contracts, deployed: false } };
+  const mantle = getChain("mantle");
+
+  it("is true for a BNB Chain plan once the executor is live, never for a manual trade there", () => {
+    expect(signedByExecutor(liveBsc, "plan")).toBe(true);
+    expect(signedByExecutor(liveBsc, "trade")).toBe(false);
+  });
+
+  it("is false for everything on a chain with no executor", () => {
+    expect(signedByExecutor(directBsc, "plan")).toBe(false);
+    expect(signedByExecutor(directBsc, "trade")).toBe(false);
+  });
+
+  it("keeps Base and Mantle exactly as before: keyed on the executor alone", () => {
+    expect(signedByExecutor(mantle, "plan")).toBe(mantle.contracts.deployed);
+    expect(signedByExecutor(mantle, "trade")).toBe(mantle.contracts.deployed);
+  });
+
+  it("words the placing line from the same rule", () => {
+    expect(placingTrustNote(liveBsc, "plan")).toBe("signed & recorded on BNB Chain");
+    expect(placingTrustNote(liveBsc, "trade")).toBe("checked by Binance first");
+    expect(placingTrustNote(directBsc, "plan")).toBe("checked by Binance first");
+    expect(placingTrustNote(mantle, "trade")).toBe("signed & recorded on Mantle");
   });
 });
 

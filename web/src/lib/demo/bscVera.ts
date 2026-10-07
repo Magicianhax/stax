@@ -235,7 +235,7 @@ export function demoBscPlanFills(alloc: Pick<Allocation, "allocations">, amountU
   });
 }
 
-/** The receipt Success shows. No on-chain verification panel: on BNB Chain a plan is checked with Binance, not signed on a contract. */
+/** The receipt Success shows. No on-chain verification panel: the demo signs nothing and records nothing. */
 export function demoBscSuccess(alloc: Allocation, amountUsd: number, txHash: `0x${string}`): InvestSuccess {
   return {
     txHash,
