@@ -25,23 +25,28 @@ function suggestionsFor(amount: number): string[] {
 
 export function GoalScreen({
   go,
+  initialGoal,
+  initialAmount,
 }: {
   go: (screen: string, params?: Record<string, unknown>) => void;
+  /** What the person had typed when Vera couldn't build a plan, so a refusal doesn't wipe it. */
+  initialGoal?: string;
+  initialAmount?: string;
 }) {
   const { address } = useSmartAccount();
   const { chain, investable: ready } = useChainReady();
   const { data: bal } = useUsdcBalance(address ?? undefined);
   const balance = bal?.value ?? 0;
 
-  const [goal, setGoal] = useState("");
+  const [goal, setGoal] = useState(initialGoal ?? "");
   // Default amount: $300 when the cash covers it, otherwise a round figure the
   // balance does cover, so the screen never opens already in an error state.
   // The user's own edits win once they type.
-  const [edited, setEdited] = useState<string | null>(null);
+  const [edited, setEdited] = useState<string | null>(initialAmount ?? null);
   const suggested = balance >= 300 ? "300" : String(Math.floor(balance / 10) * 10 || Math.floor(balance));
   // The keypad owns the edited value; the suggestion stands until they touch it.
   // The cash on hand is the ceiling, but only once the balance has loaded.
-  const pad = useAmountKeypad({ max: bal ? balance : undefined });
+  const pad = useAmountKeypad({ max: bal ? balance : undefined, initial: initialAmount });
   const amt = edited === null ? suggested : pad.value;
   const setAmt = (v: string) => {
     setEdited(v);

@@ -284,10 +284,24 @@ describe("planRuleForAutopilot: earnings", () => {
     expect(plan.ok && plan.intents).toEqual([]);
   });
 
-  it("doesn't buy again once the position is held", async () => {
+  it("doesn't buy again once this window's buy has happened, even with no holdings read at all", async () => {
+    withDate(NOW + 2 * DAY);
+    // The run that bought was yesterday: inside the 3-day window that opened at NOW - 1 day.
+    const plan = await planRuleForAutopilot(bsc, rule, { nowMs: NOW, budgetUsd: 25, lastRunMs: NOW - DAY / 2 });
+    expect(plan.ok && plan.intents).toEqual([]);
+  });
+
+  it("buys on the first day of a window, and again for the next quarter's window", async () => {
+    withDate(NOW + 2 * DAY);
+    // The last run was a whole quarter ago, long before this window opened.
+    const plan = await planRuleForAutopilot(bsc, rule, { nowMs: NOW, budgetUsd: 25, lastRunMs: NOW - 90 * DAY });
+    expect(plan.ok && plan.intents).toEqual([{ symbol: "NVDA", action: "buy", usd: 25, reason: expect.any(String) }]);
+  });
+
+  it("still buys ahead of results when the person already owns some, because holdings aren't the signal", async () => {
     withDate(NOW + 2 * DAY);
     const plan = await planRuleForAutopilot(bsc, rule, { nowMs: NOW, budgetUsd: 25, holdings: [{ symbol: "NVDA", usdValue: 30, tier: "stock" }] });
-    expect(plan.ok && plan.intents).toEqual([]);
+    expect(plan.ok && plan.intents).toEqual([{ symbol: "NVDA", action: "buy", usd: 25, reason: expect.any(String) }]);
   });
 
   it("says plainly that it can't sell after results yet", async () => {

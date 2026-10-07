@@ -32,6 +32,7 @@ import { useChain } from "@/lib/chains/active";
 import { encodeV3Path, singleHopSqrtLimit } from "@/lib/swapRouting";
 import { aggregatorRouterFor, assertDryRunAllowsSend, fetchSwapQuote, usesAggregator } from "@/lib/swapQuote";
 import { feeOf, STAX_TREASURY } from "@/lib/fees";
+import { clearsReviewedFloor, PriceMovedError } from "@/lib/slippage";
 import { usdToRaw } from "@/lib/units";
 import { resolveVenueAddress } from "@/lib/venues";
 
@@ -124,6 +125,8 @@ async function aggregatorCalls(
     amountIn: bigint;
     account: `0x${string}`;
     slippageBps: number;
+    /** The floor the person reviewed (output token, raw). The swap is built to never go below it. */
+    reviewedMinOut: bigint;
     venue?: RwaPlatform;
   },
 ): Promise<{ calls: Call[]; minOut: bigint; dryRun?: DryRun }> {
@@ -134,6 +137,7 @@ async function aggregatorCalls(
     sender: p.account,
     recipient: p.account,
     slippageBps: p.slippageBps,
+    reviewedMinOut: p.reviewedMinOut,
     build: true,
     venue: p.venue,
   });
@@ -147,6 +151,9 @@ async function aggregatorCalls(
   // hasn't sent its first on-chain trade yet, so there's nothing deployed to simulate
   // against) or no check at all (every other chain) both fall through normally.
   assertDryRunAllowsSend(q.dryRun);
+  // The server anchors the build to the reviewed floor (lib/slippage.ts); this is the backstop
+  // that a swap whose minimum sits below what the sheet promised is never signed.
+  if (!clearsReviewedFloor(q.minOut, p.reviewedMinOut)) throw new PriceMovedError();
   // Belt-and-suspenders for the twin-venue bug this guards against elsewhere (TradeScreen's
   // holding lookup, resolveVenueAddress): the approve below is built from OUR resolved
   // `p.tokenIn`, so if the server's quote ever disagreed about which token this trade means,
@@ -262,11 +269,9 @@ export function useSwap() {
             amountIn: netIn,
             account: recipient,
             slippageBps,
+            reviewedMinOut: minOut,
             venue,
           });
-          if (agg.minOut < minOut / BigInt(2)) {
-            throw new Error("The price moved too much since your quote. Please try again.");
-          }
           calls = agg.calls;
           dryRun = agg.dryRun;
         } else if (route) {
@@ -385,11 +390,9 @@ export function useSwap() {
             amountIn,
             account: recipient,
             slippageBps,
+            reviewedMinOut: minUsdcOut,
             venue,
           });
-          if (agg.minOut < minUsdcOut / BigInt(2)) {
-            throw new Error("The price moved too much since your quote. Please try again.");
-          }
           calls = agg.calls;
           dryRun = agg.dryRun;
         } else if (route) {

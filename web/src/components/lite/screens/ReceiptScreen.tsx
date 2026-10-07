@@ -17,6 +17,8 @@ import { haptic } from "@/lib/haptics";
 import { iconBtn } from "./primitives";
 import type { TradeOrder } from "../LiteApp";
 import type { ActivityLeg } from "@/lib/onchainHistory";
+import type { DryRun } from "@/lib/dryRun";
+import { dryRunReceiptRow, holdingWords } from "@/lib/plainCopy";
 
 /** "Sep 7, 2026 · 14:02" */
 function exactTime(ms: number): string {
@@ -37,6 +39,7 @@ export function ReceiptScreen({
   at,
   legs,
   failed,
+  dryRun,
   onClose,
 }: {
   go: (target: string | number, params?: Record<string, unknown>) => void;
@@ -53,6 +56,8 @@ export function ReceiptScreen({
   legs?: ActivityLeg[];
   /** History receipts: the plan reverted on-chain. */
   failed?: boolean;
+  /** BSC manual trade: the Binance check this trade passed right before it was signed. */
+  dryRun?: DryRun;
   /** Closing-the-loop handler from LiteApp; falls back to go(-1). */
   onClose?: () => void;
 }) {
@@ -101,21 +106,25 @@ export function ReceiptScreen({
     const dp = symbol === "aUSDC" || symbol === "USDC" ? 2 : q >= 100 ? 2 : 4;
     return `${q.toLocaleString("en-US", { maximumFractionDigits: dp })} ${toTile(symbol).name === symbol ? symbol : symbol}`;
   };
+  const words = order ? holdingWords(order.unit, order.ticker) : undefined;
+  const checked = dryRunReceiptRow(dryRun);
   const rows: [string, React.ReactNode][] = order
     ? isSell
       ? [
-          ["Shares & price", `${order.qty} ${order.ticker} @ ${usd(order.priceUsd)}`],
+          [words!.quantityRow, `${order.qty} ${order.ticker} @ ${usd(order.priceUsd)}`],
           ["Added to cash", usd(order.amountUsd)],
           ["Status", status],
+          ...(checked ? ([["Checked", checked]] as [string, React.ReactNode][]) : []),
           ["Network", chain.name],
           ["Time", when],
         ]
       : [
-          ["Shares & price", `${order.qty} ${order.ticker} @ ${usd(order.priceUsd)}`],
+          [words!.quantityRow, `${order.qty} ${order.ticker} @ ${usd(order.priceUsd)}`],
           ["Fee", usd(order.feeUsd)],
           ["Status", status],
+          ...(checked ? ([["Checked", checked]] as [string, React.ReactNode][]) : []),
           ["Paid from", "Your cash balance"],
-          ["Ownership", "Real shares, held by you"],
+          ["Ownership", words!.ownership],
           ["Network", chain.name],
           ["Time", when],
         ]

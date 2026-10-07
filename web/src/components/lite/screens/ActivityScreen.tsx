@@ -20,6 +20,7 @@ import { riskLabel, usd } from "@/lib/format";
 import { DEMO_NOW, planSeriesSince, trackRecordSeries } from "@/lib/demoSeries";
 import { iconBtn, Pager } from "./primitives";
 import { useChainReady } from "../useChainReady";
+import { trustLine } from "@/lib/plainCopy";
 
 const PER_PAGE = 10;
 const DAY = 86_400e3;
@@ -347,7 +348,7 @@ export function ActivityScreen({
       )}
 
       <div style={{ padding: "22px 22px 0", display: "flex", justifyContent: "center" }}>
-        <VerifiedBadge label="Every plan signed & recorded by Vera" onClick={() => go("settings")} />
+        <VerifiedBadge label={trustLine("every", ready)} onClick={() => go("settings")} />
       </div>
     </div>
   );

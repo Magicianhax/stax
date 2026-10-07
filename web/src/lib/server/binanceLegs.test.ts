@@ -263,6 +263,18 @@ describe("checkBscBuyable", () => {
     if (!gate.ok) expect(gate.nextOpenMs).toBe(explicit);
   });
 
+  it("refuses a bStock buy on a day the NYSE is shut, even though the issuer's own flags still say TRADING", () => {
+    const AFTER_CLOSE = Date.parse("2026-09-26T16:00:00.000Z"); // Saturday noon ET
+    const gate = checkBscBuyable(
+      [row({ statusInfo: { ...row().statusInfo, marketStatus: null, openState: true, reasonCode: "TRADING" } })],
+      NVDA,
+      "NVDA",
+      AFTER_CLOSE,
+    );
+    expect(gate.ok).toBe(false);
+    if (!gate.ok) expect(gate.message).toMatch(/^NVDA is closed right now/);
+  });
+
   it("fails closed when the token isn't in the catalog at all, and says unavailable, not closed", () => {
     const gate = checkBscBuyable([], NVDA, "NVDA", NOW);
     expect(gate.ok).toBe(false);
@@ -316,6 +328,54 @@ describe("buildBinanceLeg review fixes", () => {
   it("codes the $6 floor 'min_trade' so the client can show it as-is", async () => {
     const err = await buildBinanceLeg(args({ usdValue: 5 })).catch((e) => e);
     expect(err).toBeInstanceOf(BinanceLegRefusal);
+    expect(err.code).toBe("min_trade");
+  });
+});
+
+describe("anchoring the build to the reviewed floor", () => {
+  it("builds with slippage tightened so the minimum never drops under what was reviewed", async () => {
+    // Fresh quote 1000; the person reviewed 1000 at 1%, floor 990. Price slipped to 996 since.
+    quoteSpy.mockResolvedValueOnce({ ...goodQuote, toTokenAmount: BigInt(996) });
+    await buildBinanceLeg(args({ slippageBps: 100, reviewedMinOut: BigInt(990) }));
+    const percent = Number(buildSwapSpy.mock.calls[0][0].slippagePercent);
+    // 996 * (1 - percent/100) must still be >= 990, and tighter than the 1% asked for.
+    expect(percent).toBeLessThan(1);
+    expect(996 * (1 - percent / 100)).toBeGreaterThanOrEqual(990);
+  });
+
+  it("refuses with 'price_moved' when the pool moved past the reviewed floor, building nothing", async () => {
+    quoteSpy.mockResolvedValueOnce({ ...goodQuote, toTokenAmount: BigInt(900) });
+    const err = await buildBinanceLeg(args({ slippageBps: 100, reviewedMinOut: BigInt(990) })).catch((e) => e);
+    expect(err).toBeInstanceOf(BinanceLegRefusal);
+    expect(err.code).toBe("price_moved");
+    expect(buildSwapSpy).not.toHaveBeenCalled();
+  });
+
+  it("leaves a price check (no build) alone", async () => {
+    // A distinct amount, so the shared 15 s price-check cache can't answer from another test.
+    quoteSpy.mockResolvedValueOnce({ ...goodQuote, fromTokenAmount: usdToRaw(bsc, 11), toTokenAmount: BigInt(900) });
+    const leg = await buildBinanceLeg(args({ build: false, amountIn: usdToRaw(bsc, 11), usdValue: 11, reviewedMinOut: BigInt(990) }));
+    expect(leg.expectedOut).toBe(BigInt(900));
+  });
+});
+
+describe("the sell floor", () => {
+  it("lets a position bought at the $6 minimum (worth about $5.97) be sold", async () => {
+    // Binance's own floor is "over $5"; the $6 buffer is for buys only.
+    const leg = await buildBinanceLeg(args({ side: "sell", usdValue: 5.97, tokenIn: NVDA, tokenOut: bsc.usdc.address }));
+    expect(leg.amountIn).toBe(usdToRaw(bsc, 10));
+  });
+
+  it("still refuses a sale at or under $5, with words about selling, not a typed amount", async () => {
+    const err = await buildBinanceLeg(args({ side: "sell", usdValue: 4.99 })).catch((e) => e);
+    expect(err).toBeInstanceOf(BinanceLegRefusal);
+    expect(err.code).toBe("min_trade");
+    expect(err.message).not.toMatch(/Enter/);
+    expect(quoteSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps the $6 buffer for buys", async () => {
+    const err = await buildBinanceLeg(args({ side: "buy", usdValue: 5.97 })).catch((e) => e);
     expect(err.code).toBe("min_trade");
   });
 });

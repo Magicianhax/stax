@@ -18,6 +18,8 @@ import { useMarketSummary } from "@/hooks/useMarket";
 import { usePortfolio } from "@/hooks/useBalances";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
 import { useRwa, primaryVenue } from "@/hooks/useRwa";
+import { useDemo } from "@/components/demo/DemoProvider";
+import { priceOrStatic } from "@/lib/rwa";
 import { Icon, AssetTile, Sparkline, SectionTitle, MarketStatus } from "@/components/design";
 import { MarketStatusBadge } from "@/components/lite/rwa/MarketStatusBadge";
 import { Reveal } from "@/components/motion";
@@ -108,7 +110,8 @@ export function MarketScreen({
   // BSC only: each row's on-chain price sits next to its issuer, so the venue's own state and
   // its gap vs the real share replace the day-change sparkline other chains show (BSC has no
   // live intraday history source yet, and a demo sparkline would be a lie about a real venue).
-  const { data: rwa } = useRwa();
+  const { data: rwa, isError: rwaFailed } = useRwa();
+  const isDemo = useDemo() !== null;
   const rwaByTicker = useMemo(() => new Map((rwa?.tickers ?? []).map((t) => [t.ticker, t])), [rwa]);
   // Design critique P1 #9: the header's own clock (the BSC header chip below, off BSC
   // `<MarketStatus />`) already says whether the US market is open — a row only needs its own
@@ -155,7 +158,7 @@ export function MarketScreen({
     const up = day >= 0;
     // Real venue spot when available; fall back to the indicative reference.
     const p = prices?.prices[asset.symbol];
-    let shownPrice = p?.priceUsd ?? d.price;
+    let shownPrice = priceOrStatic({ bsc: chain.key === "bsc", demo: isDemo, live: p?.priceUsd, staticPrice: d.price });
     const coming = Boolean(asset.coming || d.coming);
     const safe = asset.tier === "safe";
     const sub = safe ? yieldLine(p?.apy, d.apy, true) ?? (d.ticker ?? asset.symbol) : (d.ticker ?? asset.symbol);
@@ -329,6 +332,11 @@ export function MarketScreen({
       {/* "Which is cheaper?" entry — BSC only: some stocks here have two versions (bStock and
           Ondo). A dedicated card, not a category chip, because it's a comparison across the
           whole list, not a filter of it. */}
+      {chain.key === "bsc" && rwaFailed && !rwa && (
+        <p role="status" style={{ margin: "14px 22px 0", fontSize: 13, color: "var(--ink-2)", lineHeight: 1.5 }}>
+          Couldn’t load live prices just now. They’ll show up here as soon as we can reach them.
+        </p>
+      )}
       {chain.key === "bsc" && (
         <div style={{ padding: "14px 22px 0" }}>
           <button

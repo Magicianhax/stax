@@ -115,20 +115,14 @@ export function riskLine(risk: AssetRisk | undefined): string {
   return "";
 }
 
-export type DryRunLine = { kind: "none" } | { kind: "quiet"; text: string } | { kind: "blocking"; text: string };
-
 /**
- * What Trade/Plan should render for a Binance Transaction API dry run (Task: wave-5 "dryrun"
- * stream attaches `DryRun` to the quote). Never claims a check that didn't run: "skipped" and no
- * dry run at all both render nothing, only "passed" earns the quiet confirmation line, and
- * "failed" surfaces Binance's reason (or a safe fallback) and tells the caller to block confirm.
+ * The receipt's line for a trade Binance checked before it was sent (the Transaction API
+ * simulate, run at build time right before signing — see /api/swap-quote). Never claims a check
+ * that didn't run: only "passed" earns the row. A "failed" check never reaches a receipt (the
+ * trade isn't sent), and "skipped" or no dry run says nothing.
  */
-export function dryRunLine(dryRun: DryRun | undefined, qty: string, symbol: string): DryRunLine {
-  if (!dryRun || dryRun.status === "skipped") return { kind: "none" };
-  if (dryRun.status === "passed") {
-    return { kind: "quiet", text: `Checked with Binance · you'll get about ${qty} ${symbol}` };
-  }
-  return { kind: "blocking", text: dryRun.reason ?? "Binance couldn't confirm this trade would go through." };
+export function dryRunReceiptRow(dryRun: DryRun | undefined): string | null {
+  return dryRun?.status === "passed" ? "Checked with Binance before it was sent" : null;
 }
 
 /** The Buy button's words when the chosen issuer won't fill a buy right now (P2 #15). */
@@ -149,4 +143,29 @@ export function planOpenIssuerNote(usMarketOpen: boolean | undefined, venues: re
   const names = (["bstock", "ondo"] as const).filter((p) => venues.includes(p)).map((p) => ISSUER_LABEL[p]);
   if (names.length === 0) return "";
   return `The US market is closed. Vera buys from ${names.join(" and ")}, which ${names.length > 1 ? "are" : "is"} open now.`;
+}
+
+/**
+ * The trust line under a plan, a basket or the activity feed. "Vera signs and records" is true
+ * only on the executor path (`chain.contracts.deployed`): on BNB Chain the plan goes straight
+ * from the person's own account and nothing is signed with Vera's key or written on-chain, so
+ * there the line says what does happen, Binance checking each trade first.
+ */
+export type TrustLineKind = "every" | "plan" | "basket";
+export function trustLine(kind: TrustLineKind, executorPath: boolean): string {
+  if (!executorPath) return kind === "every" ? "Every trade is checked by Binance first" : "Binance checks each trade before it's sent";
+  if (kind === "every") return "Every plan signed & recorded by Vera";
+  if (kind === "plan") return "Vera will sign & record this plan";
+  return "Vera signs the risk before each invest";
+}
+
+/**
+ * Receipt and review wording for what a trade holds. A stock is "real shares, held by you"; a
+ * coin (BTCB, ETH, BNB) or a dollar fund is a token in the account, and calling it a share would
+ * be wrong for someone who has never held crypto. `unit` is TradeOrder.unit: "shares" for stocks,
+ * the ticker for everything else.
+ */
+export function holdingWords(unit: string, ticker: string): { quantityRow: string; ownership: string } {
+  if (unit === "shares") return { quantityRow: "Shares & price", ownership: "Real shares, held by you" };
+  return { quantityRow: "Amount & price", ownership: `Held in your account as ${ticker}` };
 }

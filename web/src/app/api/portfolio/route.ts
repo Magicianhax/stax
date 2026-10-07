@@ -12,10 +12,10 @@ import { isAddress } from "viem";
 import type { ChainKey, StaxChain } from "@/lib/chains/types";
 import { priceAll } from "@/lib/prices";
 import { fromUnits } from "@/lib/format";
-import { buildAssetRows, type PortfolioHoldingRow } from "@/lib/portfolioRows";
+import { buildAssetRows, portfolioTotals, type PortfolioHoldingRow } from "@/lib/portfolioRows";
 import { chainFromRequest, serverClient } from "@/lib/server/chain";
 import { getBinanceWeb3 } from "@/lib/server/binance";
-import { bscBalanceMap } from "@/lib/server/bscBalances";
+import { bscBalanceMap, rpcCashRaw } from "@/lib/server/bscBalances";
 import { getSavingsBalanceUsd } from "@/lib/server/savings";
 import { getDaySummary } from "@/lib/server/marketData";
 import { rateLimit, clientIp } from "@/lib/server/rateLimit";
@@ -64,6 +64,7 @@ export async function GET(req: NextRequest) {
 
   const chain = chainFromRequest(req);
   const client = serverClient(chain);
+  const fresh = req.nextUrl.searchParams.get("fresh") === "1";
 
   try {
     const assets = chain.assets.all.filter((a) => a.address && a.decimals);
@@ -77,7 +78,9 @@ export async function GET(req: NextRequest) {
     ];
 
     const [balanceMap, prices, day, twinPrices, savingsUsd] = await Promise.all([
-      bscBalanceMap(chain, client, address as `0x${string}`, readAddresses),
+      // `?fresh=1` is what a screen sends right after its own trade or Savings move: it skips the
+      // 45 s Wallet API cache (at most once per 2 s per address), so Home doesn't animate stale numbers.
+      bscBalanceMap(chain, client, address as `0x${string}`, readAddresses, { fresh }),
       cachedPrices(chain),
       getDaySummary(chain).catch(() => ({}) as Awaited<ReturnType<typeof getDaySummary>>),
       twinPricesByAddress(chain),
@@ -94,7 +97,14 @@ export async function GET(req: NextRequest) {
     //
     // One accessor for whichever source(s) answered: an address absent from the merged map means
     // "not held" (0n for cash/default rows; `undefined`, not a row at all, for a twin).
-    const cashRaw = balanceMap.get(chain.usdc.address.toLowerCase()) ?? BigInt(0);
+    // Right after the person's own trade (`?fresh=1`) cash is read from the chain itself, the same
+    // source Wallet's own cash figure uses: the Wallet API can lag a block behind a trade, and Home
+    // and Wallet must agree on the number the success animation counts from. Otherwise (and when
+    // that read fails) the merged map's value stands.
+    const cashRaw =
+      (fresh ? await rpcCashRaw(chain, client, address as `0x${string}`) : null) ??
+      balanceMap.get(chain.usdc.address.toLowerCase()) ??
+      BigInt(0);
     const cashUsd = fromUnits(cashRaw, chain.usdc.decimals);
 
     const defaultRawFor = (asset: (typeof assets)[number]): bigint => balanceMap.get(asset.address!.toLowerCase()) ?? BigInt(0);
@@ -123,21 +133,23 @@ export async function GET(req: NextRequest) {
     // Largest value first, unpriced last.
     holdings.sort((a, b) => (b.valueUsd ?? 0) - (a.valueUsd ?? 0));
     // Savings isn't a holding row (it has no matching chain.assets entry — it's a vUSDT position,
-    // not a stock or a twin), but it's still the user's money: folded straight into the total so
-    // moving cash into Savings never makes net worth look like it dropped.
-    const investedUsd = holdings.reduce((s, h) => s + (h.valueUsd ?? 0), 0) + (savingsUsd ?? 0);
+    // not a stock or a twin), but it's still the user's money: it counts in the total so moving
+    // cash into Savings never makes net worth look like it dropped. It stays OUT of investedUsd,
+    // and `savingsUsd` is returned on its own, so every screen adds it exactly once instead of
+    // Home and Wallet each adding it on top of a total that already held it.
+    const { investedUsd, savingsUsd: savings, totalUsd } = portfolioTotals({ holdings, cashUsd, savingsUsd });
 
     return Response.json(
       {
         chain: chain.key,
         cashUsd,
         investedUsd,
-        totalUsd: cashUsd + investedUsd,
-        savingsUsd: savingsUsd ?? 0,
+        totalUsd,
+        savingsUsd: savings,
         holdings,
         asOf: new Date().toISOString(),
       },
-      { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30" } },
+      { headers: { "Cache-Control": fresh ? "no-store" : "public, s-maxage=10, stale-while-revalidate=30" } },
     );
   } catch (err) {
     return serverError("portfolio", err);

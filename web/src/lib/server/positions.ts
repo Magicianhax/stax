@@ -24,6 +24,7 @@ import { ERC20_ABI } from "@/lib/abis";
 import { STAX_FEE_BPS, STAX_TREASURY } from "@/lib/fees";
 import { fromUnits } from "@/lib/format";
 import { priceAll } from "@/lib/prices";
+import { manualTrades, type TxGroup } from "@/lib/manualTrades";
 import { serverClient } from "@/lib/server/chain";
 import { getWalletTransfers } from "@/lib/server/walletTransfers";
 import type { MarketRange } from "@/hooks/useMarket";
@@ -157,16 +158,6 @@ async function veraFills(chain: StaxChain, account: `0x${string}`): Promise<{ tr
   return { trades: [...merged.values()], txs };
 }
 
-interface TxGroup {
-  hash: string;
-  at: number;
-  usdcOut: number;
-  usdcIn: number;
-  feeOut: number;
-  assetIn: Map<string, number>;
-  assetOut: Map<string, number>;
-}
-
 /** Wallet transfers grouped by tx, with the fee transfer to the treasury separated out. */
 async function transferGroups(chain: StaxChain, account: `0x${string}`): Promise<{ groups: Map<string, TxGroup>; partial: boolean }> {
   // The provider is flaky on wide pages ("Something went wrong" / 429): a second,
@@ -194,29 +185,6 @@ async function transferGroups(chain: StaxChain, account: `0x${string}`): Promise
     }
   }
   return { groups, partial: txs.length === 0 };
-}
-
-/** Manual buys / sells from transfer groups not already explained by Vera fills. */
-function manualTrades(chain: StaxChain, groups: Map<string, TxGroup>, veraTxs: Set<string>): Trade[] {
-  const known = new Set(chain.assets.all.map((a) => a.symbol));
-  const safe = new Set(chain.assets.safe.map((a) => a.symbol));
-  const out: Trade[] = [];
-  for (const g of groups.values()) {
-    if (veraTxs.has(g.hash)) continue;
-    const ins = [...g.assetIn].filter(([s]) => known.has(s));
-    const outs = [...g.assetOut].filter(([s]) => known.has(s));
-    if (ins.length === 1 && outs.length === 0 && g.usdcOut > 0) {
-      const [symbol, qty] = ins[0];
-      // Aave supply is 1:1 by construction; everything else cost what left the account, fee included.
-      const usdc = safe.has(symbol) ? qty : g.usdcOut + g.feeOut;
-      out.push({ symbol, txHash: g.hash, at: g.at, qty, usdc: Math.round(usdc * 1e6) / 1e6, kind: "manual", side: "buy" });
-    } else if (outs.length === 1 && ins.length === 0 && g.usdcIn > 0) {
-      const [symbol, qty] = outs[0];
-      out.push({ symbol, txHash: g.hash, at: g.at, qty, usdc: g.usdcIn, kind: "manual", side: "sell" });
-    }
-    // Deposits, sends, multi-asset routes: not a priced trade — ignored.
-  }
-  return out;
 }
 
 async function loadLedger(chain: StaxChain, account: `0x${string}`): Promise<Ledger> {
@@ -253,8 +221,15 @@ async function loadLedger(chain: StaxChain, account: `0x${string}`): Promise<Led
     }
   }
 
-  const trades = sortTrades([...vera.trades, ...manualTrades(chain, groups, vera.txs)]);
-  const symbols = [...new Set(trades.map((t) => t.symbol))];
+  const manualOpts = {
+    knownSymbols: new Set(chain.assets.all.map((a) => a.symbol)),
+    safeSymbols: new Set(chain.assets.safe.map((a) => a.symbol)),
+    veraTxs: vera.txs,
+  };
+  // A first pass finds every symbol that has a lot (a multi-leg plan splits its cash by the value
+  // each holding received, which needs a price); the second pass is the real ledger.
+  const firstPass = sortTrades([...vera.trades, ...manualTrades(groups.values(), manualOpts)]);
+  const symbols = [...new Set(firstPass.map((t) => t.symbol))];
   const assets = chain.assets.all.filter((a) => symbols.includes(a.symbol));
   const prices: Record<string, number | undefined> = {};
   if (assets.length) {
@@ -265,6 +240,7 @@ async function loadLedger(chain: StaxChain, account: `0x${string}`): Promise<Led
       console.warn(`[positions] prices failed on ${chain.key}:`, err instanceof Error ? err.message : err);
     }
   }
+  const trades = sortTrades([...vera.trades, ...manualTrades(groups.values(), { ...manualOpts, priceOf: (s) => prices[s] })]);
   return { trades, cashUsd: fromUnits(cashRaw, chain.usdc.decimals), prices, coverageFrom: coverage, asOf: Date.now(), partial: transfers.partial };
 }
 

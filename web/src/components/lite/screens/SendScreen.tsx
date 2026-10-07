@@ -14,10 +14,16 @@ import { useAmountKeypad, toAmountString } from "@/hooks/useAmountKeypad";
 import { TokenLogo } from "@/components/lite/TokenLogo";
 import { useChain } from "@/lib/chains/active";
 import { usd, tokenQty, fromUnits, shortAddress, txUrl } from "@/lib/format";
+import { holdingKey, holdingToken } from "@/lib/venues";
+import { PLATFORM_LABEL } from "@/components/lite/rwa/VenuePicker";
 import { iconBtn, Spinner } from "./primitives";
 
 interface Sendable {
+  /** Unique per row: holdingKey for a stock (one symbol can be two rows, one per issuer), the symbol for cash. */
+  key: string;
   symbol: string;
+  /** BSC: "bStock" / "Ondo" when the ticker is held through both issuers, so two rows can be told apart. */
+  issuer?: string;
   name: string;
   address: `0x${string}`;
   decimals: number;
@@ -41,6 +47,7 @@ export function SendScreen({
   // Sendable assets: cash (USDC) first, then every held token.
   const assets: Sendable[] = useMemo(() => {
     const cash: Sendable = {
+      key: chain.usdc.symbol,
       symbol: chain.usdc.symbol,
       name: "US Dollar",
       address: chain.usdc.address,
@@ -48,21 +55,30 @@ export function SendScreen({
       raw: bal?.raw ?? BigInt(0),
       priceUsd: 1,
     };
-    const held = (port?.holdings ?? [])
-      .filter((h) => h.asset.address && h.asset.decimals)
-      .map((h) => ({
+    const rows = port?.holdings ?? [];
+    const symbolCount = new Map<string, number>();
+    for (const h of rows) symbolCount.set(h.asset.symbol, (symbolCount.get(h.asset.symbol) ?? 0) + 1);
+    const held: Sendable[] = [];
+    for (const h of rows) {
+      // The token this row's balance is in: a twin row is the OTHER issuer's mint, not asset.address.
+      const token = holdingToken(chain, h);
+      if (!token) continue;
+      held.push({
+        key: holdingKey(h),
         symbol: h.asset.symbol,
+        ...(h.venue && (symbolCount.get(h.asset.symbol) ?? 0) > 1 ? { issuer: PLATFORM_LABEL[h.venue] } : {}),
         name: h.asset.name,
-        address: h.asset.address as `0x${string}`,
-        decimals: h.asset.decimals as number,
+        address: token.address,
+        decimals: token.decimals,
         raw: h.raw,
         priceUsd: h.priceUsd,
-      }));
+      });
+    }
     return [cash, ...held];
   }, [bal?.raw, port?.holdings, chain]);
 
   const [sel, setSel] = useState(() => {
-    const i = assets.findIndex((a) => a.symbol === initialSymbol);
+    const i = assets.findIndex((a) => a.key === initialSymbol || a.symbol === initialSymbol);
     return i >= 0 ? i : 0;
   });
   const asset = assets[Math.min(sel, assets.length - 1)];
@@ -226,7 +242,7 @@ export function SendScreen({
             const on = i === sel;
             return (
               <button
-                key={a.symbol}
+                key={a.key}
                 onClick={() => { setSel(i); pad.setValue(""); setConfirming(false); }}
                 className="tap"
                 style={{
@@ -246,6 +262,7 @@ export function SendScreen({
                 <TokenLogo symbol={a.symbol} name={a.name} size={30} />
                 <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 1 }}>
                   <span>{a.symbol}</span>
+                  {a.issuer && <span style={{ fontSize: 11.5, fontWeight: 500, opacity: on ? 0.85 : 0.6 }}>from {a.issuer}</span>}
                   <span style={{ fontSize: 11.5, fontWeight: 500, opacity: on ? 0.85 : 0.6 }}>
                     {tokenQty(a.raw, a.decimals)}
                   </span>

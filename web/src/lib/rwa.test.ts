@@ -1,7 +1,7 @@
 // The two rules the whole market-hours layer rests on: what "buyable" means, and how the
 // gap between a token and the real share is measured.
 import { describe, expect, it } from "vitest";
-import { BSC_MIN_LEG_USD, gapPct, isBuyable, marketStateFrom } from "./rwa";
+import { BSC_MIN_LEG_USD, BSC_MIN_SELL_USD, gapPct, isBuyable, marketStateFrom, minLegUsd, sellShareClearsFloor, bscSellBlocked, venueBuyable, venueState, priceOrStatic } from "./rwa";
 
 describe("isBuyable", () => {
   it("is true only when open AND trading", () => {
@@ -54,5 +54,70 @@ describe("marketStateFrom", () => {
   it("is null when the API gives no session, so the caller falls back to the US calendar", () => {
     // Every bStock row looks like this.
     expect(marketStateFrom({ marketStatus: null, reasonCode: "TRADING" })).toBeNull();
+  });
+});
+
+describe("the sell floor", () => {
+  it("is Binance's real floor, below the buy buffer", () => {
+    expect(minLegUsd("buy")).toBe(BSC_MIN_LEG_USD);
+    expect(minLegUsd("sell")).toBe(BSC_MIN_SELL_USD);
+    expect(BSC_MIN_SELL_USD).toBeGreaterThan(5);
+    expect(BSC_MIN_SELL_USD).toBeLessThan(BSC_MIN_LEG_USD);
+  });
+
+  it("lets All through on a $5.97 position but not 50%", () => {
+    expect(sellShareClearsFloor(5.97, 100)).toBe(true);
+    expect(sellShareClearsFloor(5.97, 50)).toBe(false);
+  });
+
+  it("disables 25% under $20.04 and leaves chips on when the value is unknown", () => {
+    expect(sellShareClearsFloor(24, 25)).toBe(true);
+    expect(sellShareClearsFloor(20, 25)).toBe(false);
+    expect(sellShareClearsFloor(undefined, 25)).toBe(true);
+    expect(sellShareClearsFloor(Number.NaN, 25)).toBe(true);
+  });
+});
+
+describe("bscSellBlocked", () => {
+  it("never blocks a crypto sell, which has no catalog row", () => {
+    expect(bscSellBlocked("crypto", undefined)).toBe(false);
+  });
+  it("blocks a stock until its issuer is buyable, and fails closed with no row", () => {
+    expect(bscSellBlocked("stock", undefined)).toBe(true);
+    expect(bscSellBlocked("stock", { buyable: false })).toBe(true);
+    expect(bscSellBlocked("stock", { buyable: true })).toBe(false);
+  });
+});
+
+describe("venueBuyable: the trade gate and the catalog share one rule", () => {
+  const bstockTrading = { openState: true, marketStatus: null, reasonCode: "TRADING" as const };
+  const THU_OPEN = Date.parse("2026-09-24T15:00:00.000Z"); // 11:00 ET
+  const FRI_AFTER_CLOSE = Date.parse("2026-09-26T16:00:00.000Z"); // Saturday noon ET: the NYSE is shut
+
+  it("lets a trading bStock row through while the US market is open", () => {
+    expect(venueBuyable(bstockTrading, THU_OPEN)).toBe(true);
+  });
+
+  it("refuses the same row on a closed day even though the issuer still says TRADING (no weekend-premium buys)", () => {
+    expect(venueState(bstockTrading, FRI_AFTER_CLOSE)).toBe("closed");
+    expect(venueBuyable(bstockTrading, FRI_AFTER_CLOSE)).toBe(false);
+  });
+
+  it("still lets Ondo trade overnight, because its own session says so", () => {
+    const ondoOvernight = { openState: true, marketStatus: "overnight" as const, reasonCode: "TRADING" as const };
+    expect(venueBuyable(ondoOvernight, FRI_AFTER_CLOSE)).toBe(true);
+  });
+});
+
+describe("priceOrStatic", () => {
+  it("prefers a live price everywhere", () => {
+    expect(priceOrStatic({ bsc: true, demo: false, live: 201.5, staticPrice: 134.19 })).toBe(201.5);
+  });
+  it("falls back to the display table on Base and Mantle and in the demo, as before", () => {
+    expect(priceOrStatic({ bsc: false, demo: false, live: null, staticPrice: 134.19 })).toBe(134.19);
+    expect(priceOrStatic({ bsc: true, demo: true, live: undefined, staticPrice: 134.19 })).toBe(134.19);
+  });
+  it("shows no price on BNB Chain when Binance gave none, never the hard-coded table's number", () => {
+    expect(priceOrStatic({ bsc: true, demo: false, live: null, staticPrice: 134.19 })).toBeUndefined();
   });
 });

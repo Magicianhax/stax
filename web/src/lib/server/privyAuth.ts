@@ -11,6 +11,7 @@ import "server-only";
 import { PrivyClient } from "@privy-io/node";
 import { waitUntil } from "@vercel/functions";
 import { touchUser } from "@/lib/server/users";
+import type { PrivyEmbeddedWallet } from "@/lib/server/privyWallets";
 
 const APP_ID = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
 const APP_SECRET = process.env.PRIVY_APP_SECRET;
@@ -172,6 +173,23 @@ export async function fetchPrivyWallets(userId: string): Promise<PrivyWallet[]> 
     } else if (acct.type === "smart_wallet" && acct.address) {
       out.push({ address: acct.address.toLowerCase(), kind: "smart_wallet" });
     }
+  }
+  return out;
+}
+
+/**
+ * The user's own Privy-managed (embedded) Ethereum wallets, with their wallet ids. Autopilot
+ * signs server-side for a (walletId, owner) pair, so that pair must come from here, never from
+ * the request body. Throws when Privy cannot be reached: "unknown" must not read as "owns it".
+ */
+export async function fetchPrivyEmbeddedWallets(userId: string): Promise<PrivyEmbeddedWallet[]> {
+  const user = await privy().users()._get(userId);
+  const out: PrivyEmbeddedWallet[] = [];
+  for (const acct of user.linked_accounts) {
+    if (acct.type !== "wallet" || acct.chain_type !== "ethereum" || acct.connector_type !== "embedded") continue;
+    // Only an embedded wallet carries an id (the one the server signs with).
+    const id = "id" in acct ? acct.id : null;
+    if (id && acct.address) out.push({ id, address: acct.address });
   }
   return out;
 }

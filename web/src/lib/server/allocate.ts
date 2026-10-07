@@ -16,6 +16,7 @@ import { generateObject } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { AllocationSchema, type Allocation } from "@/lib/allocation-schema";
 import { investableAssets, isRoutable } from "@/lib/chains";
+import { riskScoreFor } from "@/lib/baskets";
 import type { Asset, StaxChain } from "@/lib/chains/types";
 import {
   AllocationRefusal,
@@ -26,6 +27,8 @@ import {
   maxBscLegs,
   minLegFloorMessage,
   parseCryptoMix,
+  planChangeNote,
+  roundLegWeights,
   unavailableNote,
   venueAddressFor,
   withoutUnaskedRisk,
@@ -53,6 +56,8 @@ interface BscPromptInfo {
   cryptoMix?: CryptoMixRequest;
   /** True when every stock market is shut right now AND crypto was asked for — see bscRules below. */
   stocksClosed?: boolean;
+  /** True when the goal names only crypto ("put $50 in bitcoin"): no stock is in the list at all. */
+  cryptoOnly?: boolean;
 }
 
 function systemPrompt(chain: StaxChain, universe: Asset[], bsc?: BscPromptInfo): string {
@@ -73,6 +78,12 @@ function systemPrompt(chain: StaxChain, universe: Asset[], bsc?: BscPromptInfo):
               `- These names are NOT in the list above and must never be picked, because they aren't tradeable right now: ${bsc.unavailable.join("; ")}. If the user's goal mentions one of them by name, say in your rationale that it's temporarily unavailable (market closed or paused) and suggest a close alternative from the list instead.`,
             ]
           : []),
+        ...(bsc.cryptoOnly
+          ? [
+              `- The user asked for crypto only, so no 'stock' tier asset is in the list above at all: put the whole plan into the 'crypto' tier picks.`,
+            ]
+          : [])
+        ,
         ...(bsc.stocksClosed
           ? [
               `- Every stock market is closed right now, so no 'stock' tier asset is in the list above at all: this plan can ONLY use 'crypto' tier picks. Say plainly in your rationale that the stock market is shut right now and this plan puts the money into crypto instead.`,
@@ -121,7 +132,10 @@ export async function buildAllocation(
     const catalog = await bscCatalogSnapshot(Date.now());
     const buyable = buyableTickers(catalog.tickers);
     const buyableSymbols = new Set(buyable.map((t) => t.ticker));
-    let cryptoMix = parseCryptoMix(goal) ?? undefined;
+    // Stock names the goal may mention beside crypto ("NVDA and bitcoin"), so only a goal that names
+    // crypto alone is read as crypto-only.
+    const stockNames = chain.assets.all.filter((a) => a.tier === "stock").flatMap((a) => [a.symbol, a.name]);
+    let cryptoMix = parseCryptoMix(goal, stockNames) ?? undefined;
     // Crypto has no market hours and isn't in the RWA catalog at all, so it's judged solely by
     // isRoutable (always tradeable) rather than the stock catalog's buyable-right-now gate — and
     // it only joins Vera's universe when the goal actually asked for it (default: stocks only).
@@ -140,7 +154,11 @@ export async function buildAllocation(
       cryptoMix = { cryptoPct: 100 };
     }
     // Leveraged funds stay out unless the goal asks for them (design critique P1 #6).
-    universe = [...withoutUnaskedRisk(universe.filter((a) => buyableSymbols.has(a.symbol)), goal), ...cryptoUniverse];
+    const cryptoOnly = Boolean(cryptoMix) && cryptoMix!.cryptoPct >= 100 && cryptoUniverse.length > 0;
+    universe = [
+      ...(cryptoOnly ? [] : withoutUnaskedRisk(universe.filter((a) => buyableSymbols.has(a.symbol)), goal)),
+      ...cryptoUniverse,
+    ];
     catalogBySymbol = new Map(catalog.tickers.map((t) => [t.ticker, t]));
     const maxLegs = maxBscLegs(amountUsd);
     if (maxLegs === 0) {
@@ -153,6 +171,7 @@ export async function buildAllocation(
       unavailable: catalog.tickers.filter((t) => !buyableSymbols.has(t.ticker)).map((t) => unavailableNote(t, Date.now())),
       cryptoMix,
       stocksClosed: stocksClosed && Boolean(cryptoMix),
+      cryptoOnly: cryptoOnly && !stocksClosed,
     };
   }
 
@@ -206,14 +225,17 @@ export async function buildAllocation(
   if (!capped.ok) {
     throw new AllocationRefusal(capped.message);
   }
-  const allocations = capped.legs.map((l) => {
+  // Weights that sum to exactly 100.00 with the slack on the largest leg, so the invest-time
+  // split (which divides by the weights' own sum) can't size a $6.00 leg at $5.9994.
+  const weights = roundLegWeights(capped.legs.map((l) => l.usd), amountUsd);
+  const allocations = capped.legs.map((l, i) => {
     const asset = assetsBySymbol.get(l.symbol);
     // Crypto isn't an RWA token, so it has no catalog venue to resolve — its address comes
     // straight from the chain's own asset registry instead.
     if (asset?.tier === "crypto") {
       return {
         symbol: l.symbol,
-        weightPct: Math.round((l.usd / amountUsd) * 10000) / 100,
+        weightPct: weights[i],
         reason: l.reason,
         ...(asset.address ? { address: asset.address } : {}),
       };
@@ -222,14 +244,27 @@ export async function buildAllocation(
     const address = venueAddressFor(ticker);
     return {
       symbol: l.symbol,
-      weightPct: Math.round((l.usd / amountUsd) * 10000) / 100,
+      weightPct: weights[i],
       reason: l.reason,
       ...(ticker?.bestVenue ? { venue: ticker.bestVenue } : {}),
       ...(address ? { address } : {}),
     };
   });
 
-  return { ...object, allocations };
+  // The model wrote its summary, rationale and risk before the server dropped legs under the floor
+  // or added a crypto leg for the requested mix. Say what changed, and never let the risk meter
+  // sit below what the final legs imply (a 4-name "Balanced" plan cut to one stock isn't).
+  const note = planChangeNote({
+    modelSymbols: filtered.map((a) => a.symbol),
+    finalSymbols: allocations.map((a) => a.symbol),
+    nameOf: (s) => assetsBySymbol.get(s)?.name ?? s,
+  });
+  return {
+    ...object,
+    ...(note ? { rationale: `${object.rationale} ${note}` } : {}),
+    riskScore: Math.min(10_000, Math.max(object.riskScore, riskScoreFor(chain, allocations))),
+    allocations,
+  };
 }
 
 export { MODEL as ALLOCATE_MODEL };

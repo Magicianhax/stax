@@ -70,3 +70,22 @@ export function pickHolding<H extends { asset: { symbol: string }; venue?: RwaPl
 export function holdingKey(h: { asset: { symbol: string }; venue?: RwaPlatform }): string {
   return h.venue ? `${h.asset.symbol}:${h.venue}` : h.asset.symbol;
 }
+
+/**
+ * The token a holding row actually is: its own issuer's address and decimals. A row's `raw` is
+ * the balance of THAT token (a twin row is the other issuer's mint, sized in its own decimals),
+ * so anything that moves the balance (Send) has to act on this token, never on `asset.address`,
+ * which is always the default issuer's. Null when the row's issuer can't be resolved.
+ */
+export function holdingToken(
+  chain: StaxChain,
+  h: { asset: Asset; venue?: RwaPlatform },
+): { address: `0x${string}`; decimals: number } | null {
+  const resolved = resolveVenueAddress(chain, h.asset, h.venue);
+  if (!resolved) return null;
+  const twin = h.asset.twin;
+  const isTwin = twin !== undefined && resolved.address.toLowerCase() === twin.address.toLowerCase();
+  const decimals = isTwin ? twin.decimals : h.asset.decimals;
+  if (decimals === undefined) return null;
+  return { address: resolved.address, decimals };
+}

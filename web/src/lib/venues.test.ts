@@ -3,7 +3,7 @@
 // need the same answer, so it is pure and tested here rather than re-derived in each caller.
 import { describe, expect, it } from "vitest";
 import { getChain } from "./chains";
-import { holdingKey, holdingVenue, pickHolding, resolveVenueAddress } from "./venues";
+import { holdingKey, holdingToken, holdingVenue, pickHolding, resolveVenueAddress } from "./venues";
 
 const bsc = getChain("bsc");
 const base = getChain("base");
@@ -88,5 +88,29 @@ describe("pickHolding / holdingKey", () => {
   it("gives the two issuers of one symbol different keys", () => {
     expect(holdingKey(rows[0])).not.toBe(holdingKey(rows[1]));
     expect(holdingKey({ asset: { symbol: "AAPL" } })).toBe("AAPL");
+  });
+});
+
+describe("holdingToken", () => {
+  it("is the default issuer's token for the default row", () => {
+    expect(holdingToken(bsc, { asset: nvda, venue: nvda.platform })).toEqual({ address: nvda.address, decimals: nvda.decimals });
+  });
+
+  it("is the OTHER issuer's token, in its own decimals, for a twin row (Send must not move the default token)", () => {
+    const t = holdingToken(bsc, { asset: nvda, venue: nvda.twin!.platform })!;
+    expect(t.address).toBe(nvda.twin!.address);
+    expect(t.address).not.toBe(nvda.address);
+    expect(t.decimals).toBe(nvda.twin!.decimals);
+  });
+
+  it("is the asset's own token when the row has no venue (Base and Mantle)", () => {
+    const nvdaBase = base.assets.all.find((a) => a.symbol === "NVDA");
+    if (!nvdaBase) return;
+    expect(holdingToken(base, { asset: nvdaBase })).toEqual({ address: nvdaBase.address, decimals: nvdaBase.decimals });
+  });
+
+  it("is null for an issuer the asset doesn't list", () => {
+    const amzn = bsc.assets.all.find((a) => a.symbol === "AMZN")!;
+    expect(holdingToken(bsc, { asset: amzn, venue: "bstock" })).toBeNull();
   });
 });

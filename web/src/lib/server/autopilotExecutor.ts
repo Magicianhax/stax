@@ -32,6 +32,8 @@ import { resolveVenueAddress } from "@/lib/venues";
 import { serverClient } from "@/lib/server/chain";
 import { recordRun, logRun, pauseAutopilot } from "@/lib/server/autopilotStore";
 import { planAutopilotRun } from "@/lib/server/autopilotPlan";
+import { AllocationRefusal } from "@/lib/server/bscPlan";
+import { BinanceLegRefusal } from "@/lib/server/binanceLegs";
 import { getServerSmartAccountClient } from "@/lib/server/privySmartAccount";
 import { buildLegs } from "@/lib/legBuilder";
 import { buildPlanId, recHash, signRiskInference } from "@/lib/eip712";
@@ -57,6 +59,29 @@ export interface RunResult {
    * default) leaves the existing text-based `isPermanent` check in charge, same as before.
    */
   retryable?: boolean;
+  /**
+   * A successful run that found nothing to do (a rule whose condition wasn't met): the plain
+   * sentence the Activity row carries, so "Run now" can say it instead of "Vera invested for you".
+   */
+  receipt?: string;
+}
+
+/**
+ * Words for a refusal Stax's own planning rules made (the market is closed, the amount is under
+ * Binance's $6 per holding). A decided, honest state, not a fault: logged as "skipped" so the
+ * person sees it in Activity, and never retried inside the same cron tick. Anything else is a
+ * real fault and is rethrown. A "route" refusal's words are for logs, never a screen.
+ */
+function planningRefusalReason(err: unknown): string | null {
+  if (err instanceof AllocationRefusal) return err.message;
+  if (err instanceof BinanceLegRefusal) {
+    if (err.code === "min_trade") {
+      return "This run's amount is too small to give every holding Binance's $6 minimum. Raise the amount in Autopilot.";
+    }
+    if (err.code === "route") return null;
+    return err.message;
+  }
+  return null;
 }
 
 /**
@@ -103,7 +128,15 @@ export async function runAutopilot(
   // 2. The plan: the basket's fixed weights, Vera's allocation for the saved goal, or a rule's
   //    buy/sell intents. Whichever it is, it resolves to one Allocation + spend amount below —
   //    steps 3 onward never need to know which kind of plan produced them.
-  const plan = await planAutopilotRun(working, chain, now);
+  let plan: Awaited<ReturnType<typeof planAutopilotRun>>;
+  try {
+    plan = await planAutopilotRun(working, chain, now);
+  } catch (err) {
+    const reason = planningRefusalReason(err);
+    if (!reason) throw err;
+    await log({ status: "skipped", reason });
+    return { ok: false, reason, retryable: false };
+  }
 
   let allocation: Allocation;
   let spendUsd: number;
@@ -128,7 +161,7 @@ export async function runAutopilot(
       // A real, successful check that found nothing to do — not a skip (Vera didn't fail to
       // act, there was nothing to fix) and not an error.
       await log({ status: "success", reason: plan.receipt, amountUsd: 0 });
-      return { ok: true };
+      return { ok: true, receipt: plan.receipt };
     }
     spendUsd = plan.intents.reduce((s, i) => s + i.usd, 0);
     const weights = plan.intents.map((i) => ({ symbol: i.symbol, weightPct: (i.usd / spendUsd) * 100 }));
@@ -185,7 +218,15 @@ export async function runAutopilot(
   const usdcTotal = netOf(grossTotal, chain.key);
   const feeRaw = grossTotal - usdcTotal;
 
-  const { legs } = await buildLegs({ chain, allocation, usdcTotal, client, nowSeconds: now });
+  let legs: Awaited<ReturnType<typeof buildLegs>>["legs"];
+  try {
+    ({ legs } = await buildLegs({ chain, allocation, usdcTotal, client, nowSeconds: now }));
+  } catch (err) {
+    const reason = planningRefusalReason(err);
+    if (!reason) throw err;
+    await log({ assessedRiskBps, status: "skipped", reason, amountUsd: spendUsd });
+    return { ok: false, reason, retryable: false };
+  }
   if (legs.length === 0) {
     const reason = "Could not build any swap legs.";
     await log({ assessedRiskBps, status: "error", reason, amountUsd: spendUsd });
