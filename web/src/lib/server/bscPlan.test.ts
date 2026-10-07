@@ -10,7 +10,9 @@ vi.mock("./binance", () => ({ getBinanceWeb3: vi.fn() }));
 
 import { getBinanceWeb3 } from "./binance";
 import { getChain } from "@/lib/chains";
-import { usdToRaw } from "@/lib/units";
+import { usdToRaw, rawToUsd } from "@/lib/units";
+import { splitByWeight } from "@/lib/legBuilder";
+import { assetBySymbol } from "@/lib/chains";
 import type { RwaToken } from "./binance/types";
 import type { RwaTickerView, VenueView } from "@/lib/rwa";
 import {
@@ -22,6 +24,10 @@ import {
   enforceMinLegs,
   maxBscLegs,
   parseCryptoMix,
+  planChangeNote,
+  plannedOrBestAddress,
+  roundLegWeights,
+  buildBscInvestLegs,
   unavailableNote,
   venueAddressFor,
   withoutUnaskedRisk,
@@ -528,5 +534,159 @@ describe("withoutUnaskedRisk", () => {
 
   it("never matches a ticker inside another word", () => {
     expect(symbols("soxlike growth")).toEqual(["NVDA", "SPCX"]);
+  });
+});
+
+
+describe("parseCryptoMix: crypto-only goals", () => {
+  const stocks = ["NVDA", "Nvidia", "TSLA", "Tesla"];
+
+  it.each(["Put $50 in bitcoin", "All in on ETH", "Only crypto please", "Bitcoin and Ethereum only", "Buy $20 of bitcoin"])(
+    "reads %j as all crypto, not a 20% slice",
+    (goal) => {
+      expect(parseCryptoMix(goal, stocks)).toEqual({ cryptoPct: 100 });
+    },
+  );
+
+  it("keeps the 20% default when the goal also names stocks, by word or by name", () => {
+    expect(parseCryptoMix("stocks and bitcoin", stocks)).toEqual({ cryptoPct: 20 });
+    expect(parseCryptoMix("NVDA and bitcoin", stocks)).toEqual({ cryptoPct: 20 });
+    expect(parseCryptoMix("some Tesla and bitcoin", stocks)).toEqual({ cryptoPct: 20 });
+  });
+
+  it("accepts 'into' (and 'to') before the asset", () => {
+    expect(parseCryptoMix("Put 30% into bitcoin", stocks)).toEqual({ cryptoPct: 30 });
+    expect(parseCryptoMix("70% into stocks, the rest in btc", stocks)).toEqual({ cryptoPct: 30 });
+  });
+
+  it("reads 'no more than N%' as a cap of N, not an opt-out", () => {
+    expect(parseCryptoMix("No more than 10% crypto", stocks)).toEqual({ cryptoPct: 10 });
+    expect(parseCryptoMix("stocks, at most 5% in bitcoin", stocks)).toEqual({ cryptoPct: 5 });
+  });
+
+  it("still treats a real opt-out as no crypto", () => {
+    expect(parseCryptoMix("no crypto please", stocks)).toBeNull();
+  });
+});
+
+describe("withoutUnaskedRisk: return targets are not leverage", () => {
+  const chain = getChain("bsc");
+  const universe = chain.assets.all.filter((a) => ["NVDA", "SOXL", "TQQQ"].includes(a.symbol));
+  const symbols = (goal: string) => withoutUnaskedRisk(universe, goal).map((a) => a.symbol).sort();
+
+  it.each(["I want to triple my money in 5 years", "Help me 2x my savings", "double or triple my money", "3x my savings by 2030"])(
+    "keeps leveraged funds out of %j",
+    (goal) => {
+      expect(symbols(goal)).toEqual(["NVDA"]);
+    },
+  );
+
+  it.each(["a 3x leveraged fund", "a 3x chip fund please", "I want 2x ETFs", "leverage please"])("lets %j through", (goal) => {
+    expect(symbols(goal)).toContain("SOXL");
+  });
+});
+
+describe("roundLegWeights", () => {
+  it("sums to exactly 100.00 and never sizes a $6 leg under the floor (the $30 stocks-and-bitcoin plan)", () => {
+    // 26.667% x3 + 20%: plain per-leg rounding gave 26.67 x3 + 20 = 100.01.
+    const usds = [8, 8, 8, 6];
+    const w = roundLegWeights(usds, 30);
+    expect(Math.round(w.reduce((a, b) => a + b, 0) * 100)).toBe(10_000);
+    // Run it through the invest-time split: every leg must still clear $6.
+    const entries = usds.map((_, i) => ({ asset: assetBySymbol(bsc, ["NVDA", "MSFT", "GOOGL", "BTCB"][i])!, weightPct: w[i] }));
+    const split = splitByWeight(entries, usdToRaw(bsc, 30));
+    for (const leg of split) expect(rawToUsd(bsc, leg.usdcIn)).toBeGreaterThanOrEqual(6 - 1e-6);
+    expect(split.reduce((s, l) => s + l.usdcIn, BigInt(0))).toBe(usdToRaw(bsc, 30));
+  });
+
+  it("gives the rounding slack to the largest leg, never the smallest", () => {
+    const w = roundLegWeights([10.003, 10.003, 10.003], 30.009);
+    expect(Math.max(...w) - Math.min(...w)).toBeLessThanOrEqual(0.02);
+    expect(Math.round(w.reduce((a, b) => a + b, 0) * 100)).toBe(10_000);
+  });
+
+  it("bumps a leg that was funded exactly at the floor but floored under it", () => {
+    // 6 / 37 = 16.2162...%, which floors to 16.21% = $5.9977.
+    const w = roundLegWeights([6, 31], 37);
+    expect((w[0] / 100) * 37).toBeGreaterThanOrEqual(6);
+    expect(Math.round((w[0] + w[1]) * 100)).toBe(10_000);
+  });
+
+  it("keeps a plan of exact $6 legs exact", () => {
+    expect(roundLegWeights([6, 6], 12)).toEqual([50, 50]);
+  });
+});
+
+describe("planChangeNote", () => {
+  const nameOf = (s: string) => ({ BTCB: "Bitcoin", NVDA: "Nvidia" })[s] ?? s;
+
+  it("says nothing when the server kept the model's own picks", () => {
+    expect(planChangeNote({ modelSymbols: ["NVDA", "BTCB"], finalSymbols: ["NVDA", "BTCB"], nameOf })).toBe("");
+  });
+
+  it("names a leg left out under the floor, and one added for the requested mix", () => {
+    expect(planChangeNote({ modelSymbols: ["NVDA", "BTCB"], finalSymbols: ["NVDA"], nameOf })).toMatch(/Bitcoin was left out.*\$6 minimum/);
+    expect(planChangeNote({ modelSymbols: ["NVDA"], finalSymbols: ["NVDA", "BTCB"], nameOf })).toMatch(/Bitcoin was added/);
+  });
+});
+
+describe("the issuer the plan showed is the issuer bought", () => {
+  const nvda = assetBySymbol(bsc, "NVDA")!;
+  const both = ticker({
+    venues: [venue({ platform: "bstock", address: nvda.address!, gapPct: 0.1 }), venue({ platform: "ondo", address: NVDA_ONDO, gapPct: 0.9 })],
+    bestVenue: "bstock",
+  });
+  const tokens = [row({ tokenContractAddress: nvda.address! }), row({ tokenContractAddress: NVDA_ONDO })];
+
+  it("keeps the planned issuer while it is still buyable, even when bestVenue changed", () => {
+    expect(plannedOrBestAddress(nvda, both, tokens, NVDA_ONDO, NOW)).toBe(NVDA_ONDO);
+  });
+
+  it("falls back to the best issuer when the planned one stopped trading", () => {
+    const ondoClosed = [
+      row({ tokenContractAddress: nvda.address! }),
+      row({ tokenContractAddress: NVDA_ONDO, statusInfo: { openState: false, reasonCode: "MARKET_CLOSED", nextOpenTime: null } as never }),
+    ];
+    expect(plannedOrBestAddress(nvda, both, ondoClosed, NVDA_ONDO, NOW)).toBe(nvda.address);
+  });
+
+  it("ignores a planned address that isn't this asset's own token", () => {
+    expect(plannedOrBestAddress(nvda, both, tokens, "0x000000000000000000000000000000000000dEaD", NOW)).toBe(nvda.address);
+  });
+
+  it("uses the best issuer when the plan named none", () => {
+    expect(plannedOrBestAddress(nvda, both, tokens, undefined, NOW)).toBe(nvda.address);
+  });
+});
+
+describe("buildBscInvestLegs", () => {
+  it("returns each leg with the token it actually buys, in plan order", async () => {
+    quoteSpy.mockReset().mockImplementation(async (p: { amount: bigint }) => ({ ...goodQuote, fromTokenAmount: p.amount }));
+    buildSwapSpy.mockReset().mockResolvedValue(goodSwap);
+    vi.mocked(getBinanceWeb3).mockReturnValue({ quote: quoteSpy, buildSwap: buildSwapSpy } as unknown as ReturnType<typeof getBinanceWeb3>);
+    const btcb = bsc.assets.crypto.find((a) => a.symbol === "BTCB")!;
+    const catalog = [ticker({ ticker: "NVDA", bestVenue: "bstock", venues: [venue({ address: NVDA })] })];
+    const legs = await buildBscInvestLegs({
+      chain: bsc,
+      allocation: {
+        summary: "s",
+        rationale: "r",
+        riskScore: 6000,
+        allocations: [
+          { symbol: "NVDA", weightPct: 70, reason: "why" },
+          { symbol: "BTCB", weightPct: 30, reason: "why" },
+        ],
+      },
+      usdcTotal: usdToRaw(bsc, 100),
+      taker: SMART_ACCOUNT,
+      catalog,
+      tokens: [row({ tokenContractAddress: NVDA })],
+      nowMs: NOW,
+    });
+    expect(legs.map((l) => [l.symbol, l.tokenOut.toLowerCase()])).toEqual([
+      ["NVDA", NVDA.toLowerCase()],
+      ["BTCB", btcb.address!.toLowerCase()],
+    ]);
+    expect(legs.every((l) => l.calls.length === 2)).toBe(true);
   });
 });

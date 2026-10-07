@@ -15,7 +15,7 @@ import { rateLimit } from "@/lib/server/rateLimit";
 import { getSmartAccount } from "@/lib/server/users";
 import { getBinanceWeb3 } from "@/lib/server/binance";
 import { bscCatalogSnapshot } from "@/lib/server/rwaCatalog";
-import { buildBscInvestCalls, venueAddressFor } from "@/lib/server/bscPlan";
+import { buildBscInvestLegs, PLAN_MIN_LEG_MESSAGE } from "@/lib/server/bscPlan";
 import { BinanceLegError, BinanceLegRefusal } from "@/lib/server/binanceLegs";
 import { decodeApproveAmount, dryRunBscSwap, pairLegCalls } from "@/lib/server/dryRun";
 import { unauthorized, badRequest, tooManyRequests, serverError, jsonError } from "@/lib/server/respond";
@@ -116,7 +116,7 @@ export async function POST(req: NextRequest) {
       const taker = account.address as `0x${string}`;
       try {
         const [catalog, tokens] = await Promise.all([bscCatalogSnapshot(nowMs), getBinanceWeb3().rwaTokens()]);
-        calls = await buildBscInvestCalls({
+        const builtLegs = await buildBscInvestLegs({
           chain,
           allocation,
           usdcTotal,
@@ -125,29 +125,27 @@ export async function POST(req: NextRequest) {
           tokens,
           nowMs,
         });
+        calls = builtLegs.flatMap((l) => l.calls);
 
-        // A Binance dry run per leg, right before these calls go back for signing. Each leg
-        // is exactly [approve, swap] (directCallsForLeg), in the same order as
-        // allocation.allocations, so pairLegCalls lines them back up with the ticker each one
-        // targets. dryRunBscSwap simulates the whole [approve, swap] pair atomically (see its
-        // own comment), so it spends a Binance call for every leg once this account has sent
-        // its first on-chain trade — never zero calls just because a leg's own token hasn't
-        // been approved before. A brand-new account's very first-ever basket buy still spends
-        // zero (no deployed bytecode yet to simulate against); a multi-leg TOP-UP basket can
-        // spend up to one call per leg, sharing the same 5-per-window budget as everything
-        // else on this key — worth revisiting as one whole-basket simulate call if that budget
-        // ever gets tight (see openIssues in the dry-run stream's wave 5 report).
-        const byTicker = new Map(catalog.tickers.map((t) => [t.ticker, t]));
-        const pairs = pairLegCalls(calls);
+        // A Binance dry run per leg, right before these calls go back for signing. Each built leg
+        // is exactly [approve, swap] (directCallsForLeg) and carries the token it actually buys
+        // (a stock's issuer token or the coin's own address), so the check simulates precisely what
+        // was built, never a token looked up again afterwards. dryRunBscSwap simulates the whole
+        // [approve, swap] pair atomically (see its own comment), so it spends a Binance call for
+        // every leg once this account has sent its first on-chain trade — never zero calls just
+        // because a leg's own token hasn't been approved before. A brand-new account's very
+        // first-ever basket buy still spends zero (no deployed bytecode yet to simulate against);
+        // a multi-leg TOP-UP basket can spend up to one call per leg, sharing the same 5-per-window
+        // budget as everything else on this key — worth revisiting as one whole-basket simulate
+        // call if that budget ever gets tight (see openIssues in the dry-run stream's wave 5 report).
         dryRuns = await Promise.all(
-          pairs.map(async (pair, i) => {
-            const symbol = allocation.allocations[i]?.symbol;
-            const tokenOut = venueAddressFor(byTicker.get(symbol ?? ""));
+          builtLegs.map(async (built) => {
+            const [pair] = pairLegCalls(built.calls);
             const amountIn = decodeApproveAmount(pair.approve.data);
             // Every entry names its own leg (symbol + target token) so PlanScreen matches a
             // check to the right stock, never by position (design critique P0 #1).
-            const leg = { ...(symbol ? { symbol } : {}), ...(tokenOut ? { token: tokenOut } : {}) };
-            if (!tokenOut || amountIn === undefined) {
+            const leg = { symbol: built.symbol, token: built.tokenOut };
+            if (amountIn === undefined) {
               return { status: "skipped", reason: "Couldn't check this trade with Binance just now.", checkedAt: Date.now(), ...leg } satisfies DryRun;
             }
             const dr = await dryRunBscSwap({
@@ -155,7 +153,7 @@ export async function POST(req: NextRequest) {
               taker,
               router: pair.swap.to,
               tokenIn: pair.approve.to,
-              tokenOut,
+              tokenOut: built.tokenOut,
               amountIn,
               swapData: pair.swap.data,
             });
@@ -170,7 +168,8 @@ export async function POST(req: NextRequest) {
             console.error("[invest-plan]", err.message);
             return jsonError(502, "We couldn't get a price just now. Try again in a moment.");
           }
-          return badRequest(err.message);
+          // The leg-level "enter $6 or more" copy points at an amount field a plan doesn't have.
+          return badRequest(err.code === "min_trade" ? PLAN_MIN_LEG_MESSAGE : err.message);
         }
         if (err instanceof BinanceLegError) {
           console.error("[invest-plan]", err.message);
@@ -180,7 +179,12 @@ export async function POST(req: NextRequest) {
       }
 
       const result: InvestPlanResult = {
-        plan: { planId: buildPlanId(allocation, nowSeconds), recHash: recHash(allocation), riskScore: Math.round(allocation.riskScore), agentId: chain.contracts.agentId.toString() },
+        plan: {
+          planId: buildPlanId(allocation, nowSeconds),
+          recHash: recHash(allocation),
+          // Never below what the weights imply by tier, same floor the executor path applies.
+          riskScore: Math.min(RISK_CEILING_BPS, Math.max(Math.round(allocation.riskScore), riskScoreFor(chain, allocation.allocations))),
+          agentId: chain.contracts.agentId.toString() },
         inference: { assessedRisk: 0, maxRisk: 0, expiry: "0", signature: "0x" },
         legs: [],
         usdcTotal: usdcTotal.toString(),

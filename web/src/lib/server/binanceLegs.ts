@@ -125,7 +125,9 @@ export async function buildBinanceLeg(a: BinanceLegArgs): Promise<BinanceLeg> {
     throw new BinanceLegRefusal("Couldn't price this trade right now. Try again in a moment.");
   }
   const side = a.side ?? "buy";
-  if (a.usdValue < minLegUsd(side)) {
+  // The 1e-6 absorbs float dust from splitting a plan (a leg sized exactly at the floor can land a
+  // few wei under it); the floor is already a buffer above the real >$5 limit.
+  if (a.usdValue < minLegUsd(side) - 1e-6) {
     // Design critique P1 #11: name the next step, not just the rule that was broken. A buy has no
     // amount to "enter" on a plan screen, so the words stay about the trade. A sale is checked
     // against Binance's real floor ($5), not the $6 buffer buys carry, and its message points at

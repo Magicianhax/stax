@@ -8,8 +8,9 @@ import { z } from "zod";
  * on-chain address a leg will actually buy — the RWA catalog's `bestVenue` pick, resolved by
  * `buildAllocation` before the response goes out. Both are optional so Base/Mantle allocations
  * (and anything built before this wave, e.g. a saved basket's `basketToAllocation`) stay valid
- * without them; `/api/invest-plan` re-resolves the venue fresh from the catalog at invest time
- * regardless, since a market can close between building the plan and signing it.
+ * without them. `/api/invest-plan` buys the issuer the plan showed while that issuer is still
+ * buyable and one of the asset's own tokens, and falls back to the catalog's current best only
+ * when it isn't (a market can close between building the plan and signing it).
  */
 export const AllocationSchema = z.object({
   summary: z.string().describe("One short, friendly headline for the strategy (no jargon)."),
