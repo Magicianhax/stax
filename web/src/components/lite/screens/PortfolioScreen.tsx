@@ -187,8 +187,9 @@ export function PortfolioScreen({
   const donutTotal = priced.reduce((s, h) => s + (h.valueUsd ?? 0), 0) + cash || 1;
   const legend = [
     ...priced.map((h, i) => ({
-      key: h.asset.symbol,
-      name: toTile(h.asset.symbol, h.asset.name).name,
+      // One stock held from both issuers has two rows: key and name them apart.
+      key: holdingKey(h),
+      name: toTile(h.asset.symbol, h.asset.name).name + (twinSymbols.has(h.asset.symbol) && h.venue ? ` · ${PLATFORM_LABEL[h.venue]}` : ""),
       value: h.valueUsd ?? 0,
       color: rampColor(i),
     })),
@@ -308,8 +309,10 @@ export function PortfolioScreen({
               const abs = rc && h.valueUsd !== undefined ? h.valueUsd - h.valueUsd / (1 + rc.pct / 100) : undefined;
               // Unrealized gain against what was paid, when the lots are known.
               const pos = positions.get(h.asset.symbol);
+              // A stock held from both issuers has one cost ledger per ticker, so its gain can't be
+              // split between the two rows: neither row claims it (the asset page shows the total).
               const gain =
-                pos && pos.unrealizedUsd !== null && pos.unrealizedPct !== null && pos.costBasisUsd > 0
+                pos && !twinSymbols.has(h.asset.symbol) && pos.unrealizedUsd !== null && pos.unrealizedPct !== null && pos.costBasisUsd > 0
                   ? { abs: pos.unrealizedUsd, pct: pos.unrealizedPct, label: "vs cost" }
                   : null;
               const qty = tokenQty(h.raw, h.asset.decimals ?? 18);

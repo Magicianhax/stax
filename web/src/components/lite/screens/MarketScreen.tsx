@@ -23,6 +23,7 @@ import { MarketStatusBadge } from "@/components/lite/rwa/MarketStatusBadge";
 import { Reveal } from "@/components/motion";
 import { usd, tokenQty } from "@/lib/format";
 import { usMarketClock, type UsMarketClock } from "@/lib/marketHours";
+import { useMarketNow } from "@/hooks/useMarketNow";
 import { marketHeaderLine } from "@/lib/homeToday";
 import { riskLine, shortGapLine } from "@/lib/plainCopy";
 import { platformLabel } from "@/lib/spread";
@@ -38,15 +39,16 @@ const CLOCK_TICK_MS = 30_000;
  */
 function useBscMarketClock(): (UsMarketClock & { nowMs: number }) | null {
   const [clock, setClock] = useState<(UsMarketClock & { nowMs: number }) | null>(null);
+  const now = useMarketNow();
   useEffect(() => {
     const tick = () => {
-      const nowMs = Date.now();
+      const nowMs = now();
       setClock({ ...usMarketClock(nowMs), nowMs });
     };
     tick();
     const id = setInterval(tick, CLOCK_TICK_MS);
     return () => clearInterval(id);
-  }, []);
+  }, [now]);
   return clock;
 }
 

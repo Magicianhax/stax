@@ -12,6 +12,9 @@ const STORAGE_KEY = "stax.chain.v2";
 const listeners = new Set<() => void>();
 let current: ChainKey = DEFAULT_CHAIN_KEY;
 let hydrated = false;
+// The demo (/demo and the landing) pins its own network so the visitor's saved choice neither
+// decides what the demo shows nor is overwritten by switching networks inside it.
+let demoPinned = false;
 
 function hydrate() {
   if (hydrated || typeof window === "undefined") return;
@@ -37,11 +40,33 @@ export function setActiveChainKey(key: ChainKey) {
   hydrate();
   if (key === current) return;
   current = key;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, key);
-  } catch {
-    /* ignore */
+  if (!demoPinned) {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, key);
+    } catch {
+      /* ignore */
+    }
   }
+  listeners.forEach((l) => l());
+}
+
+/**
+ * Pin the active network for a demo mount: ignores what is saved in localStorage and stops
+ * later switches being saved. Silent (no listener notification) because it runs while the demo
+ * first renders, before anything below it has subscribed.
+ */
+export function pinDemoChain(key: ChainKey) {
+  demoPinned = true;
+  hydrated = true;
+  current = key;
+}
+
+/** Undo pinDemoChain: the saved choice (or the default) is read again on next use. */
+export function unpinDemoChain() {
+  if (!demoPinned) return;
+  demoPinned = false;
+  hydrated = false;
+  current = DEFAULT_CHAIN_KEY;
   listeners.forEach((l) => l());
 }
 

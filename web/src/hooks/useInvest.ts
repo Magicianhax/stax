@@ -101,10 +101,17 @@ export function useInvest(): UseInvest {
       // Demo: canned plan after a believable "thinking" beat, no AI call.
       if (demo) {
         await sleep(1100);
-        const result = demo.allocate(goal, amountUsd, riskTolerance);
-        setAllocation(result);
-        setPhase("idle");
-        return result;
+        try {
+          const result = demo.allocate(goal, amountUsd, riskTolerance);
+          setAllocation(result);
+          setPhase("idle");
+          return result;
+        } catch (e) {
+          // Vera's own refusals (market closed, under $6 a stock) read as the real ones do.
+          setError(e instanceof Error ? e.message : "The copilot couldn't build a plan.");
+          setPhase("error");
+          return null;
+        }
       }
       // /api/allocate needs no executor — only the direct-path invest() below does. BSC
       // (no executor at all yet, ADR-0005) still builds a plan; any other undeployed chain
@@ -141,9 +148,12 @@ export function useInvest(): UseInvest {
       if (demo) {
         setPhase("planning");
         await sleep(900);
+        const placed = demo.placePlan(alloc, amountUsd);
+        // BNB Chain: Binance's check on each stock, shown before the plan goes through.
+        setDryRuns(placed.dryRuns);
         setPhase("investing");
         await sleep(1500);
-        setSuccess(demo.success(alloc, amountUsd));
+        setSuccess(placed.success);
         setPhase("done");
         return;
       }

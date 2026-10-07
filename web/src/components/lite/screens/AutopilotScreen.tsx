@@ -190,7 +190,7 @@ export function AutopilotScreen({
   const delegated = Boolean(embedded?.delegated);
   const walletId = embedded?.id ?? null;
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!demo);
   const [config, setConfig] = useState<AutopilotConfig | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -248,8 +248,14 @@ export function AutopilotScreen({
   const [detailRun, setDetailRun] = useState<RunRow | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
+  // The demo never asks for permission, saves a rule or runs one: nothing in it can act.
+  const demoOnly = () => {
+    notify("This is a demo, so nothing is turned on.", "info");
+  };
+
   // Load the current autopilot (if any).
   useEffect(() => {
+    if (demo) return; // nothing to load: the demo has no saved autopilot
     let cancelled = false;
     (async () => {
       try {
@@ -281,7 +287,7 @@ export function AutopilotScreen({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [demo]);
 
   const amountNum = Number(amount) || 0;
   const riskBps = RISK_TIERS[risk].bps;
@@ -368,6 +374,7 @@ export function AutopilotScreen({
 
   // Load Vera's run history (audit trail) when an autopilot is active.
   const loadRuns = useCallback(async () => {
+    if (demo) return;
     try {
       const r = await authedFetch("/api/autopilot/runs");
       const j = await r.json();
@@ -375,10 +382,10 @@ export function AutopilotScreen({
     } catch {
       /* activity is best-effort */
     }
-  }, []);
+  }, [demo]);
 
   useEffect(() => {
-    if (!active) return;
+    if (!active || demo) return;
     let cancelled = false;
     (async () => {
       try {
@@ -396,9 +403,10 @@ export function AutopilotScreen({
       cancelled = true;
     };
     // The history is per network, so switching chains asks for a different list.
-  }, [active, chain.key]);
+  }, [active, chain.key, demo]);
 
   const authorize = async () => {
+    if (demo) return demoOnly();
     if (!ownerAddress) return;
     if (!PRIVY_SIGNER_ID) {
       notify("Signer not configured (NEXT_PUBLIC_PRIVY_SIGNER_ID)", "info");
@@ -419,6 +427,7 @@ export function AutopilotScreen({
   };
 
   const save = async () => {
+    if (demo) return demoOnly();
     if (!walletId || !ownerAddress || !smartAccount) {
       notify("Give Vera permission first", "info");
       return;
@@ -499,6 +508,7 @@ export function AutopilotScreen({
   };
 
   const stop = async () => {
+    if (demo) return demoOnly();
     setBusy(true);
     try {
       await authedFetch("/api/autopilot", { method: "DELETE" });
@@ -519,6 +529,7 @@ export function AutopilotScreen({
   // Trigger one autonomous run immediately (Vera re-allocates, signs, and places
   // it server-side — no user signature). Same bounds gate as the scheduled cron.
   const runNow = async () => {
+    if (demo) return demoOnly();
     setBusy(true);
     try {
       const res = await authedFetch("/api/autopilot/run", { method: "POST" });

@@ -12,7 +12,7 @@
 import { useState } from "react";
 import { Icon, SectionTitle, BottomSheet } from "@/components/design";
 import { useDemo } from "@/components/demo/DemoProvider";
-import { useSavings, useSavingsBalance, useSavingsRate, DEMO_SAVINGS_RATE } from "@/hooks/useSavings";
+import { useSavings, useSavingsBalance, useSavingsRate } from "@/hooks/useSavings";
 import { useUsdcBalance } from "@/hooks/useBalances";
 import { usd } from "@/lib/format";
 import { haptic } from "@/lib/haptics";
@@ -37,7 +37,7 @@ export function SavingsCard({ address }: { address?: string }) {
   // amount stay put even after moveOut succeeds and useSavingsBalance refetches down to 0.
   const [outAmount, setOutAmount] = useState(0);
 
-  const effectiveRate = demo ? DEMO_SAVINGS_RATE : rate;
+  const effectiveRate = demo ? demo.savings?.rate : rate;
   const cash = bal?.value ?? 0;
   const inSavings = savingsBal ?? 0;
   const hasSavings = inSavings > 0;

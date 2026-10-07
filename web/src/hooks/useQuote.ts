@@ -22,6 +22,7 @@ import { fetchSwapQuote, usesAggregator } from "@/lib/swapQuote";
 import type { DryRun } from "@/lib/dryRun";
 import { usdToRaw } from "@/lib/units";
 import { useSmartAccount } from "@/hooks/useSmartAccount";
+import { useDemo } from "@/components/demo/DemoProvider";
 
 const AGGREGATOR_DEBOUNCE_MS = 400;
 
@@ -53,6 +54,9 @@ export interface Quote {
  */
 export function useQuote(asset: Asset | null, amountUsd: number, venue?: RwaPlatform) {
   const chain = useChain();
+  const demo = useDemo();
+  // Demo on BNB Chain: quoted from the demo market, never from Binance (lib/demo/bscMarket.ts).
+  const demoMarket = chain.key === "bsc" && demo?.rwa ? demo : null;
   const { address } = useSmartAccount();
   const aggregator = usesAggregator(chain, asset);
   const amountCents = Math.round(amountUsd * 100);
@@ -63,7 +67,7 @@ export function useQuote(asset: Asset | null, amountUsd: number, venue?: RwaPlat
   const canQuote = aggregator ? Boolean(address) || Boolean(asset?.pool) : true;
   const enabled = Boolean(asset && asset.decimals && cents > 0 && isRoutable(chain, asset.symbol) && canQuote);
   return useQuery({
-    queryKey: ["quote", chain.key, asset?.symbol, "buy", cents, aggregator ? address : null, venue ?? null],
+    queryKey: ["quote", chain.key, asset?.symbol, "buy", cents, aggregator ? address : null, venue ?? null, demoMarket ? `demo:${demoMarket.nowMs}` : null],
     enabled,
     staleTime: 10_000,
     refetchInterval: 15_000,
@@ -80,7 +84,14 @@ export function useQuote(asset: Asset | null, amountUsd: number, venue?: RwaPlat
       let expectedOutRaw: bigint;
       let minOutRaw: bigint | undefined;
       let dryRun: DryRun | undefined;
-      if (a.via === "aave_v3") {
+      if (demoMarket) {
+        // A short beat, like a real price check, then the same refusals the server makes.
+        await new Promise((r) => setTimeout(r, 220));
+        const q = demoMarket.quote({ asset: a, side: "buy", amountIn: amountInRaw, venue });
+        expectedOutRaw = q.amountOut;
+        minOutRaw = q.minOut;
+        dryRun = q.dryRun;
+      } else if (a.via === "aave_v3") {
         expectedOutRaw = amountInRaw; // supply(USDC) mints aUSDC 1:1
       } else if (aggregator && address) {
         try {
@@ -143,6 +154,8 @@ export interface SellQuote {
  */
 export function useSellQuote(asset: Asset | null, tokenQtyRaw: bigint, venue?: RwaPlatform) {
   const chain = useChain();
+  const demo = useDemo();
+  const demoMarket = chain.key === "bsc" && demo?.rwa ? demo : null;
   const { address } = useSmartAccount();
   const aggregator = usesAggregator(chain, asset);
   const rawKey = tokenQtyRaw.toString();
@@ -151,7 +164,7 @@ export function useSellQuote(asset: Asset | null, tokenQtyRaw: bigint, venue?: R
   const canQuote = aggregator ? Boolean(address) || Boolean(asset?.pool) : true;
   const enabled = Boolean(asset && asset.decimals && qtyKey !== "0" && isRoutable(chain, asset.symbol) && canQuote);
   return useQuery({
-    queryKey: ["sell-quote", chain.key, asset?.symbol, "sell", qtyKey, aggregator ? address : null, venue ?? null],
+    queryKey: ["sell-quote", chain.key, asset?.symbol, "sell", qtyKey, aggregator ? address : null, venue ?? null, demoMarket ? `demo:${demoMarket.nowMs}` : null],
     enabled,
     staleTime: 10_000,
     refetchInterval: 15_000,
@@ -164,7 +177,13 @@ export function useSellQuote(asset: Asset | null, tokenQtyRaw: bigint, venue?: R
       let expectedUsdcRaw: bigint;
       let minUsdcRaw: bigint | undefined;
       let dryRun: DryRun | undefined;
-      if (a.via === "aave_v3") {
+      if (demoMarket) {
+        await new Promise((r) => setTimeout(r, 220));
+        const q = demoMarket.quote({ asset: a, side: "sell", amountIn: amountInRaw, venue });
+        expectedUsdcRaw = q.amountOut;
+        minUsdcRaw = q.minOut;
+        dryRun = q.dryRun;
+      } else if (a.via === "aave_v3") {
         expectedUsdcRaw = amountInRaw; // withdraw returns USDC 1:1
       } else if (aggregator && address) {
         try {

@@ -28,7 +28,6 @@ import { SavingsCard } from "@/components/lite/savings/SavingsCard";
 import { useSavingsBalance } from "@/hooks/useSavings";
 import type { WalletTx } from "@/lib/walletTx";
 import { useDemo } from "@/components/demo/DemoProvider";
-import { DEMO_TRANSACTIONS } from "@/lib/demo/demoData";
 import { DEMO_NOW } from "@/lib/demoSeries";
 import { iconBtn, Spinner, Pager } from "./primitives";
 import { ReceiveSheet } from "@/components/lite/receive";
@@ -148,7 +147,7 @@ export function WalletScreen({
 
   // Transactions, 10 per page. The demo mirrors Home's activity (same plans,
   // same hashes) so the two screens never contradict each other.
-  const txList = useMemo(() => (demo ? DEMO_TRANSACTIONS : (txs ?? [])), [demo, txs]);
+  const txList = useMemo(() => (demo ? demo.transactions : (txs ?? [])), [demo, txs]);
   const txPageCount = Math.max(1, Math.ceil(txList.length / 10));
   const txSafePage = Math.min(txPage, txPageCount - 1);
   const txRows = txList.slice(txSafePage * 10, txSafePage * 10 + 10);

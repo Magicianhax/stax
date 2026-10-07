@@ -18,12 +18,6 @@ import { useRefreshBalances } from "@/hooks/useBalances";
 import type { SavingsRateResponse } from "@/app/api/savings/route";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-const DEMO_SAVINGS_TX = ("0x" + "5a7c2b41".repeat(32).slice(0, 64)) as `0x${string}`;
-const DEMO_RATE: SavingsRateResponse = { chain: "bsc", available: true, apyBps: 420, apyDisplay: "4.20%" };
-// A plausible standing balance for demo mode's screenshot wallet — DemoProvider's own `DemoApi`
-// carries no Savings field (nothing there needed one before this card existed), so this is kept
-// local here rather than widening that shared type for a display-only constant.
-const DEMO_SAVINGS_BALANCE_USD = 42.15;
 
 type Phase = "idle" | "moving" | "done" | "error";
 
@@ -68,7 +62,7 @@ export function useSavingsBalance(address?: string) {
       return json.balanceUsd ?? null;
     },
   });
-  if (demo) return { ...query, data: DEMO_SAVINGS_BALANCE_USD, isLoading: false, isPending: false } as typeof query;
+  if (demo) return { ...query, data: demo.savings?.balanceUsd ?? 0, isLoading: false, isPending: false } as typeof query;
   return query;
 }
 
@@ -94,7 +88,10 @@ export function useSavings() {
       if (demo) {
         setPhase("moving");
         await sleep(1200);
-        setTxHash(DEMO_SAVINGS_TX);
+        // Simulated: nothing is sent. The balance and cash move in the demo's own session only.
+        const balance = demo.savings?.balanceUsd ?? 0;
+        const usd = body.action === "deposit" ? body.amountUsd : -Math.min(balance, balance * body.ratio);
+        setTxHash(demo.recordSavings(Number(usd.toFixed(2))));
         setPhase("done");
         return;
       }
@@ -139,5 +136,3 @@ export function useSavings() {
   return { phase, error, txHash, busy: phase === "moving", moveIn, moveOut, reset };
 }
 
-/** The demo-mode rate, for screens that render before useSavingsRate's query is enabled. */
-export const DEMO_SAVINGS_RATE = DEMO_RATE;

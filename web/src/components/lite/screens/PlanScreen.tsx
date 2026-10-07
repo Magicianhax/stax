@@ -27,6 +27,7 @@ import { planCheckFailedMessage, planDryRunView } from "@/lib/planDryRuns";
 import { gapToRealShare, planOpenIssuerNote } from "@/lib/plainCopy";
 import { platformLabel } from "@/lib/spread";
 import { usMarketClock } from "@/lib/marketHours";
+import { useMarketNow } from "@/hooks/useMarketNow";
 import { useRwa } from "@/hooks/useRwa";
 import type { DryRun } from "@/lib/dryRun";
 import type { AllocateResult } from "@/lib/invest-types";
@@ -100,7 +101,8 @@ export function PlanScreen({
   const venueFor = (symbol: string, platform: "bstock" | "ondo" | undefined) =>
     platform ? rwa?.tickers.find((t) => t.ticker === symbol)?.venues.find((v) => v.platform === platform) : undefined;
   // Read once per mount: this screen is only ever reached by navigation, never server-rendered.
-  const [usMarketOpen] = useState(() => usMarketClock(Date.now()).buyable);
+  const marketNow = useMarketNow();
+  const [usMarketOpen] = useState(() => usMarketClock(marketNow()).buyable);
   const openIssuerNote = bsc ? planOpenIssuerNote(usMarketOpen, allocation.allocations.map((a) => a.venue)) : "";
   const { save } = useBaskets();
   const { notify } = useToast();

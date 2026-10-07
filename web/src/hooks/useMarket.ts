@@ -13,7 +13,7 @@ import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { useChain } from "@/lib/chains/active";
 import { authedFetch } from "@/lib/authedFetch";
 import { useDemo } from "@/components/demo/DemoProvider";
-import { DEMO_MARKET_SUMMARY } from "@/lib/demo/demoData";
+import { demoHistory } from "@/lib/demo/demoData";
 
 export type MarketRange = "1D" | "1W" | "1M" | "1Y" | "5Y";
 
@@ -40,9 +40,10 @@ async function getJson<T>(url: string, fallbackError: string): Promise<T> {
 /** Real chart series for one asset + range. keepPreviousData makes range switches seamless. */
 export function useMarketHistory(symbol: string | undefined, range: MarketRange) {
   const chain = useChain();
-  return useQuery({
+  const demo = useDemo();
+  const query = useQuery({
     queryKey: ["market-history", chain.key, symbol, range],
-    enabled: Boolean(symbol),
+    enabled: Boolean(symbol) && !demo,
     staleTime: 60_000,
     placeholderData: keepPreviousData,
     queryFn: () =>
@@ -51,6 +52,9 @@ export function useMarketHistory(symbol: string | undefined, range: MarketRange)
         "Couldn't load the chart.",
       ),
   });
+  // Demo: the seeded series, never a request (lib/demo/demoData.ts).
+  if (demo && symbol) return { ...query, data: demoHistory(symbol, range), isLoading: false, isPending: false } as typeof query;
+  return query;
 }
 
 /** Real 1D change + sparkline for every asset on the active chain (market list rows). */
@@ -65,6 +69,6 @@ export function useMarketSummary() {
     queryFn: () =>
       getJson<MarketSummaryResponse>("/api/market", "Couldn't load market data."),
   });
-  if (demo) return { ...query, data: DEMO_MARKET_SUMMARY, isLoading: false, isPending: false } as typeof query;
+  if (demo) return { ...query, data: demo.marketSummary, isLoading: false, isPending: false } as typeof query;
   return query;
 }
