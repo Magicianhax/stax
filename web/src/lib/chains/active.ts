@@ -6,6 +6,7 @@
 // choice from when Base was the default, and ignoring it lands everyone on BNB Chain once. A choice
 // made after that sticks.
 import { useSyncExternalStore } from "react";
+import { pinMount, unpinMount } from "./demoPin";
 import { CHAINS, DEFAULT_CHAIN_KEY, isChainKey, type ChainKey, type StaxChain } from "./index";
 
 const STORAGE_KEY = "stax.chain.v2";
@@ -13,8 +14,10 @@ const listeners = new Set<() => void>();
 let current: ChainKey = DEFAULT_CHAIN_KEY;
 let hydrated = false;
 // The demo (/demo and the landing) pins its own network so the visitor's saved choice neither
-// decides what the demo shows nor is overwritten by switching networks inside it.
-let demoPinned = false;
+// decides what the demo shows nor is overwritten by switching networks inside it. Counted per
+// mount (demoPin.ts) so two demos can't unpin each other.
+let demoPins = { count: 0 };
+const isDemoPinned = () => demoPins.count > 0;
 
 function hydrate() {
   if (hydrated || typeof window === "undefined") return;
@@ -40,7 +43,7 @@ export function setActiveChainKey(key: ChainKey) {
   hydrate();
   if (key === current) return;
   current = key;
-  if (!demoPinned) {
+  if (!isDemoPinned()) {
     try {
       window.localStorage.setItem(STORAGE_KEY, key);
     } catch {
@@ -52,19 +55,25 @@ export function setActiveChainKey(key: ChainKey) {
 
 /**
  * Pin the active network for a demo mount: ignores what is saved in localStorage and stops
- * later switches being saved. Silent (no listener notification) because it runs while the demo
- * first renders, before anything below it has subscribed.
+ * later switches being saved. Call it from an effect (never during render, so SSR leaves module
+ * state alone). The first mount sets the network and notifies subscribers; later mounts only
+ * add to the count.
  */
 export function pinDemoChain(key: ChainKey) {
-  demoPinned = true;
+  const r = pinMount(demoPins);
+  demoPins = r.state;
+  if (!r.first) return;
   hydrated = true;
+  const changed = current !== key;
   current = key;
+  if (changed) listeners.forEach((l) => l());
 }
 
-/** Undo pinDemoChain: the saved choice (or the default) is read again on next use. */
+/** Undo one pinDemoChain. When the last demo goes, the saved choice (or the default) is read again. */
 export function unpinDemoChain() {
-  if (!demoPinned) return;
-  demoPinned = false;
+  const r = unpinMount(demoPins);
+  demoPins = r.state;
+  if (!r.last) return;
   hydrated = false;
   current = DEFAULT_CHAIN_KEY;
   listeners.forEach((l) => l());
