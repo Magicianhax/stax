@@ -615,6 +615,26 @@ describe("roundLegWeights", () => {
   it("keeps a plan of exact $6 legs exact", () => {
     expect(roundLegWeights([6, 6], 12)).toEqual([50, 50]);
   });
+
+  it.each([
+    [3, 18],
+    [6, 36],
+    [7, 42],
+  ])("sizes %i legs all at the floor at $6 each ($%i)", (n, total) => {
+    const usds = Array.from({ length: n }, () => 6);
+    const w = roundLegWeights(usds, total);
+    const syms = ["NVDA", "MSFT", "GOOGL", "AAPL", "AMZN", "TSLA", "META"];
+    const entries = usds.map((_, i) => ({ asset: assetBySymbol(bsc, syms[i])!, weightPct: w[i] }));
+    const split = splitByWeight(entries, usdToRaw(bsc, total));
+    expect(split).toHaveLength(n);
+    for (const leg of split) expect(rawToUsd(bsc, leg.usdcIn)).toBeGreaterThanOrEqual(6 - 1e-6);
+  });
+
+  it("takes a floor overshoot from a leg with headroom, not from a leg on the floor", () => {
+    const w = roundLegWeights([6, 6, 6, 12], 30);
+    for (let i = 0; i < 3; i++) expect((w[i] / 100) * 30).toBeGreaterThanOrEqual(6 - 1e-9);
+    expect(Math.round(w.reduce((a, b) => a + b, 0) * 100)).toBe(10_000);
+  });
 });
 
 describe("planChangeNote", () => {

@@ -177,20 +177,38 @@ export function enforceMinLegs<T extends BscCandidateLeg>(legs: T[], totalUsd: n
  * remainder after dividing by that inflated total, sized a $6.00 leg at $5.9994 and Binance's
  * floor refused a plan Vera had just approved. Here every leg is floored to a hundredth of a
  * percent, any leg that was funded at the floor but floored under it is bumped back up by one
- * step, and the slack (positive or negative) goes to the LARGEST leg, never the smallest.
+ * step, positive slack goes to the LARGEST leg, and negative slack is taken only from legs that
+ * stay at or above the floor (when every leg sits on it the sum stays over 100.00, which
+ * splitByWeight normalises away).
  */
 export function roundLegWeights(legUsds: readonly number[], totalUsd: number, minUsd: number = BSC_MIN_LEG_USD): number[] {
   const UNITS = 10_000; // hundredths of a percent
   if (legUsds.length === 0 || !(totalUsd > 0)) return legUsds.map(() => 0);
   const EPS = 1e-9;
   const minUnits = Math.ceil((minUsd / totalUsd) * UNITS - EPS);
-  const units = legUsds.map((usd) => {
+  const funded = legUsds.map((usd) => usd >= minUsd - EPS);
+  const units = legUsds.map((usd, i) => {
     const floored = Math.floor((usd / totalUsd) * UNITS + EPS);
-    return usd >= minUsd - EPS ? Math.max(floored, minUnits) : floored;
+    return funded[i] ? Math.max(floored, minUnits) : floored;
   });
-  let largest = 0;
-  for (let i = 1; i < legUsds.length; i++) if (legUsds[i] > legUsds[largest]) largest = i;
-  units[largest] += UNITS - units.reduce((s, u) => s + u, 0);
+  let slack = UNITS - units.reduce((s, u) => s + u, 0);
+  if (slack >= 0) {
+    let largest = 0;
+    for (let i = 1; i < legUsds.length; i++) if (legUsds[i] > legUsds[largest]) largest = i;
+    units[largest] += slack;
+  } else {
+    // The floor bumps overshot 100.00. Take the excess only from legs that stay at or above the
+    // floor (largest first), never from a leg already on it. If every leg is on the floor there
+    // is nothing to take: leave the overshoot, because splitByWeight divides by the weights' own
+    // sum and so still sizes each of those legs at exactly its share.
+    const order = legUsds.map((_, i) => i).sort((a, b) => legUsds[b] - legUsds[a]);
+    for (const i of order) {
+      if (slack === 0) break;
+      const take = Math.min(-slack, Math.max(0, units[i] - (funded[i] ? minUnits : 0)));
+      units[i] -= take;
+      slack += take;
+    }
+  }
   return units.map((u) => u / 100);
 }
 
