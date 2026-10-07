@@ -14,7 +14,11 @@ vi.mock("@/lib/server/rateLimit", () => ({
 }));
 
 const cachedBscBalancesSpy = vi.fn();
-vi.mock("@/lib/server/binance/wallet", () => ({ cachedBscBalances: (...args: unknown[]) => cachedBscBalancesSpy(...args) }));
+const invalidateSpy = vi.fn();
+vi.mock("@/lib/server/binance/wallet", () => ({
+  cachedBscBalances: (...args: unknown[]) => cachedBscBalancesSpy(...args),
+  invalidateBscBalanceCache: (...args: unknown[]) => invalidateSpy(...args),
+}));
 
 vi.mock("@/lib/server/binance", () => ({ getBinanceWeb3: () => ({ rwaTokens: async () => [] }) }));
 vi.mock("@/lib/prices", () => ({ priceAll: async () => ({}) }));
@@ -41,8 +45,8 @@ const usdt = bsc.usdc.address.toLowerCase();
 const firstStock = bsc.assets.all.find((a) => a.address && a.decimals)!;
 const firstStockAddr = firstStock.address!.toLowerCase();
 
-function reqFor(chain: string): NextRequest {
-  return new NextRequest(`http://localhost/api/portfolio?address=${ADDR}&chain=${chain}`);
+function reqFor(chain: string, extra = ""): NextRequest {
+  return new NextRequest(`http://localhost/api/portfolio?address=${ADDR}&chain=${chain}${extra}`);
 }
 
 // The exact address set route.ts reads (cash + every stock/crypto default mint + every twin
@@ -58,6 +62,7 @@ function allBscReadAddresses(): string[] {
 
 beforeEach(() => {
   cachedBscBalancesSpy.mockReset();
+  invalidateSpy.mockReset();
   multicallSpy.mockReset();
   getSavingsBalanceUsdSpy.mockReset().mockResolvedValue(null);
 });
@@ -139,5 +144,27 @@ describe("GET /api/portfolio on BSC", () => {
     const res = await GET(reqFor("bsc"));
     const body = await res.json();
     expect(body.savingsUsd).toBe(0);
+  });
+});
+
+describe("GET /api/portfolio?fresh=1 on BSC (right after the person's own trade)", () => {
+  it("skips the Wallet API cache and reads cash from the chain, so Home doesn't animate pre-trade numbers", async () => {
+    const stale = new Map(allBscReadAddresses().map((a) => [a.toLowerCase(), BigInt(0)]));
+    stale.set(usdt, BigInt(30) * BigInt(10) ** BigInt(18)); // the cached read still says $30
+    cachedBscBalancesSpy.mockResolvedValueOnce(stale);
+    multicallSpy.mockResolvedValueOnce([{ status: "success", result: BigInt(24) * BigInt(10) ** BigInt(18) }]); // after a $6 buy
+
+    const res = await GET(reqFor("bsc", "&fresh=1"));
+    const body = await res.json();
+
+    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    expect(body.cashUsd).toBe(24);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("leaves the cache alone on an ordinary poll", async () => {
+    cachedBscBalancesSpy.mockResolvedValueOnce(new Map(allBscReadAddresses().map((a) => [a.toLowerCase(), BigInt(0)])));
+    await GET(reqFor("bsc"));
+    expect(invalidateSpy).not.toHaveBeenCalled();
   });
 });

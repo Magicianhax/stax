@@ -142,6 +142,28 @@ describe("cachedBscBalances", () => {
     expect(mockWeb3Request).toHaveBeenCalledTimes(2);
   });
 
+  it("invalidateBscBalanceCache(minAgeMs) leaves a younger read alone, so a client can't drain the Binance budget", async () => {
+    vi.useFakeTimers();
+    try {
+      const { cachedBscBalances, invalidateBscBalanceCache } = await import("./wallet");
+      mockWeb3Request.mockResolvedValue([{ tokenAssets: [tokenAsset(TOKEN, "1")] }]);
+      const other = "0xbbb0000000000000000000000000000000000b" as const;
+
+      await cachedBscBalances(other, [TOKEN]);
+      vi.advanceTimersByTime(500);
+      invalidateBscBalanceCache(other, 2_000); // too young: kept
+      await cachedBscBalances(other, [TOKEN]);
+      expect(mockWeb3Request).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(2_000);
+      invalidateBscBalanceCache(other, 2_000); // old enough: dropped
+      await cachedBscBalances(other, [TOKEN]);
+      expect(mockWeb3Request).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("doesn't poison later reads after a failure", async () => {
     const { cachedBscBalances } = await import("./wallet");
     mockWeb3Request.mockRejectedValueOnce(new Error("network down"));

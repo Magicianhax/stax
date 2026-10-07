@@ -107,6 +107,11 @@ interface PortfolioApiResponse {
   holdings: PortfolioApiHolding[];
 }
 
+// Set by useRefreshBalances: until this instant the portfolio reads ask the server to skip its
+// per-address balance cache (BSC), so a trade or Savings move shows up in the balances right away.
+let freshUntilMs = 0;
+const FRESH_WINDOW_MS = 6_000;
+
 /** The user's holdings on the active chain, valued server-side. See /api/portfolio. */
 export function usePortfolio(address?: string) {
   const demo = useDemo();
@@ -117,7 +122,8 @@ export function usePortfolio(address?: string) {
     refetchInterval: 30_000,
     ...LIVE_BALANCE_OPTS,
     queryFn: async (): Promise<Portfolio> => {
-      const res = await authedFetch(`/api/portfolio?address=${address}`);
+      // After the person's own write the next read bypasses the server's balance cache.
+      const res = await authedFetch(`/api/portfolio?address=${address}${Date.now() < freshUntilMs ? "&fresh=1" : ""}`);
       const json = await res.json();
       if (!res.ok) {
         throw new Error(typeof json?.error === "string" ? json.error : "Couldn't load portfolio.");
@@ -167,6 +173,7 @@ export function isBuyableStock(chain: StaxChain, symbol: string): boolean {
 export function useRefreshBalances() {
   const qc = useQueryClient();
   return useCallback(() => {
+    freshUntilMs = Date.now() + FRESH_WINDOW_MS;
     const invalidate = () => {
       qc.invalidateQueries({ queryKey: ["usdc-balance"] });
       qc.invalidateQueries({ queryKey: ["portfolio"] });
