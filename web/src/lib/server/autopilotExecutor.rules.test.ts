@@ -172,6 +172,29 @@ describe("runAutopilot: a rule plan with buy-only intents", () => {
   });
 });
 
+describe("runAutopilot: a buy_discount on the twin issuer", () => {
+  it("hands buildLegs the twin's venue and address, so the executor leg buys exactly that token", async () => {
+    const nvda = deployedBsc.assets.all.find((a) => a.symbol === "NVDA")!;
+    planAutopilotRunSpy.mockResolvedValue({
+      ok: true,
+      kind: "rule",
+      rule: { type: "buy_discount", symbol: "NVDA", discountPct: 2 },
+      intents: [{ symbol: "NVDA", action: "buy", usd: 25, reason: "NVDA is 3% cheap via Ondo", platform: "ondo" }],
+      receipt: "Vera bought the discount: bought $25 of NVDA.",
+    });
+    buildLegsSpy.mockResolvedValue({
+      legs: [{ router: "0xB44446b0c8E56988c34f7Ff73Ae904982b5FdDA5", tokenOut: nvda.twin!.address, usdcIn: BigInt(1), minOut: BigInt(1), swapData: "0x" }],
+      notes: [],
+    });
+
+    const result = await runAutopilot(cfg(), { nowSeconds: NOW_S }, deployedBsc);
+
+    expect(result).toEqual({ ok: true, txHash: "0xtx" });
+    const [{ allocation }] = buildLegsSpy.mock.calls[0];
+    expect(allocation.allocations).toEqual([expect.objectContaining({ symbol: "NVDA", venue: "ondo", address: nvda.twin!.address })]);
+  });
+});
+
 describe("runAutopilot: a rule plan above the user's risk ceiling", () => {
   it("skips at the bounds gate and never signs a fabricated zero-risk inference (review finding #1)", async () => {
     planAutopilotRunSpy.mockResolvedValue({

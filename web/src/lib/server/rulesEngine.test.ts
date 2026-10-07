@@ -78,13 +78,13 @@ describe("planRuleForAutopilot: buy_discount", () => {
     expect(plan).toEqual({ ok: false, reason: expect.stringContaining("NVDA") });
   });
 
-  it("refuses (rather than buy the wrong issuer) when the twin is discounted but NVDA's own bStock venue isn't", async () => {
+  it("buys the twin issuer when that is where the discount is (the executor buys either issuer)", async () => {
     // NVDA's default platform on BSC is bstock (see chains/bsc.assets.ts); ondo is its twin.
-    // bStock sits at par (no discount) while Ondo is genuinely 3% cheap. The old `bestVenue`
-    // pick (smallest |gap| among buyable venues) would have chosen bStock's ~0% gap and found
-    // nothing; classifySpread across every venue correctly finds Ondo's discount instead — but
-    // the shared executor pipeline can only buy NVDA's own (bStock) address, so this must refuse
-    // rather than sign a buy of the wrong token (review finding #2).
+    // bStock sits at par while Ondo is genuinely 3% cheap. The old `bestVenue` pick (smallest
+    // |gap| among buyable venues) would have chosen bStock and found nothing; classifySpread
+    // across every venue finds Ondo's discount. Executor legs are issuer-aware now (legBuilder
+    // resolves the intent's venue) and the executor whitelists both NVDA tokens, so the rule buys
+    // Ondo, tagged with its platform so the leg buys exactly that token.
     bscCatalogSnapshotSpy.mockResolvedValue({
       asOf: NOW,
       tickers: [
@@ -99,7 +99,41 @@ describe("planRuleForAutopilot: buy_discount", () => {
 
     const plan = await planRuleForAutopilot(bsc, { type: "buy_discount", symbol: "NVDA", discountPct: 2 }, { nowMs: NOW, budgetUsd: 25 });
 
-    expect(plan).toEqual({ ok: false, reason: expect.stringMatching(/other issuer/i) });
+    expect(plan.ok).toBe(true);
+    if (plan.ok) expect(plan.intents).toEqual([expect.objectContaining({ symbol: "NVDA", action: "buy", usd: 25, platform: "ondo" })]);
+  });
+
+  it("buys the discounted issuer that is open, not a deeper discount that is paused", async () => {
+    bscCatalogSnapshotSpy.mockResolvedValue({
+      asOf: NOW,
+      tickers: [
+        ticker({
+          venues: [
+            venue({ platform: "bstock", gapPct: -2.5 }),
+            venue({ platform: "ondo", symbol: "NVDAon", address: "0xa9ee28c80f960b889dfbd1902055218cba016f75", gapPct: -6, buyable: false, state: "paused" }),
+          ],
+        }),
+      ],
+    });
+
+    const plan = await planRuleForAutopilot(bsc, { type: "buy_discount", symbol: "NVDA", discountPct: 2 }, { nowMs: NOW, budgetUsd: 25 });
+
+    expect(plan.ok).toBe(true);
+    if (plan.ok) expect(plan.intents).toEqual([expect.objectContaining({ symbol: "NVDA", usd: 25, platform: "bstock" })]);
+  });
+
+  it("refuses an issuer this asset doesn't list rather than guess an address", async () => {
+    // AAPL is Ondo by default with a bStock twin; a stock with no twin can't map a second issuer.
+    const solo = getChain("bsc").assets.all.find((a) => a.tier === "stock" && a.platform && !a.twin)!;
+    const other = solo.platform === "bstock" ? "ondo" : "bstock";
+    bscCatalogSnapshotSpy.mockResolvedValue({
+      asOf: NOW,
+      tickers: [ticker({ ticker: solo.symbol, venues: [venue({ platform: other, gapPct: -4 })] })],
+    });
+
+    const plan = await planRuleForAutopilot(bsc, { type: "buy_discount", symbol: solo.symbol, discountPct: 2 }, { nowMs: NOW, budgetUsd: 25 });
+
+    expect(plan).toEqual({ ok: false, reason: expect.stringContaining(solo.symbol) });
   });
 
   it("does nothing when the only venue with a big enough gap is paused (not buyable)", async () => {

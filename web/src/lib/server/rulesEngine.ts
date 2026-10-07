@@ -102,15 +102,16 @@ const skip = (reason: string): RulePlanResult => ({ ok: false, reason });
  * catalog's own pick) is the buyable venue with the SMALLEST |gap| — the closest to par, i.e.
  * the LEAST likely to be a discount — so a real -3% on the twin is missed whenever the primary
  * sits at -0.5%. Every venue is checked instead, through the same classifySpread the issuer
- * board uses, and the most-negative buyable gap wins (review finding #2). The executor's shared
- * leg-building pipeline (lib/legBuilder.ts, outside this stream) always buys the asset's own
- * default address, though — it has no way to route to the twin's — so a discount that only
- * lives on the twin is refused rather than silently bought at the wrong address.
+ * board uses, and the most-negative gap wins, preferring a buyable venue (review finding #2).
+ * Either issuer can win: executor legs are issuer-aware (lib/legBuilder.ts buys the intent's
+ * `platform`, re-checked buyable) and the BSC executor whitelists both issuers' tokens.
  */
 function pickDiscountVenue(ticker: Pick<RwaTickerView, "venues">, discountPct: number): VenueView | null {
   const discounted = ticker.venues.filter((v) => classifySpread(v, { discountPct }).label === "discount");
   if (discounted.length === 0) return null;
-  return discounted.reduce((best, v) => ((v.gapPct ?? 0) < (best.gapPct ?? 0) ? v : best));
+  const buyable = discounted.filter((v) => v.buyable);
+  const pool = buyable.length > 0 ? buyable : discounted;
+  return pool.reduce((best, v) => ((v.gapPct ?? 0) < (best.gapPct ?? 0) ? v : best));
 }
 
 async function planBuyDiscount(chain: StaxChain, rule: Extract<Rule, { type: "buy_discount" }>, ctx: RuleRunContext): Promise<RulePlanResult> {
@@ -124,12 +125,10 @@ async function planBuyDiscount(chain: StaxChain, rule: Extract<Rule, { type: "bu
 
   const asset = assetBySymbol(chain, rule.symbol);
   if (!asset) return skip(`${rule.symbol} isn't listed on ${chain.name} right now.`);
+  // The issuer must be one of this asset's own tokens (its default or its twin, both whitelisted
+  // on the executor). One venues.ts can't map is never guessed at.
   const resolved = resolveVenueAddress(chain, asset, best.platform);
-  if (!resolved || resolved.address.toLowerCase() !== asset.address?.toLowerCase()) {
-    // The discount lives on the twin (or an issuer venues.ts can't map at all) — see this
-    // function's header for why that can't be bought yet.
-    return skip(`${rule.symbol} is cheaper via its other issuer right now, which Vera can't buy for this rule yet.`);
-  }
+  if (!resolved) return skip(`${rule.symbol} is cheaper via an issuer Vera can't buy right now.`);
   const intents = evaluateBuyDiscount(
     { symbol: rule.symbol, buyable: best.buyable, gapPct: best.gapPct, platform: best.platform },
     rule.discountPct,
