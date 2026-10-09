@@ -33,9 +33,6 @@ const VTOKEN_ABI = [
 function mintCall(amount: bigint, to: `0x${string}` = VENUS_VUSDT_ADDRESS) {
   return { to, data: encodeFunctionData({ abi: VTOKEN_ABI, functionName: "mint", args: [amount] }), value: "0" };
 }
-function redeemCall(fn: "redeem" | "redeemUnderlying", amount: bigint, to: `0x${string}` = VENUS_VUSDT_ADDRESS) {
-  return { to, data: encodeFunctionData({ abi: VTOKEN_ABI, functionName: fn, args: [amount] }), value: "0" };
-}
 function approveCall(spender: `0x${string}`, amount: bigint, to: `0x${string}` = bsc.usdc.address) {
   return { to, data: encodeFunctionData({ abi: ERC20_ABI, functionName: "approve", args: [spender, amount] }) };
 }
@@ -171,71 +168,62 @@ describe("buildSavingsDeposit", () => {
   });
 });
 
+// 2026-10-09: "Move money out" said "You don't have savings to move out yet" to an account holding
+// $25 of vUSDT — Binance's build-redeem (40456) doesn't see smart-account positions. The redeem is
+// now built from the on-chain balance, simulated first, and never asks Binance.
 describe("buildSavingsRedeem", () => {
+  const VBAL = BigInt("94167254163"); // the real account's 941.67 vUSDT (≈ $25.00) on 2026-10-09
+  const deps = (balance: bigint, code: bigint | Error = BigInt(0)) => ({
+    vUsdtBalance: vi.fn(async () => balance),
+    simulateRedeem: vi.fn(async () => {
+      if (code instanceof Error) throw code;
+      return code;
+    }),
+  });
+
   it("refuses a ratio outside (0, 1]", async () => {
     const { buildSavingsRedeem, SavingsRefusal } = await import("./savings");
-    await expect(buildSavingsRedeem(bsc, ADDR, 0)).rejects.toThrow(SavingsRefusal);
-    await expect(buildSavingsRedeem(bsc, ADDR, 1.5)).rejects.toThrow(SavingsRefusal);
+    await expect(buildSavingsRedeem(bsc, ADDR, 0, deps(VBAL))).rejects.toThrow(SavingsRefusal);
+    await expect(buildSavingsRedeem(bsc, ADDR, 1.5, deps(VBAL))).rejects.toThrow(SavingsRefusal);
   });
 
-  it("translates Binance's 'no position found' into a plain refusal, not a 500", async () => {
-    // Dynamically imported (not a static top-of-file import) so this is the SAME module
-    // instance savings.ts itself imports after vi.resetModules() — otherwise `instanceof`
-    // inside savings.ts would compare against a different class object and never match.
-    const { BinanceWeb3Error } = await import("./binance/types");
-    buildRedeem.mockRejectedValueOnce(new BinanceWeb3Error(40456, "no position found for investmentId=x", 200));
-    const { buildSavingsRedeem, SavingsRefusal } = await import("./savings");
-    await expect(buildSavingsRedeem(bsc, ADDR, 1)).rejects.toThrow(SavingsRefusal);
-  });
-
-  it("passes a real redeem() call through", async () => {
-    buildRedeem.mockResolvedValueOnce([redeemCall("redeem", BigInt(10) ** BigInt(8))]);
+  it("moves all of it out with one redeem of the whole on-chain vUSDT balance, never asking Binance", async () => {
     const { buildSavingsRedeem } = await import("./savings");
-    const calls = await buildSavingsRedeem(bsc, ADDR, 1);
+    const d = deps(VBAL);
+    const calls = await buildSavingsRedeem(bsc, ADDR, 1, d);
+    expect(buildRedeem).not.toHaveBeenCalled();
     expect(calls).toHaveLength(1);
     expect(calls[0].to.toLowerCase()).toBe(VENUS_VUSDT_ADDRESS.toLowerCase());
+    const decoded = decodeFunctionData({
+      abi: [{ type: "function", name: "redeem", stateMutability: "nonpayable", inputs: [{ name: "redeemTokens", type: "uint256" }], outputs: [{ name: "", type: "uint256" }] }] as const,
+      data: calls[0].data,
+    });
+    expect(decoded.args[0]).toBe(VBAL);
+    expect(d.simulateRedeem).toHaveBeenCalledWith(bsc, ADDR, VBAL);
   });
 
-  it("also accepts redeemUnderlying()", async () => {
-    buildRedeem.mockResolvedValueOnce([redeemCall("redeemUnderlying", usdToRaw(bsc, 5))]);
+  it("redeems the asked share of the balance", async () => {
     const { buildSavingsRedeem } = await import("./savings");
-    const calls = await buildSavingsRedeem(bsc, ADDR, 1);
-    expect(calls).toHaveLength(1);
+    const d = deps(BigInt(1000));
+    await buildSavingsRedeem(bsc, ADDR, 0.25, d);
+    expect(d.simulateRedeem).toHaveBeenCalledWith(bsc, ADDR, BigInt(250));
   });
 
-  it("carries through one approve, rebuilt from the decoded (spender, amount) rather than forwarded", async () => {
-    const amount = usdToRaw(bsc, 5);
-    buildRedeem.mockResolvedValueOnce([approveCall(VENUS_VUSDT_ADDRESS, amount), redeemCall("redeem", BigInt(10) ** BigInt(8))]);
-    const { buildSavingsRedeem } = await import("./savings");
-    const calls = await buildSavingsRedeem(bsc, ADDR, 1);
-    expect(calls).toHaveLength(2);
-    const approve = decodeFunctionData({ abi: ERC20_ABI, data: calls[0].data });
-    expect(approve.args).toEqual([VENUS_VUSDT_ADDRESS, amount]);
+  it("says there's nothing to move out only when the account really holds no vUSDT", async () => {
+    const { buildSavingsRedeem, SavingsRefusal } = await import("./savings");
+    await expect(buildSavingsRedeem(bsc, ADDR, 1, deps(BigInt(0)))).rejects.toThrow(SavingsRefusal);
+    await expect(buildSavingsRedeem(bsc, ADDR, 1, deps(BigInt(0)))).rejects.toThrow(/don't have savings/);
   });
 
-  it("throws when Binance's redeem response is only a transfer", async () => {
-    buildRedeem.mockResolvedValueOnce([transferCall(ATTACKER, usdToRaw(bsc, 5))]);
-    const { buildSavingsRedeem } = await import("./savings");
-    await expect(buildSavingsRedeem(bsc, ADDR, 1)).rejects.toThrow();
+  it("never returns a redeem Venus would answer with an error code instead of a revert", async () => {
+    const { buildSavingsRedeem, SavingsRefusal } = await import("./savings");
+    await expect(buildSavingsRedeem(bsc, ADDR, 1, deps(VBAL, BigInt(14)))).rejects.toThrow(SavingsRefusal);
+    await expect(buildSavingsRedeem(bsc, ADDR, 1, deps(VBAL, new Error("execution reverted")))).rejects.toThrow(SavingsRefusal);
   });
 
-  it("throws when the redeem call targets a contract that isn't the pinned Venus address", async () => {
-    buildRedeem.mockResolvedValueOnce([redeemCall("redeem", BigInt(10) ** BigInt(8), ATTACKER)]);
-    const { buildSavingsRedeem } = await import("./savings");
-    await expect(buildSavingsRedeem(bsc, ADDR, 1)).rejects.toThrow();
-  });
-
-  it("throws when the accompanying approve targets a spender other than the pinned Venus address", async () => {
-    buildRedeem.mockResolvedValueOnce([approveCall(ATTACKER, usdToRaw(bsc, 5)), redeemCall("redeem", BigInt(10) ** BigInt(8))]);
-    const { buildSavingsRedeem } = await import("./savings");
-    await expect(buildSavingsRedeem(bsc, ADDR, 1)).rejects.toThrow();
-  });
-
-  it("throws when there is more than one approve", async () => {
-    const amount = usdToRaw(bsc, 5);
-    buildRedeem.mockResolvedValueOnce([approveCall(VENUS_VUSDT_ADDRESS, amount), approveCall(VENUS_VUSDT_ADDRESS, amount), redeemCall("redeem", BigInt(10) ** BigInt(8))]);
-    const { buildSavingsRedeem } = await import("./savings");
-    await expect(buildSavingsRedeem(bsc, ADDR, 1)).rejects.toThrow();
+  it("is BNB Chain only", async () => {
+    const { buildSavingsRedeem, SavingsRefusal } = await import("./savings");
+    await expect(buildSavingsRedeem(getChain("base"), ADDR, 1, deps(VBAL))).rejects.toThrow(SavingsRefusal);
   });
 });
 

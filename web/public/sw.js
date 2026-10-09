@@ -1,7 +1,7 @@
 // Stax service worker — hand-authored (no serwist/workbox).
 // public/ is served verbatim at /sw.js by Turbopack (no bundler processing).
 // Bump CACHE_VERSION on every deploy that changes the app shell.
-const CACHE_VERSION = "stax-v1";
+const CACHE_VERSION = "stax-v2";
 const PRECACHE = `${CACHE_VERSION}-precache`;
 const RUNTIME = `${CACHE_VERSION}-runtime`;
 const OFFLINE_URL = "/offline";
@@ -69,11 +69,19 @@ self.addEventListener("fetch", (event) => {
   // Never cache API / auth routes — always go to network.
   if (url.pathname.startsWith("/api/")) return;
 
-  // Navigations (HTML): network-first, fall back to cache, then /offline.
+  // Navigations (HTML): network-first, fall back to cache, then /offline. A phone switching
+  // networks can drop one request while the connection is fine, so a failed navigation is
+  // retried once before the offline page is shown.
   if (request.mode === "navigate") {
     event.respondWith(
       (async () => {
         try {
+          return await fetch(request);
+        } catch {
+          /* retried below */
+        }
+        try {
+          await new Promise((r) => setTimeout(r, 1200));
           return await fetch(request);
         } catch {
           const cache = await caches.open(PRECACHE);
