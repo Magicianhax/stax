@@ -444,6 +444,10 @@ the built `[approve, swap]` batch at growing delays:
 | Uniswap / Pancake pools | 65 s | (deadline) |
 
 On chain the failure reads `adapter:0x7977f3e8e063a4ee95b5f396d63485dbdea4515d:Error(RFQ_OrderExpired …)`.
+Finer measurement: Halfmoon fills at 15 s and fails at 16 s; Neptunex is expired by 2 s.
+`/quote-and-swap` never returns a Halfmoon route (`40465 Path not found` for QCOMon even with no
+`excludeDexes`), while `/quote` + `/swap` route the same pair through Halfmoon; a Halfmoon-only
+pair must be built with `/swap` (ADR-0017).
 A sponsored ERC-4337 user op lands ~10 s after the build, so Stax excludes every "Rfq …" dex
 (ADR-0016). With them excluded, 10 of 42 tickers had no route on either issuer, and a few pool
 routes quoted 84-100% below the maker (RKLBB, BABAon, AVGOon, TQQQon).

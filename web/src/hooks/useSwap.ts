@@ -21,7 +21,7 @@
 import { useCallback, useState } from "react";
 import { encodeFunctionData } from "viem";
 import { useActiveWallet } from "@/hooks/useActiveWallet";
-import { sendSponsoredCalls, type Call } from "@/lib/aa";
+import { getSmartAccountClient, sendBuiltCalls, type Call } from "@/lib/aa";
 import { asViemProvider } from "@/lib/provider";
 import { useDemo } from "@/components/demo/DemoProvider";
 import { useRefreshBalances } from "@/hooks/useBalances";
@@ -40,6 +40,8 @@ type Phase = "idle" | "swapping" | "done" | "error";
 
 const BPS = BigInt(10000);
 const DEADLINE_SECONDS = 15 * 60;
+/** Fresh builds an aggregator trade may be re-sent with after a failed op (lib/aa.ts sendBuiltCalls). */
+const AGGREGATOR_RESENDS = 2;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 // Canned receipt hash for demo-mode buys/sells on Base (never broadcast on-chain). On BNB Chain the
@@ -252,6 +254,7 @@ export function useSwap() {
           throw new Error(`${asset.symbol} isn't buyable on ${chain.name} yet.`);
         }
 
+        const assetAddress = asset.address;
         const usdc = chain.usdc.address;
         const amountIn = usdToRaw(chain, amountUsd);
         if (amountIn <= BigInt(0)) throw new Error("Enter an amount first.");
@@ -263,65 +266,72 @@ export function useSwap() {
         const expectedNet = (expectedOutRaw * netIn) / amountIn;
         const minOut = (expectedNet * (BPS - BigInt(slippageBps))) / BPS;
 
-        let calls: Call[];
-        let dryRun: DryRun | undefined;
-        const route = chain.routes[asset.symbol];
-        if (asset.via === "aave_v3") {
-          // Safe dollars: supply USDC to Aave, aUSDC lands in the user's account 1:1.
-          const pool = chain.routers.aavePool!;
-          calls = [
-            approve(usdc, pool, netIn),
-            {
-              to: pool,
-              data: encodeFunctionData({ abi: AAVE_POOL_ABI, functionName: "supply", args: [usdc, netIn, recipient, 0] }),
-            },
-          ];
-        } else if (usesAggregator(chain, asset)) {
-          // Kyber builds the swap for the NET amount; its minReturn + our quote floor both
-          // derive from the user's slippage pick. Fee transfer is prepended below as usual.
-          const agg = await aggregatorCalls(chain, {
-            asset,
-            side: "buy",
-            tokenIn: usdc,
-            amountIn: netIn,
-            account: recipient,
-            slippageBps,
-            reviewedMinOut: minOut,
-            venue,
-          });
-          calls = agg.calls;
-          dryRun = agg.dryRun;
-        } else if (route) {
-          // Multi-hop exactInput(path) has no per-hop price limit; minOut guards it alone.
-          calls = [approve(usdc, route.router, netIn), routeSwapCall(chain, asset.symbol, route.hops, recipient, netIn, minOut)];
-        } else {
-          // Single-hop gets a price-impact ceiling on top of the minOut floor.
-          const sqrtPriceLimitX96 = await singleHopSqrtLimit(chain, asset.pool!, usdc);
-          calls = [
-            approve(usdc, chain.routers.v3, netIn),
-            singleHopSwapCall(chain, {
+        // The wallet and its smart account are readied before anything is built: a Binance route
+        // through a market maker fills for only seconds after its build (lib/server/binanceLegs.ts).
+        const provider = asViemProvider(await wallet.getEthereumProvider());
+        await getSmartAccountClient(provider, chain);
+        const buildCalls = async (): Promise<{ calls: Call[]; dryRun?: DryRun }> => {
+          let calls: Call[];
+          let dryRun: DryRun | undefined;
+          const route = chain.routes[asset.symbol];
+          if (asset.via === "aave_v3") {
+            // Safe dollars: supply USDC to Aave, aUSDC lands in the user's account 1:1.
+            const pool = chain.routers.aavePool!;
+            calls = [
+              approve(usdc, pool, netIn),
+              {
+                to: pool,
+                data: encodeFunctionData({ abi: AAVE_POOL_ABI, functionName: "supply", args: [usdc, netIn, recipient, 0] }),
+              },
+            ];
+          } else if (usesAggregator(chain, asset)) {
+            // Kyber builds the swap for the NET amount; its minReturn + our quote floor both
+            // derive from the user's slippage pick. Fee transfer is prepended below as usual.
+            const agg = await aggregatorCalls(chain, {
+              asset,
+              side: "buy",
               tokenIn: usdc,
-              tokenOut: asset.address,
-              fee: asset.feeTier ?? 3000,
-              recipient,
               amountIn: netIn,
-              amountOutMinimum: minOut,
-              sqrtPriceLimitX96,
-            }),
-          ];
-        }
+              account: recipient,
+              slippageBps,
+              reviewedMinOut: minOut,
+              venue,
+            });
+            calls = agg.calls;
+            dryRun = agg.dryRun;
+          } else if (route) {
+            // Multi-hop exactInput(path) has no per-hop price limit; minOut guards it alone.
+            calls = [approve(usdc, route.router, netIn), routeSwapCall(chain, asset.symbol, route.hops, recipient, netIn, minOut)];
+          } else {
+            // Single-hop gets a price-impact ceiling on top of the minOut floor.
+            const sqrtPriceLimitX96 = await singleHopSqrtLimit(chain, asset.pool!, usdc);
+            calls = [
+              approve(usdc, chain.routers.v3, netIn),
+              singleHopSwapCall(chain, {
+                tokenIn: usdc,
+                tokenOut: assetAddress,
+                fee: asset.feeTier ?? 3000,
+                recipient,
+                amountIn: netIn,
+                amountOutMinimum: minOut,
+                sqrtPriceLimitX96,
+              }),
+            ];
+          }
 
-        // Fee transfer (if any) goes first, batched into the same sponsored UserOp.
-        if (feeRaw > BigInt(0)) {
-          calls.unshift({
-            to: usdc,
-            data: encodeFunctionData({ abi: ERC20_ABI, functionName: "transfer", args: [STAX_TREASURY, feeRaw] }),
-          });
-        }
+          // Fee transfer (if any) goes first, batched into the same sponsored UserOp.
+          if (feeRaw > BigInt(0)) {
+            calls.unshift({
+              to: usdc,
+              data: encodeFunctionData({ abi: ERC20_ABI, functionName: "transfer", args: [STAX_TREASURY, feeRaw] }),
+            });
+          }
+          return { calls, dryRun };
+        };
 
         setPhase("swapping");
-        const provider = asViemProvider(await wallet.getEthereumProvider());
-        const receipt = await sendSponsoredCalls(provider, calls, chain);
+        const { receipt, built } = await sendBuiltCalls(provider, chain, buildCalls, usesAggregator(chain, asset) ? AGGREGATOR_RESENDS : 0);
+        const dryRun = built.dryRun;
         setResult({
           txHash: receipt.receipt.transactionHash as `0x${string}`,
           asset,
@@ -404,53 +414,58 @@ export function useSwap() {
         if (!venueToken) throw new Error(`Couldn't find ${asset.symbol} for that venue.`);
 
         const usdc = chain.usdc.address;
-        let calls: Call[];
-        let dryRun: DryRun | undefined;
-        if (asset.via === "aave_v3") {
-          // aUSDC balance is the USDC amount (1:1, 6 dec); withdraw burns it from the caller.
-          calls = [
-            {
-              to: chain.routers.aavePool!,
-              data: encodeFunctionData({ abi: AAVE_POOL_ABI, functionName: "withdraw", args: [usdc, amountIn, recipient] }),
-            },
-          ];
-        } else if (aggregator) {
-          const agg = await aggregatorCalls(chain, {
-            asset,
-            side: "sell",
-            tokenIn: venueToken.address,
-            amountIn,
-            account: recipient,
-            slippageBps,
-            reviewedMinOut: minUsdcOut,
-            venue,
-          });
-          calls = agg.calls;
-          dryRun = agg.dryRun;
-        } else if (route) {
-          calls = [
-            approve(asset.address!, route.router, amountIn),
-            routeSwapCall(chain, asset.symbol, reverseRoute(route.hops), recipient, amountIn, minUsdcOut),
-          ];
-        } else {
-          const sqrtPriceLimitX96 = await singleHopSqrtLimit(chain, asset.pool!, asset.address!);
-          calls = [
-            approve(asset.address!, chain.routers.v3, amountIn),
-            singleHopSwapCall(chain, {
-              tokenIn: asset.address!,
-              tokenOut: usdc,
-              fee: asset.feeTier ?? 3000,
-              recipient,
+        const provider = asViemProvider(await wallet.getEthereumProvider());
+        await getSmartAccountClient(provider, chain);
+        const buildCalls = async (): Promise<{ calls: Call[]; dryRun?: DryRun }> => {
+          let calls: Call[];
+          let dryRun: DryRun | undefined;
+          if (asset.via === "aave_v3") {
+            // aUSDC balance is the USDC amount (1:1, 6 dec); withdraw burns it from the caller.
+            calls = [
+              {
+                to: chain.routers.aavePool!,
+                data: encodeFunctionData({ abi: AAVE_POOL_ABI, functionName: "withdraw", args: [usdc, amountIn, recipient] }),
+              },
+            ];
+          } else if (aggregator) {
+            const agg = await aggregatorCalls(chain, {
+              asset,
+              side: "sell",
+              tokenIn: venueToken.address,
               amountIn,
-              amountOutMinimum: minUsdcOut,
-              sqrtPriceLimitX96,
-            }),
-          ];
-        }
+              account: recipient,
+              slippageBps,
+              reviewedMinOut: minUsdcOut,
+              venue,
+            });
+            calls = agg.calls;
+            dryRun = agg.dryRun;
+          } else if (route) {
+            calls = [
+              approve(asset.address!, route.router, amountIn),
+              routeSwapCall(chain, asset.symbol, reverseRoute(route.hops), recipient, amountIn, minUsdcOut),
+            ];
+          } else {
+            const sqrtPriceLimitX96 = await singleHopSqrtLimit(chain, asset.pool!, asset.address!);
+            calls = [
+              approve(asset.address!, chain.routers.v3, amountIn),
+              singleHopSwapCall(chain, {
+                tokenIn: asset.address!,
+                tokenOut: usdc,
+                fee: asset.feeTier ?? 3000,
+                recipient,
+                amountIn,
+                amountOutMinimum: minUsdcOut,
+                sqrtPriceLimitX96,
+              }),
+            ];
+          }
+          return { calls, dryRun };
+        };
 
         setPhase("swapping");
-        const provider = asViemProvider(await wallet.getEthereumProvider());
-        const receipt = await sendSponsoredCalls(provider, calls, chain);
+        const { receipt, built } = await sendBuiltCalls(provider, chain, buildCalls, aggregator ? AGGREGATOR_RESENDS : 0);
+        const dryRun = built.dryRun;
         setResult({
           txHash: receipt.receipt.transactionHash as `0x${string}`,
           asset,

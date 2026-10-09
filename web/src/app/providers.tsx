@@ -53,6 +53,9 @@ export function Providers({ children }: { children: ReactNode }) {
         // their own wallet keep using that EOA (it owns their gasless smart account).
         embeddedWallets: {
           ethereum: { createOnLogin: "users-without-wallets" },
+          // Stax's own review screen is the confirmation; a second Privy pop-up between it and the
+          // send costs seconds that a Binance maker quote (15 s) doesn't have.
+          showWalletUIs: false,
         },
         // Branded to match the app: deep "Soft"-dark surface, sage-green accent,
         // the Stax logo, email/social first (beginner-friendly), on-voice copy.

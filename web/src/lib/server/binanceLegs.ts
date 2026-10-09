@@ -32,34 +32,56 @@ import type { AggQuoteAndSwap, AggSwapBuild, RwaToken } from "./binance/types";
 const BPS = BigInt(10_000);
 
 /**
- * Market makers whose signed quotes Binance embeds in the swap calldata, and which stop filling
- * seconds after the build. Measured 2026-10-09 by simulating built calldata at growing delays:
- * Rfq Neptunex (most bStock routes) fills at 1 s and is expired by 3 s; Rfq Halfmoon (most Ondo
- * routes) by about 18 s. Pool routes still fill at 65 s. A sponsored user op lands about 10 s
- * after its build (tx 0xda37369e… reverted RFQ_OrderExpired 6 s after its order expired), so a
- * route through one of these fails on chain, or in the bundler's simulation before it is sent.
- * Binance names every such maker "Rfq …"; the known names seed `excludeDexes`, which takes names,
- * not a pattern.
+ * Market makers whose signed orders Binance embeds in the swap calldata ("Rfq …" in the route's
+ * dex list). Each order stops filling a fixed time after the build. Measured 2026-10-09 by
+ * simulating built calldata at growing delays: Rfq Neptunex (most bStock routes) is expired by
+ * 2 s; Rfq Halfmoon (most Ondo routes) fills for 15 s and fails at 16 s; pool routes still fill at
+ * 65 s. A sponsored user op lands a few seconds after its build, so Neptunex can never be used,
+ * and Halfmoon only on a trade that is sent straight after it is built (tx 0xda37369e… reverted
+ * RFQ_OrderExpired 6 s after its Neptunex order expired).
  */
-const SHORT_LIVED_DEX = /^rfq\b/i;
-const KNOWN_SHORT_LIVED_DEXES = ["Rfq Neptunex", "Rfq Halfmoon", "Rfq Newworld"];
+const MAKER_DEX = /^rfq\b/i;
+/** Makers whose orders last long enough for a trade sent straight after its build: seconds, by lower-case name. */
+const TIMED_MAKERS: Readonly<Record<string, number>> = { "rfq halfmoon": 15 };
+/** Every maker seen live; `excludeDexes` takes names, not a pattern. */
+const KNOWN_MAKERS = ["Rfq Neptunex", "Rfq Halfmoon", "Rfq Newworld"];
 /**
- * The most a route that avoids those makers may give up against the maker's own price. Most
- * gave up 0-0.6% live; a few thin pools quoted 84-100% less, which this refuses.
+ * The most a re-route may give up against the maker route's own output. Most gave up 0-0.6%
+ * live; a few thin pools quoted 84-100% less, which this refuses.
  */
-const MAX_DURABLE_GIVEUP_BPS = BigInt(200);
+const MAX_REROUTE_GIVEUP_BPS = BigInt(200);
 /** Binance's "Path not found" / "No liquidity" (40465) and "Insufficient liquidity" (40374). */
 const NO_ROUTE_CODES = new Set([40465, 40374]);
 
+const makersIn = (dexNames: readonly string[] | undefined) => (dexNames ?? []).filter((d) => MAKER_DEX.test(d));
+
+/** True when a route runs through any market maker. */
 export function usesShortLivedMaker(dexNames: readonly string[] | undefined): boolean {
-  return (dexNames ?? []).some((d) => SHORT_LIVED_DEX.test(d));
+  return makersIn(dexNames).length > 0;
+}
+
+/**
+ * How long a route's calldata keeps filling, in seconds: Infinity with no maker on it, the
+ * shortest timed maker's window otherwise, null when a maker on it has no usable window.
+ */
+export function fillWindowS(dexNames: readonly string[] | undefined): number | null {
+  let window = Infinity;
+  for (const m of makersIn(dexNames)) {
+    const s = TIMED_MAKERS[m.toLowerCase()];
+    if (s === undefined) return null;
+    window = Math.min(window, s);
+  }
+  return window;
+}
+
+/** A route's window when every maker on it is timed (a finite number of seconds), else null. */
+function timedWindowS(dexNames: readonly string[] | undefined): number | null {
+  const w = fillWindowS(dexNames);
+  return w !== null && w !== Infinity ? w : null;
 }
 
 function noFill(symbol: string): BinanceLegRefusal {
-  return new BinanceLegRefusal(
-    `Binance can't fill ${symbol} right now. Its only seller holds a price for a few seconds, which is too short to send a trade. Try again later, or leave ${symbol} out.`,
-    "no_fill",
-  );
+  return new BinanceLegRefusal(`Binance has no seller for ${symbol} from this issuer right now.`, "no_fill");
 }
 
 export interface BinanceLegArgs {
@@ -103,6 +125,11 @@ export interface BinanceLeg {
   minOut: bigint;
   expectedOut: bigint;
   priceImpactPct: number;
+  /**
+   * Seconds this leg's calldata keeps filling after it was built, when its route runs through a
+   * timed market maker (TIMED_MAKERS). Absent for a pool route, which fills until its deadline.
+   */
+  fillWithinS?: number;
 }
 
 /**
@@ -193,7 +220,7 @@ export async function buildBinanceLeg(a: BinanceLegArgs): Promise<BinanceLeg> {
   // A price check (TradeScreen polls every 15 s) needs only the quote. Building the swap is a
   // second call against the shared 5-per-window budget, so it happens only when the user is
   // about to sign, and a price-only leg carries no calldata. The price shown must be the route
-  // the build will take, so a maker route is priced on the route that avoids it.
+  // the build will take, so a maker route is priced on the route that replaces it.
   if (a.build === false) {
     // Shared for 15 s across every caller asking the same pair and amount: TradeScreen re-polls
     // every 15 s per viewer, and each live quote spends one call of Binance's shared budget that
@@ -202,8 +229,15 @@ export async function buildBinanceLeg(a: BinanceLegArgs): Promise<BinanceLeg> {
       const q0 = await fetchQuote();
       checkQuote(q0);
       if (!usesShortLivedMaker(q0.dexNames)) return q0;
-      const d = await durableRoute(a, q0.toTokenAmount, q0.dexNames ?? [], a.slippageBps);
-      return { ...q0, toTokenAmount: d.quote.toTokenAmount, priceImpactPercent: d.quote.priceImpactPercent, dexNames: d.quote.dexNames };
+      const seen = q0.dexNames ?? [];
+      const asPrice = (p: Reroute) => ({ ...q0, toTokenAmount: p.r.quote.toTokenAmount, priceImpactPercent: p.r.quote.priceImpactPercent, dexNames: p.r.quote.dexNames });
+      const pools = await reroute(a, q0.toTokenAmount, seen, a.slippageBps, false);
+      if (pools) return asPrice(pools);
+      // Binance's own route, when every maker on it is timed: only /swap builds those.
+      if (timedWindowS(q0.dexNames) !== null) return q0;
+      const timed = await reroute(a, q0.toTokenAmount, seen, a.slippageBps, true);
+      if (timed) return asPrice(timed);
+      throw noFill(a.symbol);
     });
     checkQuote(q);
     return {
@@ -230,10 +264,11 @@ export async function buildBinanceLeg(a: BinanceLegArgs): Promise<BinanceLeg> {
   let expectedOut = q.toTokenAmount;
   let priceImpactPct = q.priceImpactPercent;
   let slippageBps = a.slippageBps;
+  let fillWithinS: number | undefined;
   let built: AggSwapBuild | undefined;
-  if (!usesShortLivedMaker(q.dexNames)) {
+  const buildDefault = () => {
     slippageBps = anchor(q.toTokenAmount);
-    built = await binance
+    return binance
       .buildSwap({
         fromToken: a.tokenIn,
         toToken: a.tokenOut,
@@ -243,19 +278,40 @@ export async function buildBinanceLeg(a: BinanceLegArgs): Promise<BinanceLeg> {
         slippagePercent: (slippageBps / 100).toString(),
       })
       .catch((err) => wrap(a.symbol, err));
-  }
+  };
+  if (!usesShortLivedMaker(q.dexNames)) built = await buildDefault();
   if (!built || usesShortLivedMaker(built.dexNames)) {
-    // The best route runs through a maker whose quote would expire before this trade lands:
-    // build the route that avoids it, at a tolerance anchored to its own price.
+    // Binance's best route runs through a market maker. In order: a pool route with every maker
+    // excluded; Binance's own route when every maker on it is timed (only /swap builds those —
+    // /quote-and-swap never returns a Halfmoon route); a re-route through timed makers only.
     const seen = [...(q.dexNames ?? []), ...(built?.dexNames ?? [])];
-    let d = await durableRoute(a, q.toTokenAmount, seen, a.slippageBps);
-    const anchored = anchor(d.quote.toTokenAmount);
-    if (anchored !== a.slippageBps) d = await durableRoute(a, q.toTokenAmount, seen, anchored);
-    slippageBps = anchored;
-    built = d.build;
-    expectedOut = d.quote.toTokenAmount;
-    priceImpactPct = d.quote.priceImpactPercent;
+    const take = async (first: Reroute, timed: boolean) => {
+      let p: Reroute | null = first;
+      const anchored = anchor(p.r.quote.toTokenAmount);
+      if (anchored !== a.slippageBps) p = await reroute(a, q.toTokenAmount, seen, anchored, timed);
+      if (!p) throw noFill(a.symbol);
+      slippageBps = anchored;
+      built = p.r.build;
+      expectedOut = p.r.quote.toTokenAmount;
+      priceImpactPct = p.r.quote.priceImpactPercent;
+      fillWithinS = p.fillWithinS;
+    };
+    const pools = await reroute(a, q.toTokenAmount, seen, a.slippageBps, false);
+    if (pools) {
+      await take(pools, false);
+    } else {
+      if (!built && timedWindowS(q.dexNames) !== null) built = await buildDefault();
+      const window = built ? fillWindowS(built.dexNames) : null;
+      if (built && window !== null) {
+        if (window !== Infinity) fillWithinS = window;
+      } else {
+        const timed = await reroute(a, q.toTokenAmount, seen, a.slippageBps, true);
+        if (!timed) throw noFill(a.symbol);
+        await take(timed, true);
+      }
+    }
   }
+  if (!built) throw noFill(a.symbol);
   if (built.executionMode !== "SWAP") {
     throw new BinanceLegRefusal(`${a.symbol}: Binance returned an RFQ route, which a contract can't sign.`, "route");
   }
@@ -279,36 +335,46 @@ export async function buildBinanceLeg(a: BinanceLegArgs): Promise<BinanceLeg> {
     minOut,
     expectedOut,
     priceImpactPct,
+    ...(fillWithinS !== undefined ? { fillWithinS } : {}),
   };
 }
 
+type Reroute = { r: AggQuoteAndSwap; fillWithinS?: number };
+
 /**
- * The same trade built by `/quote-and-swap` with every short-lived maker excluded. Refused as
- * "no_fill" when nothing else can fill it, when the result still names a maker (a new one Binance
- * added), or when it gives up more than MAX_DURABLE_GIVEUP_BPS against `makerOut`, the maker
- * route's own output.
+ * The same trade built by `/quote-and-swap`, the one endpoint that honours `excludeDexes`, with
+ * every maker excluded (or, `timed`, every maker but the timed ones). Null when nothing is left
+ * to fill it, when the result still names a maker it shouldn't (one Binance added), or when it
+ * gives up more than MAX_REROUTE_GIVEUP_BPS against `makerOut`, the maker route's own output.
  */
-async function durableRoute(a: BinanceLegArgs, makerOut: bigint, seen: string[], slippageBps: number): Promise<AggQuoteAndSwap> {
-  const excludeDexes = [...new Set([...KNOWN_SHORT_LIVED_DEXES, ...seen.filter((d) => SHORT_LIVED_DEX.test(d))])];
-  const r = await getBinanceWeb3()
-    .quoteAndSwap({
+async function reroute(a: BinanceLegArgs, makerOut: bigint, seen: string[], slippageBps: number, timed: boolean): Promise<Reroute | null> {
+  const excludeDexes = [...new Set([...KNOWN_MAKERS, ...makersIn(seen)])].filter(
+    (d) => !timed || TIMED_MAKERS[d.toLowerCase()] === undefined,
+  );
+  let r: AggQuoteAndSwap;
+  try {
+    r = await getBinanceWeb3().quoteAndSwap({
       fromToken: a.tokenIn,
       toToken: a.tokenOut,
       amount: a.amountIn,
       taker: a.taker,
       slippagePercent: (slippageBps / 100).toString(),
       excludeDexes,
-    })
-    .catch((err) => {
-      if (err instanceof BinanceWeb3Error && NO_ROUTE_CODES.has(err.code)) throw noFill(a.symbol);
-      return wrap(a.symbol, err);
     });
-  if (usesShortLivedMaker(r.quote.dexNames) || usesShortLivedMaker(r.build.dexNames)) throw noFill(a.symbol);
+  } catch (err) {
+    if (err instanceof BinanceWeb3Error && NO_ROUTE_CODES.has(err.code)) return null;
+    return wrap(a.symbol, err);
+  }
   if (r.quote.fromTokenAmount !== a.amountIn) {
     throw new BinanceLegRefusal(`${a.symbol}: Binance quoted a different amount than requested.`, "route");
   }
-  if (r.quote.toTokenAmount * BPS < makerOut * (BPS - MAX_DURABLE_GIVEUP_BPS)) throw noFill(a.symbol);
-  return r;
+  const quoted = fillWindowS(r.quote.dexNames);
+  const builtWindow = fillWindowS(r.build.dexNames);
+  if (quoted === null || builtWindow === null) return null;
+  const window = Math.min(quoted, builtWindow);
+  if (!timed && window !== Infinity) return null;
+  if (r.quote.toTokenAmount * BPS < makerOut * (BPS - MAX_REROUTE_GIVEUP_BPS)) return null;
+  return { r, ...(window !== Infinity ? { fillWithinS: window } : {}) };
 }
 
 /**

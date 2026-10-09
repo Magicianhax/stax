@@ -22,7 +22,7 @@
 import { useCallback, useState } from "react";
 import type { DryRun } from "@/lib/dryRun";
 import { useActiveWallet } from "@/hooks/useActiveWallet";
-import { sendSponsoredCalls, type Call } from "@/lib/aa";
+import { getSmartAccountClient, sendBuiltCalls, type Call } from "@/lib/aa";
 import { asViemProvider } from "@/lib/provider";
 import { executorInvestCalls } from "@/lib/executorCalls";
 import { useChain } from "@/lib/chains/active";
@@ -34,8 +34,16 @@ import { useRefreshBalances } from "@/hooks/useBalances";
 import { authedFetch } from "@/lib/authedFetch";
 import type { Allocation } from "@/lib/allocation-schema";
 import type { AllocateResult, InvestPlanResult, InvestSuccess } from "@/lib/invest-types";
+import { boughtHoldings } from "@/lib/investSummary";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Fresh plans a BNB Chain invest may be re-sent with after a failed op (lib/aa.ts sendBuiltCalls). */
+const BINANCE_RESENDS = 2;
+
+/** Binance's dry run said this plan would revert: back to the plan, which names the part (lib/planDryRuns.ts). */
+class DryRunBounce extends Error {}
+
 
 type Phase = "idle" | "thinking" | "planning" | "approving" | "investing" | "done" | "error";
 
@@ -187,117 +195,121 @@ export function useInvest(): UseInvest {
       try {
         const wallet = activeWallet;
         if (!wallet) throw new Error("No account found. Please sign in again.");
-
-        // 1. Server signs the plan for the active chain. `chain.contracts.deployed` gates
-        //    only the executor shape below — a direct-path response (`plan.calls`) needs no
-        //    deployed executor, so we always ask before deciding which shape to send.
+        // The wallet and its smart account are readied before the plan is built: a Binance route
+        // through a market maker fills for only seconds after its build (lib/server/binanceLegs.ts).
         setPhase("planning");
-        const plan = await postJson<InvestPlanResult>("/api/invest-plan", {
-          address,
-          allocation: alloc,
-          amountUsd,
-        });
-        // Never relay a plan built for another network / executor.
-        if (plan.chain !== chain.key) {
-          throw new Error("That plan was built for a different network. Please try again.");
-        }
-        // Binance's own dry run is the final word when it actually ran: "failed" means it
-        // simulated this exact trade and it would revert, so it is never sent — "skipped"
-        // (the common case for a brand-new token) and "passed" both proceed as normal. A
-        // failure bounces back to the plan with no error banner: PlanScreen names the part
-        // that failed and how to move on (lib/planDryRuns.ts), and Hold stays enabled because
-        // the server re-checks on every hold.
-        setDryRuns(plan.dryRuns);
-        if (plan.dryRuns?.some((d) => d.status === "failed")) {
-          setPhase("error");
-          return;
-        }
+        const provider = asViemProvider(await wallet.getEthereumProvider());
+        await getSmartAccountClient(provider, chain);
 
-        let calls: Call[];
-        let verification: InvestSuccess["verification"];
-        if (plan.calls) {
-          // 2a. Direct smart-account path (ADR-0005): no executor contract stands between
-          //     these calls and the wallet, so every recipient is checked before anything is
-          //     signed. Sent verbatim, in order, as one sponsored user op — atomic, so a
-          //     basket can never half-execute.
-          calls = assertExecCallsAreSafe(chain, plan.calls).map((c) => ({
-            to: c.to,
-            data: c.data,
-            ...(c.value !== undefined ? { value: BigInt(c.value) } : {}),
-          }));
-          // No on-chain risk-verification step on this path — nothing to show.
-        } else {
-          // 2b. Executor path (Base, Mantle, and BNB Chain since 2026-10-07): approve + investWithAI.
-          if (!chain.contracts.deployed) {
-            setError(notLiveMessage);
+        const buildCalls = async () => {
+          // 1. Server signs the plan for the active chain. `chain.contracts.deployed` gates
+          //    only the executor shape below — a direct-path response (`plan.calls`) needs no
+          //    deployed executor, so we always ask before deciding which shape to send.
+          setPhase("planning");
+          const plan = await postJson<InvestPlanResult>("/api/invest-plan", {
+            address,
+            allocation: alloc,
+            amountUsd,
+          });
+          // Never relay a plan built for another network / executor.
+          if (plan.chain !== chain.key) {
+            throw new Error("That plan was built for a different network. Please try again.");
+          }
+          // Binance's own dry run is the final word when it actually ran: "failed" means it
+          // simulated this exact trade and it would revert, so it is never sent — "skipped"
+          // (the common case for a brand-new token) and "passed" both proceed as normal. A
+          // failure bounces back to the plan with no error banner: PlanScreen names the part
+          // that failed and how to move on (lib/planDryRuns.ts), and Hold stays enabled because
+          // the server re-checks on every hold.
+          setDryRuns(plan.dryRuns);
+          if (plan.dryRuns?.some((d) => d.status === "failed")) throw new DryRunBounce();
+
+          let calls: Call[];
+          let verification: InvestSuccess["verification"];
+          if (plan.calls) {
+            // 2a. Direct smart-account path (ADR-0005): no executor contract stands between
+            //     these calls and the wallet, so every recipient is checked before anything is
+            //     signed. Sent verbatim, in order, as one sponsored user op — atomic, so a
+            //     basket can never half-execute.
+            calls = assertExecCallsAreSafe(chain, plan.calls).map((c) => ({
+              to: c.to,
+              data: c.data,
+              ...(c.value !== undefined ? { value: BigInt(c.value) } : {}),
+            }));
+            // No on-chain risk-verification step on this path — nothing to show.
+          } else {
+            // 2b. Executor path (Base, Mantle, and BNB Chain since 2026-10-07): approve + investWithAI.
+            if (!chain.contracts.deployed) throw new Error(notLiveMessage);
+            const executor = chain.contracts.executor;
+            if (plan.executor.toLowerCase() !== executor.toLowerCase()) {
+              throw new Error("That plan doesn't match this network. Please try again.");
+            }
+
+            const usdcTotal = BigInt(plan.usdcTotal);
+            const legs = plan.legs.map((l) => ({
+              router: l.router,
+              tokenOut: l.tokenOut,
+              usdcIn: BigInt(l.usdcIn),
+              minOut: BigInt(l.minOut),
+              swapData: l.swapData,
+            }));
+
+            // [fee -> treasury, approve(executor, exactly usdcTotal), investWithAI] through the one
+            // encoder the server also dry-runs on BNB Chain (lib/executorCalls.ts), so what Binance
+            // checked is byte for byte what is sent. The fee is gross minus the net the server
+            // deployed: zero on any chain where the server deploys the full gross (BSC, ADR-0007),
+            // and then there is no fee call at all.
+            const feeRaw = usdToRaw(chain, amountUsd) - usdcTotal;
+            calls = executorInvestCalls({
+              chain,
+              plan: {
+                planId: plan.plan.planId,
+                recHash: plan.plan.recHash,
+                riskScore: plan.plan.riskScore,
+                agentId: BigInt(plan.plan.agentId),
+              },
+              inference: {
+                assessedRisk: plan.inference.assessedRisk,
+                maxRisk: plan.inference.maxRisk,
+                expiry: BigInt(plan.inference.expiry),
+                signature: plan.inference.signature,
+              },
+              legs,
+              usdcTotal,
+              feeRaw,
+            });
+            verification = {
+              riskScore: plan.plan.riskScore,
+              maxRisk: plan.inference.maxRisk,
+              planId: plan.plan.planId,
+              agentId: plan.plan.agentId,
+              signature: plan.inference.signature,
+            };
+          }
+          // 3. Send the batched, sponsored UserOp on the active chain.
+          setPhase("investing");
+          return { calls, verification, skipped: plan.skipped ?? [] };
+        };
+
+        let sent: Awaited<ReturnType<typeof sendBuiltCalls<Awaited<ReturnType<typeof buildCalls>>>>>;
+        try {
+          sent = await sendBuiltCalls(provider, chain, buildCalls, chain.routers.binance ? BINANCE_RESENDS : 0);
+        } catch (e) {
+          if (e instanceof DryRunBounce) {
             setPhase("error");
             return;
           }
-          const executor = chain.contracts.executor;
-          if (plan.executor.toLowerCase() !== executor.toLowerCase()) {
-            throw new Error("That plan doesn't match this network. Please try again.");
-          }
-
-          const usdcTotal = BigInt(plan.usdcTotal);
-          const legs = plan.legs.map((l) => ({
-            router: l.router,
-            tokenOut: l.tokenOut,
-            usdcIn: BigInt(l.usdcIn),
-            minOut: BigInt(l.minOut),
-            swapData: l.swapData,
-          }));
-
-          // [fee -> treasury, approve(executor, exactly usdcTotal), investWithAI] through the one
-          // encoder the server also dry-runs on BNB Chain (lib/executorCalls.ts), so what Binance
-          // checked is byte for byte what is sent. The fee is gross minus the net the server
-          // deployed: zero on any chain where the server deploys the full gross (BSC, ADR-0007),
-          // and then there is no fee call at all.
-          const feeRaw = usdToRaw(chain, amountUsd) - usdcTotal;
-          calls = executorInvestCalls({
-            chain,
-            plan: {
-              planId: plan.plan.planId,
-              recHash: plan.plan.recHash,
-              riskScore: plan.plan.riskScore,
-              agentId: BigInt(plan.plan.agentId),
-            },
-            inference: {
-              assessedRisk: plan.inference.assessedRisk,
-              maxRisk: plan.inference.maxRisk,
-              expiry: BigInt(plan.inference.expiry),
-              signature: plan.inference.signature,
-            },
-            legs,
-            usdcTotal,
-            feeRaw,
-          });
-          verification = {
-            riskScore: plan.plan.riskScore,
-            maxRisk: plan.inference.maxRisk,
-            planId: plan.plan.planId,
-            agentId: plan.plan.agentId,
-            signature: plan.inference.signature,
-          };
+          throw e;
         }
+        const { receipt, built } = sent;
 
-        // 3. Send the batched, sponsored UserOp on the active chain.
-        setPhase("investing");
-        const provider = asViemProvider(await wallet.getEthereumProvider());
-        const receipt = await sendSponsoredCalls(provider, calls, chain);
-
-        // 4. Build a success summary from the allocation (USD by weight).
-        const holdings = alloc.allocations.map((a) => ({
-          symbol: a.symbol,
-          name: a.symbol,
-          weightPct: a.weightPct,
-          amountUsd: (amountUsd * a.weightPct) / 100,
-        }));
-
+        // 4. A success summary from the allocation (USD by weight), minus anything left out.
         setSuccess({
           txHash: receipt.receipt.transactionHash as `0x${string}`,
-          holdings,
+          holdings: boughtHoldings(alloc, amountUsd, built.skipped),
           amountUsd,
-          ...(verification ? { verification } : {}),
+          ...(built.skipped.length > 0 ? { skipped: built.skipped } : {}),
+          ...(built.verification ? { verification: built.verification } : {}),
         });
         setPhase("done");
         refreshBalances(); // cash + holdings + activity refetch now, no manual refresh

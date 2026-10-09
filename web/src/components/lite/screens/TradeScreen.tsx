@@ -153,6 +153,17 @@ export function TradeScreen({
   // same closed-market refusal, in a second, ET-labelled sentence right under the first.
   const quoteErrorText = venueKnownClosed ? undefined : quoteProblemText(quoteError, problemCtx("buy"));
 
+  // Binance has no seller from this issuer right now ("no_fill"): move the buy to the other
+  // issuer when it's open, once per issuer, so two empty issuers can't flip back and forth.
+  const [noFillVenues, setNoFillVenues] = useState<RwaPlatform[]>([]);
+  const noFill = side === "buy" && bsc && quoteError instanceof SwapQuoteError && quoteError.code === "no_fill";
+  // Adjusted while rendering (react.dev "adjusting state when a prop changes"): the guard runs once per issuer.
+  if (noFill && wantVenue && !noFillVenues.includes(wantVenue)) {
+    const tried = [...noFillVenues, wantVenue];
+    setNoFillVenues(tried);
+    if (otherVenueView?.buyable && !tried.includes(otherVenueView.platform)) setVenueOverride(otherVenueView.platform);
+  }
+
   // Sell side: share of the held position to sell. No default — "All" is a chip.
   const [sellPct, setSellPct] = useState(draft?.sellPct ?? 0);
   const heldRaw = holding?.raw ?? BigInt(0);
