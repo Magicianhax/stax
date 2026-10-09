@@ -335,9 +335,8 @@ export const BSC_STOCKS: Asset[] = [
     twin: ondoTwin("0xb943c8a0d77b656daf5244da060d647fd9152289", "SOXLon"),
   }),
   stock({
-    // Docs list a "SpaceX" catalog sector; SPCX is presumed to be SpaceX pre-IPO shares, unconfirmed.
+    // SpaceX is a listed company now (no longer pre-IPO, 2026-10-09), so SPCX carries no risk flag.
     symbol: "SPCX",
-    risk: "preipo",
     name: "SpaceX",
     address: "0xbe9d156892e55e7154bcd3cb0fea677f9d3103e1",
     platform: "bstock",

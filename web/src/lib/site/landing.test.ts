@@ -82,8 +82,8 @@ describe("baskets", () => {
   });
 
   it("reads holdings by name", () => {
-    const pre = landingBaskets().find((b) => b.id === "bsc:pre-ipo")!;
-    expect(basketHoldingsLine(pre)).toBe("SpaceX · Cerebras");
+    const fresh = landingBaskets().find((b) => b.id === "bsc:newly-public")!;
+    expect(basketHoldingsLine(fresh)).toMatch(/^SpaceX · Circle/);
   });
 });
 

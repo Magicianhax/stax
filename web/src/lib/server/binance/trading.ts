@@ -7,9 +7,19 @@ import "server-only";
 import { z } from "zod";
 import { web3Request } from "./client";
 import { BinanceWeb3Error } from "./types";
-import type { AggQuote, AggSwapBuild, QuoteParams } from "./types";
+import type { AggQuote, AggQuoteAndSwap, AggSwapBuild, QuoteParams } from "./types";
 
 const BINANCE_CHAIN_ID = "56";
+
+const wireDexList = z
+  .object({ dexRouterList: z.array(z.object({ dexProtocol: z.object({ dexName: z.string() }).passthrough() }).passthrough()) })
+  .passthrough();
+
+/** The route's dex names, deduplicated; empty when the wire carried no list. */
+function dexNamesOf(route: unknown): string[] {
+  const parsed = wireDexList.safeParse(route);
+  return parsed.success ? [...new Set(parsed.data.dexRouterList.map((d) => d.dexProtocol.dexName))] : [];
+}
 
 // `data` is an array of routes; every live call in research returned exactly one.
 const wireQuoteRoute = z
@@ -51,6 +61,7 @@ export async function quote(p: QuoteParams): Promise<AggQuote> {
     toTokenAmount: BigInt(route.toTokenAmount),
     priceImpactPercent: Number(route.priceImpactPercent),
     approveTarget: route.approveTarget as `0x${string}`,
+    dexNames: dexNamesOf(route),
     raw: route,
   };
 }
@@ -88,9 +99,13 @@ export async function buildSwap(p: QuoteParams & { quoteId: string; slippagePerc
   if (!parsed.success) {
     throw new BinanceWeb3Error(-1, "unexpected response shape: /api/v1/dex/aggregator/swap", 200);
   }
-  const { tx } = parsed.data;
+  return toSwapBuild(parsed.data);
+}
+
+function toSwapBuild(b: z.infer<typeof wireSwapBuild>): AggSwapBuild {
+  const { tx } = b;
   return {
-    executionMode: parsed.data.executionMode,
+    executionMode: b.executionMode,
     tx: {
       from: tx.from as `0x${string}`,
       to: tx.to as `0x${string}`,
@@ -100,5 +115,46 @@ export async function buildSwap(p: QuoteParams & { quoteId: string; slippagePerc
       gasPrice: tx.gasPrice,
       minReceiveAmount: BigInt(tx.minReceiveAmount),
     },
+    dexNames: dexNamesOf(b.routerResult),
+  };
+}
+
+const wireQuoteAndSwap = wireSwapBuild.extend({
+  routerResult: z
+    .object({ fromTokenAmount: z.string(), toTokenAmount: z.string(), priceImpactPercent: z.string() })
+    .passthrough(),
+});
+
+/**
+ * `/quote-and-swap` (LIVE 2026-10-09): one call that prices and builds, and the only aggregator
+ * endpoint that honours `excludeDexes` — `/quote` and `/swap` ignore it, and every endpoint
+ * ignores `enableRfq=false`. It requires `vendor`; "LiquidMesh" is the vendor behind every live
+ * route. Its `routerResult` carries no quoteId and no approveTarget: the spender is the router
+ * `tx.to` names, which callers assert.
+ */
+export async function quoteAndSwap(p: QuoteParams & { slippagePercent: string; excludeDexes: string[] }): Promise<AggQuoteAndSwap> {
+  const data = await web3Request<unknown>("GET", "/api/v1/dex/aggregator/quote-and-swap", {
+    binanceChainId: BINANCE_CHAIN_ID,
+    fromTokenAddress: p.fromToken,
+    toTokenAddress: p.toToken,
+    amount: p.amount.toString(),
+    userWalletAddress: p.taker,
+    slippagePercent: p.slippagePercent,
+    vendor: "LiquidMesh",
+    excludeDexes: p.excludeDexes.join(","),
+  });
+  const parsed = wireQuoteAndSwap.safeParse(Array.isArray(data) ? data[0] : data);
+  if (!parsed.success) {
+    throw new BinanceWeb3Error(-1, "unexpected response shape: /api/v1/dex/aggregator/quote-and-swap", 200);
+  }
+  const r = parsed.data.routerResult;
+  return {
+    quote: {
+      fromTokenAmount: BigInt(r.fromTokenAmount),
+      toTokenAmount: BigInt(r.toTokenAmount),
+      priceImpactPercent: Number(r.priceImpactPercent),
+      dexNames: dexNamesOf(r),
+    },
+    build: toSwapBuild(parsed.data),
   };
 }

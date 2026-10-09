@@ -112,14 +112,14 @@ export function venueSession(symbol: string, platform: RwaPlatform, tMs: number)
  * How far above (+) or below (-) the real share this issuer's token trades, in percent, at `tMs`.
  * Inside the session it hugs the real price; around and outside it the real price is stale and the
  * token drifts above it, Ondo further than bStock. One discount (AMD at Ondo) while the market is
- * open, for the "buy the discount" story. Pre-IPO names carry a bigger premium.
+ * open, for the "buy the discount" story. Pre-IPO names (Cerebras) carry a bigger premium.
  */
 export function gapAt(symbol: string, platform: RwaPlatform, tMs: number): number {
   const us = usMarketState(tMs);
   const h = hash01(`${symbol}:${platform}`);
   const n = wobble(`${symbol}:${platform}:gap`, tMs);
   const ondo = platform === "ondo";
-  const preipo = symbol === "SPCX" || symbol === "CBRS";
+  const preipo = symbol === "CBRS";
   let g: number;
   if (us === "open") {
     g = (h - 0.5) * 0.3 + n * 0.18;

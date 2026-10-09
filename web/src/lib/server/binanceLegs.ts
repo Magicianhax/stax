@@ -27,9 +27,40 @@ import type { Asset, StaxChain } from "@/lib/chains/types";
 import { getBinanceWeb3 } from "./binance";
 import { cached } from "./cache";
 import { BinanceWeb3Error } from "./binance/types";
-import type { RwaToken } from "./binance/types";
+import type { AggQuoteAndSwap, AggSwapBuild, RwaToken } from "./binance/types";
 
 const BPS = BigInt(10_000);
+
+/**
+ * Market makers whose signed quotes Binance embeds in the swap calldata, and which stop filling
+ * seconds after the build. Measured 2026-10-09 by simulating built calldata at growing delays:
+ * Rfq Neptunex (most bStock routes) fills at 1 s and is expired by 3 s; Rfq Halfmoon (most Ondo
+ * routes) by about 18 s. Pool routes still fill at 65 s. A sponsored user op lands about 10 s
+ * after its build (tx 0xda37369e… reverted RFQ_OrderExpired 6 s after its order expired), so a
+ * route through one of these fails on chain, or in the bundler's simulation before it is sent.
+ * Binance names every such maker "Rfq …"; the known names seed `excludeDexes`, which takes names,
+ * not a pattern.
+ */
+const SHORT_LIVED_DEX = /^rfq\b/i;
+const KNOWN_SHORT_LIVED_DEXES = ["Rfq Neptunex", "Rfq Halfmoon", "Rfq Newworld"];
+/**
+ * The most a route that avoids those makers may give up against the maker's own price. Most
+ * gave up 0-0.6% live; a few thin pools quoted 84-100% less, which this refuses.
+ */
+const MAX_DURABLE_GIVEUP_BPS = BigInt(200);
+/** Binance's "Path not found" / "No liquidity" (40465) and "Insufficient liquidity" (40374). */
+const NO_ROUTE_CODES = new Set([40465, 40374]);
+
+export function usesShortLivedMaker(dexNames: readonly string[] | undefined): boolean {
+  return (dexNames ?? []).some((d) => SHORT_LIVED_DEX.test(d));
+}
+
+function noFill(symbol: string): BinanceLegRefusal {
+  return new BinanceLegRefusal(
+    `Binance can't fill ${symbol} right now. Its only seller holds a price for a few seconds, which is too short to send a trade. Try again later, or leave ${symbol} out.`,
+    "no_fill",
+  );
+}
 
 export interface BinanceLegArgs {
   chain: StaxChain;
@@ -92,11 +123,13 @@ export class BinanceLegRefusal extends Error {
    * "min_trade": the $6 floor, written for the person and safe to show as-is. "route": Binance
    * handed back something Stax won't sign (an RFQ route, an unexpected router, a changed
    * amount) — a real refusal, but its words are for logs, never the screen (design critique
-   * P0 #3). Uncoded refusals keep their existing user-facing wording.
+   * P0 #3). "no_fill": the only route runs through a market maker whose quote expires before a
+   * trade can land (`usesShortLivedMaker`); the trade screen offers the other issuer, and a plan
+   * tries the other issuer before refusing. Uncoded refusals keep their existing user-facing wording.
    */
   constructor(
     message: string,
-    readonly code?: "min_trade" | "route" | "price_moved",
+    readonly code?: "min_trade" | "route" | "price_moved" | "no_fill",
   ) {
     super(message);
   }
@@ -145,56 +178,84 @@ export async function buildBinanceLeg(a: BinanceLegArgs): Promise<BinanceLeg> {
   const binance = getBinanceWeb3();
   const fetchQuote = () =>
     binance.quote({ fromToken: a.tokenIn, toToken: a.tokenOut, amount: a.amountIn, taker: a.taker }).catch((err) => wrap(a.symbol, err));
-  // A price check (build=false) is shared for 15 s across every caller asking the same pair and
-  // amount: TradeScreen re-polls every 15 s per viewer, and each live quote spends one call of
-  // Binance's shared 5-per-window budget that real trades, plan legs and dry runs also need.
-  // The swap build always gets a fresh quote.
-  const q = a.build === false ? await sharedPriceQuote(a, fetchQuote) : await fetchQuote();
-  if (q.executionMode !== "SWAP") {
-    throw new BinanceLegRefusal(`${a.symbol}: Binance returned an RFQ route, which a contract can't sign.`, "route");
-  }
-  if (q.approveTarget.toLowerCase() !== router.toLowerCase()) {
-    throw new BinanceLegRefusal(`${a.symbol}: Binance quoted an unexpected router.`, "route");
-  }
-  if (q.fromTokenAmount !== a.amountIn) {
-    throw new BinanceLegRefusal(`${a.symbol}: Binance quoted a different amount than requested.`, "route");
-  }
+  const checkQuote = (q: Quote) => {
+    if (q.executionMode !== "SWAP") {
+      throw new BinanceLegRefusal(`${a.symbol}: Binance returned an RFQ route, which a contract can't sign.`, "route");
+    }
+    if (q.approveTarget.toLowerCase() !== router.toLowerCase()) {
+      throw new BinanceLegRefusal(`${a.symbol}: Binance quoted an unexpected router.`, "route");
+    }
+    if (q.fromTokenAmount !== a.amountIn) {
+      throw new BinanceLegRefusal(`${a.symbol}: Binance quoted a different amount than requested.`, "route");
+    }
+  };
 
-  // Anchor the build's tolerance to what the person reviewed (price checks have nothing to anchor).
-  let slippageBps = a.slippageBps;
-  if (a.build !== false) {
-    const anchored = anchoredSlippageBps({ freshExpectedOut: q.toTokenAmount, reviewedMinOut: a.reviewedMinOut, slippageBps });
-    if (anchored === null) throw new BinanceLegRefusal(PRICE_MOVED_MESSAGE, "price_moved");
-    slippageBps = anchored;
-  }
-  const slippageFloor = (q.toTokenAmount * (BPS - BigInt(slippageBps))) / BPS;
   // A price check (TradeScreen polls every 15 s) needs only the quote. Building the swap is a
   // second call against the shared 5-per-window budget, so it happens only when the user is
-  // about to sign, and a price-only leg carries no calldata.
+  // about to sign, and a price-only leg carries no calldata. The price shown must be the route
+  // the build will take, so a maker route is priced on the route that avoids it.
   if (a.build === false) {
+    // Shared for 15 s across every caller asking the same pair and amount: TradeScreen re-polls
+    // every 15 s per viewer, and each live quote spends one call of Binance's shared budget that
+    // real trades, plan legs and dry runs also need.
+    const q = await sharedPriceQuote(a, async () => {
+      const q0 = await fetchQuote();
+      checkQuote(q0);
+      if (!usesShortLivedMaker(q0.dexNames)) return q0;
+      const d = await durableRoute(a, q0.toTokenAmount, q0.dexNames ?? [], a.slippageBps);
+      return { ...q0, toTokenAmount: d.quote.toTokenAmount, priceImpactPercent: d.quote.priceImpactPercent, dexNames: d.quote.dexNames };
+    });
+    checkQuote(q);
     return {
       router,
       tokenIn: a.tokenIn,
       tokenOut: a.tokenOut,
       amountIn: a.amountIn,
       swapData: "0x",
-      minOut: slippageFloor,
+      minOut: (q.toTokenAmount * (BPS - BigInt(a.slippageBps))) / BPS,
       expectedOut: q.toTokenAmount,
       priceImpactPct: q.priceImpactPercent,
     };
   }
 
-  const slippagePercent = (slippageBps / 100).toString();
-  const built = await binance
-    .buildSwap({
-      fromToken: a.tokenIn,
-      toToken: a.tokenOut,
-      amount: a.amountIn,
-      taker: a.taker,
-      quoteId: q.quoteId,
-      slippagePercent,
-    })
-    .catch((err) => wrap(a.symbol, err));
+  // The swap build always gets a fresh quote, and its tolerance is anchored to what the person
+  // reviewed (lib/slippage.ts).
+  const anchor = (freshExpectedOut: bigint) => {
+    const anchored = anchoredSlippageBps({ freshExpectedOut, reviewedMinOut: a.reviewedMinOut, slippageBps: a.slippageBps });
+    if (anchored === null) throw new BinanceLegRefusal(PRICE_MOVED_MESSAGE, "price_moved");
+    return anchored;
+  };
+  const q = await fetchQuote();
+  checkQuote(q);
+  let expectedOut = q.toTokenAmount;
+  let priceImpactPct = q.priceImpactPercent;
+  let slippageBps = a.slippageBps;
+  let built: AggSwapBuild | undefined;
+  if (!usesShortLivedMaker(q.dexNames)) {
+    slippageBps = anchor(q.toTokenAmount);
+    built = await binance
+      .buildSwap({
+        fromToken: a.tokenIn,
+        toToken: a.tokenOut,
+        amount: a.amountIn,
+        taker: a.taker,
+        quoteId: q.quoteId,
+        slippagePercent: (slippageBps / 100).toString(),
+      })
+      .catch((err) => wrap(a.symbol, err));
+  }
+  if (!built || usesShortLivedMaker(built.dexNames)) {
+    // The best route runs through a maker whose quote would expire before this trade lands:
+    // build the route that avoids it, at a tolerance anchored to its own price.
+    const seen = [...(q.dexNames ?? []), ...(built?.dexNames ?? [])];
+    let d = await durableRoute(a, q.toTokenAmount, seen, a.slippageBps);
+    const anchored = anchor(d.quote.toTokenAmount);
+    if (anchored !== a.slippageBps) d = await durableRoute(a, q.toTokenAmount, seen, anchored);
+    slippageBps = anchored;
+    built = d.build;
+    expectedOut = d.quote.toTokenAmount;
+    priceImpactPct = d.quote.priceImpactPercent;
+  }
   if (built.executionMode !== "SWAP") {
     throw new BinanceLegRefusal(`${a.symbol}: Binance returned an RFQ route, which a contract can't sign.`, "route");
   }
@@ -206,6 +267,7 @@ export async function buildBinanceLeg(a: BinanceLegArgs): Promise<BinanceLeg> {
   if (a.reviewedMinOut !== undefined && built.tx.minReceiveAmount < (a.reviewedMinOut * (BPS - BigInt(1))) / BPS) {
     throw new BinanceLegRefusal(PRICE_MOVED_MESSAGE, "price_moved");
   }
+  const slippageFloor = (expectedOut * (BPS - BigInt(slippageBps))) / BPS;
   const minOut = built.tx.minReceiveAmount < slippageFloor ? built.tx.minReceiveAmount : slippageFloor;
 
   return {
@@ -215,9 +277,38 @@ export async function buildBinanceLeg(a: BinanceLegArgs): Promise<BinanceLeg> {
     amountIn: a.amountIn,
     swapData: built.tx.data,
     minOut,
-    expectedOut: q.toTokenAmount,
-    priceImpactPct: q.priceImpactPercent,
+    expectedOut,
+    priceImpactPct,
   };
+}
+
+/**
+ * The same trade built by `/quote-and-swap` with every short-lived maker excluded. Refused as
+ * "no_fill" when nothing else can fill it, when the result still names a maker (a new one Binance
+ * added), or when it gives up more than MAX_DURABLE_GIVEUP_BPS against `makerOut`, the maker
+ * route's own output.
+ */
+async function durableRoute(a: BinanceLegArgs, makerOut: bigint, seen: string[], slippageBps: number): Promise<AggQuoteAndSwap> {
+  const excludeDexes = [...new Set([...KNOWN_SHORT_LIVED_DEXES, ...seen.filter((d) => SHORT_LIVED_DEX.test(d))])];
+  const r = await getBinanceWeb3()
+    .quoteAndSwap({
+      fromToken: a.tokenIn,
+      toToken: a.tokenOut,
+      amount: a.amountIn,
+      taker: a.taker,
+      slippagePercent: (slippageBps / 100).toString(),
+      excludeDexes,
+    })
+    .catch((err) => {
+      if (err instanceof BinanceWeb3Error && NO_ROUTE_CODES.has(err.code)) throw noFill(a.symbol);
+      return wrap(a.symbol, err);
+    });
+  if (usesShortLivedMaker(r.quote.dexNames) || usesShortLivedMaker(r.build.dexNames)) throw noFill(a.symbol);
+  if (r.quote.fromTokenAmount !== a.amountIn) {
+    throw new BinanceLegRefusal(`${a.symbol}: Binance quoted a different amount than requested.`, "route");
+  }
+  if (r.quote.toTokenAmount * BPS < makerOut * (BPS - MAX_DURABLE_GIVEUP_BPS)) throw noFill(a.symbol);
+  return r;
 }
 
 /**
@@ -303,8 +394,16 @@ const PRICE_QUOTE_TTL_S = 15;
 
 async function sharedPriceQuote(a: BinanceLegArgs, fetchQuote: () => Promise<Quote>): Promise<Quote> {
   const key = `binance:pq:${a.chain.key}:${a.tokenIn.toLowerCase()}:${a.tokenOut.toLowerCase()}:${a.amountIn}`;
-  const stored = await cached<StoredQuote>(key, PRICE_QUOTE_TTL_S, async () => {
-    const q = await fetchQuote();
+  // A no-fill is remembered for the same 15 s as a price, so a pair only a maker can fill isn't
+  // re-asked on every poll.
+  const stored = await cached<StoredQuote | { noFill: true }>(key, PRICE_QUOTE_TTL_S, async () => {
+    let q: Quote;
+    try {
+      q = await fetchQuote();
+    } catch (err) {
+      if (err instanceof BinanceLegRefusal && err.code === "no_fill") return { noFill: true };
+      throw err;
+    }
     return {
       quoteId: q.quoteId,
       vendorName: q.vendorName,
@@ -315,5 +414,6 @@ async function sharedPriceQuote(a: BinanceLegArgs, fetchQuote: () => Promise<Quo
       toTokenAmount: q.toTokenAmount.toString(),
     };
   });
+  if ("noFill" in stored) throw noFill(a.symbol);
   return { ...stored, fromTokenAmount: BigInt(stored.fromTokenAmount), toTokenAmount: BigInt(stored.toTokenAmount), raw: undefined };
 }

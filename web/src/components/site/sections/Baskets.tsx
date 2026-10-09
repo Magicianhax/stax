@@ -1,7 +1,7 @@
 "use client";
 
 // Baskets — "One tap, a whole mix." Six curated BNB Chain baskets (AI chips,
-// Magnificent 7, index funds, Buffett-style, pre-IPO, stocks + Bitcoin),
+// Magnificent 7, index funds, Buffett-style, newly public, stocks + Bitcoin),
 // filtered the same way the app filters them (every holding buyable), with
 // their real weights (lib/site/landing `landingBaskets`). Cards on 3×4 columns at equal height; the whole card is the link.
 // One gesture: the weight bars extend from zero the first time the row shows

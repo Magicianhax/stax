@@ -342,7 +342,8 @@ route's mode is `SWAP` (see RFQ below).
 | `vendor` | no | single-vendor filter (`LiquidMesh`, `Pancake`, …) |
 | `feePercent` + `feeSource` | no | **must be sent together** (LIVE, undocumented). `feeSource` = `FROM_TOKEN` (LIVE) or `TO_TOKEN` (DOCS). Range 0–5 on EVM (DOCS). |
 | `fromTokenReferrerWalletAddress` or `toTokenReferrerWalletAddress` | with fee | the fee recipient; the two are mutually exclusive (DOCS). Only the `from` variant was tested. |
-| `enableRfq` | no | appears on `quote-and-swap` in the SDK. Whether `/quote` and `/swap` honour it is UNVERIFIED. |
+| `enableRfq` | no | **ignored** (LIVE 2026-10-09): `false` still returns "Rfq Neptunex" routes on `/quote`, `/swap` and `/quote-and-swap`. |
+| `excludeDexes` | no | comma-joined dex names. **Ignored by `/quote`; honoured only by `/quote-and-swap`** (LIVE 2026-10-09). |
 
 **Minimum order: exactly $5.00 fails** (`40375`) and $6.00 succeeds. Treat the minimum as
 **more than $5**. This applies **per quote, so per basket leg**.
@@ -421,8 +422,31 @@ honoured, or a `vendor` filter).
 
 ### Other (DOCS)
 
-- `GET /quote-and-swap`: a one-shot build with extra params (`excludeDexes, enableRfq,
-  approveTransaction, gasLevel, …`). Not called.
+- `GET /quote-and-swap` (LIVE 2026-10-09): a one-shot quote + build. **Requires `vendor`**
+  (`40001 "Parameter [vendor] is required"`; `LiquidMesh` works) and is the only endpoint that
+  honours `excludeDexes`. Response: `{ executionMode, routerResult, tx, rfq }` like `/swap`, but
+  `routerResult` has no `quoteId` and no `approveTarget`. No route left after exclusions:
+  `40465 "LiquidMesh EVM quoteAndSwap error: Path not found"` (or `"No liquidity"`).
+
+### Short-lived market makers inside SWAP routes (LIVE 2026-10-09)
+
+`executionMode` is `"SWAP"` and `rfq` is `null` even when the route runs through an RFQ market
+maker. The only signal is the dex name in `dexRouterList` ("Rfq Neptunex", "Rfq Halfmoon",
+"Rfq Newworld"). Each maker's signed order, with its own expiry, is embedded in the calldata. The
+router's own deadline is ~500 s, but the maker's order is much shorter. Measured by `eth_call` of
+the built `[approve, swap]` batch at growing delays:
+
+| Route | Still fills at | Fails by |
+|---|---|---|
+| Rfq Neptunex (most bStock routes) | 1 s | 3 s |
+| Rfq Halfmoon (most Ondo routes) | 14 s | 18 s |
+| Kipseli | 45 s | 65 s |
+| Uniswap / Pancake pools | 65 s | (deadline) |
+
+On chain the failure reads `adapter:0x7977f3e8e063a4ee95b5f396d63485dbdea4515d:Error(RFQ_OrderExpired …)`.
+A sponsored ERC-4337 user op lands ~10 s after the build, so Stax excludes every "Rfq …" dex
+(ADR-0016). With them excluded, 10 of 42 tickers had no route on either issuer, and a few pool
+routes quoted 84-100% below the maker (RKLBB, BABAon, AVGOon, TQQQon).
 - `GET /history?binanceChainId&txHash`: swap status. Not called.
 - MEV: nothing on EVM in the aggregator. EVM MEV protection is `enableMevProtection` on broadcast
   (§5).

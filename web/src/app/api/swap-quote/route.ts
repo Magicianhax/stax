@@ -238,8 +238,10 @@ export async function POST(req: NextRequest) {
       }
       if (err instanceof BinanceLegRefusal) {
         // Design critique P0 #3: a "route" refusal (RFQ, unexpected router, changed amount) is
-        // real, but its words are for the log — the client shows its own plain sentence.
-        if (err.code === "route") {
+        // real, but its words are for the log — the client shows its own plain sentence. So is
+        // "no_fill" (only a short-lived maker can fill this issuer): that sentence offers the
+        // other issuer, which is the next step here.
+        if (err.code === "route" || err.code === "no_fill") {
           console.error("[swap-quote]", err.message);
           return jsonError(502, "We couldn't get a price just now. Try again in a moment.");
         }

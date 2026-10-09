@@ -189,7 +189,7 @@ const BASE_SEEDS: Seed[] = [
     icon: "rocket",
     color: "#7c6fcf",
     items: [
-      { symbol: "SPCX", weightPct: 40, reason: "A rare piece of a private space company." },
+      { symbol: "SPCX", weightPct: 40, reason: "SpaceX: rockets and Starlink, newly listed on the stock market." },
       { symbol: "NVDA", weightPct: 35, reason: "The chips behind the AI boom." },
       { symbol: "BTC", weightPct: 25, reason: "Bitcoin, known for large ups and downs." },
     ],
@@ -352,14 +352,14 @@ const BSC_SEEDS: Seed[] = [
     ],
   },
   {
-    slug: "pre-ipo",
-    name: "Pre-IPO",
-    tagline: "Two private companies you can't buy shares of anywhere else. Higher risk.",
+    slug: "newly-public",
+    name: "Newly Public",
+    tagline: "Companies that only recently started trading on a stock exchange. Expect big swings.",
     icon: "rocket",
     color: "#7c6fcf",
     items: [
-      { symbol: "SPCX", weightPct: 60, reason: "A rare piece of a private space company. Not publicly traded, so expect bigger swings." },
-      { symbol: "CBRS", weightPct: 40, reason: "A private AI chip maker. Not publicly traded, so expect bigger swings." },
+      { symbol: "SPCX", weightPct: 60, reason: "SpaceX: rockets and Starlink internet, newly listed. Expect bigger swings." },
+      { symbol: "CRCL", weightPct: 40, reason: "Circle, the company behind the USDC digital dollar, listed in 2025." },
     ],
   },
   {

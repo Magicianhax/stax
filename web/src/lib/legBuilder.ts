@@ -33,7 +33,7 @@ import {
 import { priceLimitSqrtX96 } from "./swapGuards";
 import { assetBySymbol } from "./chains";
 import { kyberBuild, kyberRoute } from "./server/kyber";
-import { buildBinanceLeg } from "./server/binanceLegs";
+import { BinanceLegRefusal, buildBinanceLeg, checkBscBuyable } from "./server/binanceLegs";
 import { resolveBscStockToken } from "./server/bscLegToken";
 import { loadBscMarket, type BscMarket } from "./server/bscMarket";
 import { rawToUsd } from "./units";
@@ -436,6 +436,11 @@ interface LegEntry {
   tokenOut?: `0x${string}`;
   /** "binance" legs: the issuer the allocation entry named (what the plan screen showed). */
   planned?: { venue?: RwaPlatform; address?: string };
+  /**
+   * "binance" stock legs, not strict: the other issuer's token when it is buyable right now. Used
+   * only when Binance can't fill `tokenOut` ("no_fill": its only route is a short-lived maker).
+   */
+  altTokenOut?: `0x${string}`;
 }
 
 /**
@@ -467,6 +472,11 @@ async function resolveBinanceTokens(
       tokens: market.tokens,
       nowMs: market.nowMs,
     });
+    // A strict plan (an Autopilot rule) never switches issuer; anyone else may, if the one it
+    // resolved can't be filled.
+    if (strictVenue) continue;
+    const other = [e.asset.address, e.asset.twin?.address].find((t) => t && t.toLowerCase() !== e.tokenOut!.toLowerCase());
+    if (other && checkBscBuyable(market.tokens, other, e.asset.symbol, market.nowMs).ok) e.altTokenOut = other;
   }
 }
 
@@ -504,7 +514,15 @@ async function buildAll(
         case "aave":
           return buildAaveLeg(chain, asset, usdcIn);
         case "binance":
-          return buildBinanceExecutorLeg(chain, asset, entry.tokenOut!, usdcIn, slippageBps);
+          try {
+            return await buildBinanceExecutorLeg(chain, asset, entry.tokenOut!, usdcIn, slippageBps);
+          } catch (err) {
+            // Only a short-lived maker can fill this issuer right now: buy the same share from the
+            // other issuer instead, the same switch resolveBscStockToken makes for a closed one.
+            if (!(err instanceof BinanceLegRefusal && err.code === "no_fill") || !entry.altTokenOut) throw err;
+            notes.push(`${asset.symbol}: bought from the other issuer, which Binance can fill right now.`);
+            return buildBinanceExecutorLeg(chain, asset, entry.altTokenOut, usdcIn, slippageBps);
+          }
         case "route":
           return buildRouteLeg(chain, client, asset, entry.route!, usdcIn, slippageBps, deadline);
         case "kyber": {

@@ -7,14 +7,14 @@ import { balances } from "./wallet";
 import { candles } from "./market";
 import { rwaProfile, rwaPrices, rwaSearch, rwaTokens } from "./rwa";
 import { simulate } from "./transaction";
-import { buildSwap, quote } from "./trading";
+import { buildSwap, quote, quoteAndSwap } from "./trading";
 import type { BinanceWeb3 } from "./types";
 
 let instance: BinanceWeb3 | undefined;
 
 export function getBinanceWeb3(): BinanceWeb3 {
   if (!instance) {
-    instance = { rwaTokens, rwaPrices, rwaSearch, rwaProfile, candles, quote, buildSwap, simulate, balances };
+    instance = { rwaTokens, rwaPrices, rwaSearch, rwaProfile, candles, quote, buildSwap, quoteAndSwap, simulate, balances };
   }
   return instance;
 }
