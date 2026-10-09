@@ -202,6 +202,30 @@ export async function sendSponsoredCalls(
   return receipt;
 }
 
+/**
+ * Build the calls, then send them; when the op fails before or on chain and `resends` is above
+ * zero, build afresh and send again. For aggregator trades: a Binance route through a market
+ * maker fills for only seconds after its build (lib/server/binanceLegs.ts), so a stale build is
+ * replaced, never re-sent. A failed op moves nothing, and an op whose send merely looked failed
+ * shares its nonce with the next attempt, so at most one of them can land.
+ */
+export async function sendBuiltCalls<T extends { calls: Call[] }>(
+  provider: EIP1193Provider,
+  chain: StaxChain,
+  build: () => Promise<T>,
+  resends: number,
+) {
+  for (let attempt = 0; ; attempt++) {
+    const built = await build();
+    try {
+      return { receipt: await sendSponsoredCalls(provider, built.calls, chain), built };
+    } catch (e) {
+      if (!(e instanceof SponsoredCallError) || attempt >= resends) throw e;
+      console.warn(`[aa] resending with a fresh build (attempt ${attempt + 2})`);
+    }
+  }
+}
+
 // --- internals -------------------------------------------------------------
 
 // A minimal EIP-1193-shaped provider over an HTTP JSON-RPC endpoint, so we can

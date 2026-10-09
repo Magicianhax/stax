@@ -61,6 +61,8 @@ export interface BuildLegsResult {
   legs: Leg[];
   usdcTotal: bigint;
   notes: string[];
+  /** Symbols left out because nothing could fill them; their share went to the other legs. */
+  skipped: string[];
 }
 
 export interface BuildLegsArgs {
@@ -427,6 +429,43 @@ async function buildBinanceExecutorLeg(
   return { router: leg.router, tokenOut, usdcIn, minOut: leg.minOut, swapData: leg.swapData };
 }
 
+const isNoFill = (err: unknown) => err instanceof BinanceLegRefusal && err.code === "no_fill";
+
+/**
+ * A BSC stock or coin leg, never failing a plan for one holding Binance can't fill: the issuer
+ * the entry resolved, else the other issuer (kept on the entry, so a re-split doesn't ask the
+ * first one again), else null so buildAll leaves it out and re-splits its share across the rest.
+ * A strict plan (an Autopilot rule) chose its issuer and its holdings on purpose: it refuses.
+ */
+async function buildBinanceEntryLeg(
+  chain: StaxChain,
+  asset: Asset,
+  entry: LegEntry,
+  usdcIn: bigint,
+  slippageBps: bigint,
+  notes: string[],
+  strict: boolean,
+): Promise<Leg | null> {
+  try {
+    return await buildBinanceExecutorLeg(chain, asset, entry.tokenOut!, usdcIn, slippageBps);
+  } catch (err) {
+    if (!isNoFill(err)) throw err;
+    if (entry.altTokenOut) {
+      try {
+        const leg = await buildBinanceExecutorLeg(chain, asset, entry.altTokenOut, usdcIn, slippageBps);
+        entry.tokenOut = entry.altTokenOut;
+        entry.altTokenOut = undefined;
+        notes.push(`${asset.symbol}: bought from the other issuer, which Binance can fill right now.`);
+        return leg;
+      } catch (err2) {
+        if (!isNoFill(err2)) throw err2;
+      }
+    }
+    if (strict) throw err;
+    return null;
+  }
+}
+
 interface LegEntry {
   asset: Asset;
   kind: LegKind;
@@ -493,6 +532,8 @@ async function buildAll(
   slippageBps: bigint,
   deadline: bigint,
   notes: string[],
+  strict = false,
+  skipped: string[] = [],
 ): Promise<Leg[]> {
   if (entries.length === 0) {
     throw new Error(
@@ -514,15 +555,7 @@ async function buildAll(
         case "aave":
           return buildAaveLeg(chain, asset, usdcIn);
         case "binance":
-          try {
-            return await buildBinanceExecutorLeg(chain, asset, entry.tokenOut!, usdcIn, slippageBps);
-          } catch (err) {
-            // Only a short-lived maker can fill this issuer right now: buy the same share from the
-            // other issuer instead, the same switch resolveBscStockToken makes for a closed one.
-            if (!(err instanceof BinanceLegRefusal && err.code === "no_fill") || !entry.altTokenOut) throw err;
-            notes.push(`${asset.symbol}: bought from the other issuer, which Binance can fill right now.`);
-            return buildBinanceExecutorLeg(chain, asset, entry.altTokenOut, usdcIn, slippageBps);
-          }
+          return buildBinanceEntryLeg(chain, asset, entry, usdcIn, slippageBps, notes, strict);
         case "route":
           return buildRouteLeg(chain, client, asset, entry.route!, usdcIn, slippageBps, deadline);
         case "kyber": {
@@ -546,6 +579,11 @@ async function buildAll(
   for (const sym of dropped) {
     const e = entryBySymbol.get(sym)!;
     notes.push(`Skipped ${sym} (${e.weightPct}%): no swap route on ${chain.name} right now.`);
+    skipped.push(sym);
+  }
+  // BNB Chain: when not one holding can be filled there is nothing to re-split; say which.
+  if (dropped.length === split.length && entries.some((e) => e.kind === "binance")) {
+    throw new BinanceLegRefusal(`Binance has no seller for ${skipped.join(", ")} right now. Try again in a few minutes.`, "no_fill");
   }
   notes.push(`Re-split the amount across the remaining assets.`);
   return buildAll(
@@ -556,6 +594,8 @@ async function buildAll(
     slippageBps,
     deadline,
     notes,
+    strict,
+    skipped,
   );
 }
 
@@ -606,6 +646,7 @@ export async function buildLegs(args: BuildLegsArgs): Promise<BuildLegsResult> {
   await resolveBinanceTokens(entries, chain, args.bscMarket, nowSeconds, args.strictVenue === true);
 
   const deadline = BigInt(nowSeconds + DEADLINE_SECONDS);
-  const legs = await buildAll(chain, client, entries, usdcTotal, slippageBps, deadline, notes);
-  return { legs, usdcTotal, notes };
+  const skipped: string[] = [];
+  const legs = await buildAll(chain, client, entries, usdcTotal, slippageBps, deadline, notes, args.strictVenue === true, skipped);
+  return { legs, usdcTotal, notes, skipped };
 }

@@ -11,10 +11,12 @@ import { toTile, catFor } from "@/lib/displayAssets";
 import { YieldTag } from "./primitives";
 import { assetBySymbol } from "@/lib/chains";
 import { usd, txUrl } from "@/lib/format";
+import { skippedLine } from "@/lib/investSummary";
 import { useChain } from "@/lib/chains/active";
 import { signedByExecutor } from "@/lib/plainCopy";
 import { haptic } from "@/lib/haptics";
 import type { InvestSuccess } from "@/lib/invest-types";
+
 
 export function SuccessScreen({
   success,
@@ -105,6 +107,11 @@ export function SuccessScreen({
             </div>
           ))}
         </Reveal>
+        {success.skipped && success.skipped.length > 0 && (
+          <p style={{ margin: "10px 2px 0", fontSize: 13.5, color: "var(--ink-2)", lineHeight: 1.5 }}>
+            {skippedLine(success.skipped, (sym) => assetBySymbol(chain, sym)?.name ?? sym)}
+          </p>
+        )}
       </Reveal>
 
       {/* verified on-chain — the trust moment: Vera's risk call was signed +

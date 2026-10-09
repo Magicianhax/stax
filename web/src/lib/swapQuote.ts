@@ -80,8 +80,8 @@ export function swapQuoteErrorMessage(json: unknown, fallback = "Couldn't get a 
  * and the per-user price-check limit. Anything without a code is an internal or upstream
  * problem and is never shown verbatim.
  */
-export type SwapQuoteErrorCode = "closed" | "min_trade" | "rate_limited" | "price_moved";
-const CODES: ReadonlySet<string> = new Set<SwapQuoteErrorCode>(["closed", "min_trade", "rate_limited", "price_moved"]);
+export type SwapQuoteErrorCode = "closed" | "min_trade" | "rate_limited" | "price_moved" | "no_fill";
+const CODES: ReadonlySet<string> = new Set<SwapQuoteErrorCode>(["closed", "min_trade", "rate_limited", "price_moved", "no_fill"]);
 
 export class SwapQuoteError extends Error {
   constructor(
@@ -126,6 +126,11 @@ export function quoteProblemText(error: unknown, ctx: QuoteProblemContext): stri
   if (error instanceof SwapQuoteError) {
     if (error.code === "min_trade" || error.code === "price_moved") return error.message;
     if (error.code === "rate_limited") return "Too many price checks — wait a few seconds";
+    // Trade moves the buy to the other issuer on its own when that one is open; this is what is
+    // left when it can't (lib/server/binanceLegs.ts "no_fill").
+    if (error.code === "no_fill" && !(ctx.side === "buy" && ctx.otherIssuer)) {
+      return `Binance has no seller for ${ctx.companyName} right now. Try again in a few minutes.`;
+    }
     if (error.code === "closed" && typeof error.nextOpenMs === "number") {
       return `${ctx.companyName} is closed right now. It ${formatOpensLocal(error.nextOpenMs, ctx.nowMs)}.`;
     }

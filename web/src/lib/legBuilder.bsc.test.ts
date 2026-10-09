@@ -213,6 +213,31 @@ describe("buildLegs on BSC: an issuer Binance can't fill", () => {
     expect(notes.join(" ")).toMatch(/NVDA: bought from the other issuer/);
   });
 
+  it("leaves out a holding nothing can fill and re-splits its share across the rest", async () => {
+    buildSwapSpy.mockImplementation(async (p: { toToken: `0x${string}` }) => {
+      if (p.toToken.toLowerCase() === btcb.address!.toLowerCase()) {
+        throw new BinanceLegRefusal("Binance has no seller for BTCB from this issuer right now.", "no_fill");
+      }
+      return { executionMode: "SWAP", tx: { from: EXECUTOR, to: ROUTER, data: "0xbeef", value: "0", gas: "1", gasPrice: "1", minReceiveAmount: BigInt(990) } };
+    });
+    const { legs, skipped, notes } = await buildLegs({
+      chain: bsc,
+      allocation: alloc([
+        { symbol: "NVDA", weightPct: 60, reason: "why" },
+        { symbol: "BTCB", weightPct: 40, reason: "why" },
+      ]),
+      usdcTotal: usdToRaw(bsc, 20),
+      client: noClient,
+      nowSeconds: NOW_S,
+      bscMarket: market(),
+    });
+    expect(skipped).toEqual(["BTCB"]);
+    expect(legs).toHaveLength(1);
+    expect(legs[0].tokenOut).toBe(NVDA_B);
+    expect(legs[0].usdcIn).toBe(usdToRaw(bsc, 20));
+    expect(notes.join(" ")).toMatch(/Skipped BTCB/);
+  });
+
   it("refuses with 'no_fill' when neither issuer can be filled", async () => {
     buildSwapSpy.mockImplementation(async () => {
       throw new BinanceLegRefusal("Binance can't fill NVDA right now.", "no_fill");

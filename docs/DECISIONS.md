@@ -181,3 +181,21 @@ other issuer when it is buyable, and an Autopilot rule (strict issuer) refuses.
 AXTI, CBRS, CRWV, EWY, GLW, LITE, PLTR, QCOM, RKLB, WDC) had no usable route on either issuer and
 are refused until pool liquidity appears (RKLB's only other route was 84% worse). Failed user ops now show a plain sentence, not the
 bundler's calldata dump.
+
+## ADR-0017 Fill every trade we can: timed makers, resends, re-split (2026-10-09)
+**Status:** accepted (amends ADR-0016, which refused anything only a maker could fill)
+**Context:** Refusing left QCOM, PLTR, WDC and 8 other tickers unbuyable, and a basket holding
+one of them failed as a whole. Measured windows: Rfq Halfmoon (Ondo) fills for 15 s, Rfq
+Neptunex (bStock) is expired by 2 s. `/quote-and-swap` never returns a Halfmoon route, even with
+no exclusions; plain `/quote` + `/swap` does.
+**Decision:** A leg takes, in order: a pool route (every maker excluded, within 2%); Binance's
+own `/swap` route when every maker on it is timed (Halfmoon, `fillWithinS: 15`); a timed-only
+re-route; else `no_fill`. Plans and baskets then try the other issuer, and only when neither can
+be filled leave that holding out and re-split its share (the success screen names it). Autopilot
+rules still refuse. The Trade screen moves a buy to the other issuer on `no_fill`. Clients ready
+the smart account before the build, sign without a Privy pop-up (`showWalletUIs: false`; Stax's
+review screen is the confirmation), and rebuild and resend up to twice when a user op fails.
+**Consequences:** Live 2026-10-09: QCOM, PLTR and WDC (Ondo, Halfmoon) and AVGO, NVDA (pools)
+legs still filled 8 s after the build. A Halfmoon leg must land within 15 s of its build, so a
+slow bundler can still fail it once; the resend rebuilds it. Same-nonce resends mean at most one
+attempt can land.

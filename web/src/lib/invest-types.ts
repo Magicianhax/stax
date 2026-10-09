@@ -51,6 +51,8 @@ export interface InvestPlanResult {
   /** Explorer base URL for `chain` (e.g. https://basescan.org) so the client never guesses. */
   explorer: string;
   notes: string[];
+  /** BNB Chain: holdings left out because Binance had no seller for them; the rest absorbed their share. */
+  skipped?: string[];
   /**
    * Direct smart-account path (ADR-0005): present instead of being sent through the executor
    * when a Binance chain's `chain.contracts.deployed` is false. The client sends these calls
@@ -75,6 +77,8 @@ export interface InvestSuccess {
   txHash: `0x${string}`;
   holdings: { symbol: string; name: string; weightPct: number; amountUsd: number }[];
   amountUsd: number;
+  /** Holdings the plan named that couldn't be bought; their share went to `holdings`. */
+  skipped?: string[];
   /** The on-chain AI verification this plan passed (for the "Verified on-chain" panel). */
   verification?: {
     riskScore: number; // assessed portfolio risk, bps

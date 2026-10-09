@@ -446,17 +446,18 @@ describe("shared price checks", () => {
   });
 });
 
-// 2026-10-09: a $10 NVDA buy reverted RFQ_OrderExpired (tx 0xda37369e…) and a $50 Vera plan
-// failed SwapCallFailed(1) in the bundler's simulation. Binance's best route ran through "Rfq …"
-// market makers whose signed quotes stop filling 2-18 s after the build, and a sponsored user op
-// lands about 10 s after it. The leg must take the route that avoids them, or refuse.
-describe("short-lived market makers", () => {
+// 2026-10-09: a $10 NVDA buy reverted RFQ_OrderExpired (tx 0xda37369e…) and a $50 basket failed
+// SwapCallFailed(1) in the bundler's simulation. Binance's best route ran through "Rfq …" market
+// makers whose signed orders stop filling seconds after the build (Neptunex by 2 s, Halfmoon at
+// 16 s). The leg re-routes: pools first, then a route whose only makers are timed (Halfmoon).
+describe("market-maker routes", () => {
   const quoteAndSwapSpy = vi.fn();
   const makerQuote = { ...goodQuote, toTokenAmount: BigInt(1000), dexNames: ["Rfq Neptunex"] };
-  const durable = (out: bigint, dexNames = ["Uniswap V4"], minReceiveAmount = (out * BigInt(99)) / BigInt(100)) => ({
+  const reroute = (out: bigint, dexNames = ["Uniswap V4"], minReceiveAmount = (out * BigInt(99)) / BigInt(100)) => ({
     quote: { fromTokenAmount: usdToRaw(bsc, 10), toTokenAmount: out, priceImpactPercent: 0.02, dexNames },
     build: { ...goodSwap, tx: { ...goodSwap.tx, data: "0xd0d0" as const, minReceiveAmount }, dexNames },
   });
+  const noRoute = () => new BinanceWeb3Error(40465, "LiquidMesh EVM quoteAndSwap error: Path not found", 200);
 
   beforeEach(() => {
     quoteAndSwapSpy.mockReset();
@@ -467,17 +468,49 @@ describe("short-lived market makers", () => {
     } as unknown as ReturnType<typeof getBinanceWeb3>);
   });
 
-  it("builds the route that avoids every known maker instead of the maker's own swap", async () => {
+  it("takes a pool route with every maker excluded before anything else", async () => {
     quoteSpy.mockResolvedValueOnce(makerQuote);
-    quoteAndSwapSpy.mockResolvedValueOnce(durable(BigInt(995)));
+    quoteAndSwapSpy.mockResolvedValueOnce(reroute(BigInt(995)));
     const leg = await buildBinanceLeg(args());
     expect(buildSwapSpy).not.toHaveBeenCalled();
+    expect(quoteAndSwapSpy).toHaveBeenCalledTimes(1);
     expect(quoteAndSwapSpy).toHaveBeenCalledWith(
       expect.objectContaining({ excludeDexes: expect.arrayContaining(["Rfq Neptunex", "Rfq Halfmoon", "Rfq Newworld"]), taker: SMART_ACCOUNT }),
     );
     expect(leg.swapData).toBe("0xd0d0");
     expect(leg.expectedOut).toBe(BigInt(995));
     expect(leg.minOut).toBe((BigInt(995) * BigInt(99)) / BigInt(100));
+    expect(leg.fillWithinS).toBeUndefined();
+  });
+
+  it("falls back to the Halfmoon maker (15 s) when no pool can fill it, and says how long it lasts", async () => {
+    quoteSpy.mockResolvedValueOnce(makerQuote);
+    quoteAndSwapSpy.mockRejectedValueOnce(noRoute()).mockResolvedValueOnce(reroute(BigInt(998), ["Rfq Halfmoon"]));
+    const leg = await buildBinanceLeg(args());
+    const timedCall = quoteAndSwapSpy.mock.calls[1][0];
+    expect(timedCall.excludeDexes).toContain("Rfq Neptunex");
+    expect(timedCall.excludeDexes).not.toContain("Rfq Halfmoon");
+    expect(leg.expectedOut).toBe(BigInt(998));
+    expect(leg.fillWithinS).toBe(15);
+  });
+
+  it("builds Binance's own Halfmoon route through /swap when no pool can fill it (/quote-and-swap never returns one)", async () => {
+    quoteSpy.mockResolvedValueOnce({ ...goodQuote, dexNames: ["Rfq Halfmoon"] });
+    buildSwapSpy.mockResolvedValueOnce({ ...goodSwap, dexNames: ["Rfq Halfmoon"] });
+    quoteAndSwapSpy.mockRejectedValue(noRoute());
+    const leg = await buildBinanceLeg(args());
+    expect(quoteAndSwapSpy).toHaveBeenCalledTimes(1); // the pool attempt only
+    expect(buildSwapSpy).toHaveBeenCalledWith(expect.objectContaining({ quoteId: "q1" }));
+    expect(leg.swapData).toBe("0xdeadbeef");
+    expect(leg.fillWithinS).toBe(15);
+  });
+
+  it("prices a Halfmoon-only pair on Binance's own route", async () => {
+    const amountIn = usdToRaw(bsc, 15.55);
+    quoteSpy.mockResolvedValueOnce({ ...goodQuote, fromTokenAmount: amountIn, toTokenAmount: BigInt(777), dexNames: ["Rfq Halfmoon"] });
+    quoteAndSwapSpy.mockRejectedValue(noRoute());
+    const leg = await buildBinanceLeg(args({ amountIn, usdValue: 15.55, build: false }));
+    expect(leg.expectedOut).toBe(BigInt(777));
   });
 
   it("keeps the ordinary quote-then-swap path when no maker is on the route", async () => {
@@ -490,36 +523,37 @@ describe("short-lived market makers", () => {
   it("re-routes when the built swap itself comes back through a maker, excluding the one it named", async () => {
     quoteSpy.mockResolvedValueOnce({ ...goodQuote, dexNames: ["Uniswap V4"] });
     buildSwapSpy.mockResolvedValueOnce({ ...goodSwap, dexNames: ["Rfq Brandnew"] });
-    quoteAndSwapSpy.mockResolvedValueOnce(durable(BigInt(999)));
+    quoteAndSwapSpy.mockResolvedValueOnce(reroute(BigInt(999)));
     const leg = await buildBinanceLeg(args());
     expect(quoteAndSwapSpy.mock.calls[0][0].excludeDexes).toContain("Rfq Brandnew");
     expect(leg.swapData).toBe("0xd0d0");
   });
 
-  it("refuses 'no_fill', naming the stock, when only a maker can fill it", async () => {
+  it("refuses 'no_fill', naming the stock, only when neither pools nor a timed maker can fill it", async () => {
     quoteSpy.mockResolvedValueOnce(makerQuote);
-    quoteAndSwapSpy.mockRejectedValueOnce(new BinanceWeb3Error(40465, "LiquidMesh EVM quoteAndSwap error: Path not found", 200));
+    quoteAndSwapSpy.mockRejectedValue(noRoute());
     const err = await buildBinanceLeg(args()).catch((e) => e);
+    expect(quoteAndSwapSpy).toHaveBeenCalledTimes(2);
     expect(err).toBeInstanceOf(BinanceLegRefusal);
     expect(err.code).toBe("no_fill");
-    expect(err.message).toMatch(/^Binance can't fill NVDA right now/);
+    expect(err.message).toMatch(/^Binance has no seller for NVDA/);
   });
 
-  it("refuses 'no_fill' when the other route gives up more than 2% against the maker", async () => {
+  it("never uses a re-route that gives up more than 2% against the maker", async () => {
     quoteSpy.mockResolvedValueOnce(makerQuote);
-    quoteAndSwapSpy.mockResolvedValueOnce(durable(BigInt(979))); // 2.1% under the maker's 1000
+    quoteAndSwapSpy.mockResolvedValue(reroute(BigInt(979))); // 2.1% under the maker's 1000
     await expect(buildBinanceLeg(args())).rejects.toMatchObject({ code: "no_fill" });
   });
 
-  it("accepts the other route at exactly 2% under the maker", async () => {
+  it("accepts a re-route at exactly 2% under the maker", async () => {
     quoteSpy.mockResolvedValueOnce(makerQuote);
-    quoteAndSwapSpy.mockResolvedValueOnce(durable(BigInt(980)));
+    quoteAndSwapSpy.mockResolvedValueOnce(reroute(BigInt(980)));
     await expect(buildBinanceLeg(args())).resolves.toMatchObject({ expectedOut: BigInt(980) });
   });
 
-  it("refuses when the route that should avoid makers still names one (a maker Binance added)", async () => {
+  it("never uses a maker with no measured window, even one Binance just added", async () => {
     quoteSpy.mockResolvedValueOnce(makerQuote);
-    quoteAndSwapSpy.mockResolvedValueOnce(durable(BigInt(999), ["Rfq Somethingnew"]));
+    quoteAndSwapSpy.mockResolvedValue(reroute(BigInt(999), ["Rfq Somethingnew"]));
     await expect(buildBinanceLeg(args())).rejects.toMatchObject({ code: "no_fill" });
   });
 
@@ -529,10 +563,10 @@ describe("short-lived market makers", () => {
     await expect(buildBinanceLeg(args())).rejects.toBeInstanceOf(BinanceLegError);
   });
 
-  it("re-anchors the avoiding route to the reviewed floor before building it", async () => {
+  it("re-anchors the re-route to the reviewed floor before building it", async () => {
     quoteSpy.mockResolvedValueOnce(makerQuote);
-    // Reviewed floor 985; the other route quotes 990, so 1% would drop to 980: tighten and rebuild.
-    quoteAndSwapSpy.mockResolvedValueOnce(durable(BigInt(990))).mockResolvedValueOnce(durable(BigInt(990), ["Uniswap V4"], BigInt(986)));
+    // Reviewed floor 985; the re-route quotes 990, so 1% would drop to 980: tighten and rebuild.
+    quoteAndSwapSpy.mockResolvedValueOnce(reroute(BigInt(990))).mockResolvedValueOnce(reroute(BigInt(990), ["Uniswap V4"], BigInt(986)));
     const leg = await buildBinanceLeg(args({ reviewedMinOut: BigInt(985) }));
     expect(quoteAndSwapSpy).toHaveBeenCalledTimes(2);
     const percent = Number(quoteAndSwapSpy.mock.calls[1][0].slippagePercent);
@@ -544,7 +578,8 @@ describe("short-lived market makers", () => {
   it("prices a price check on the route the build will take, building nothing", async () => {
     const amountIn = usdToRaw(bsc, 13.37);
     quoteSpy.mockResolvedValueOnce({ ...makerQuote, fromTokenAmount: amountIn });
-    quoteAndSwapSpy.mockResolvedValueOnce({ ...durable(BigInt(990)), quote: { ...durable(BigInt(990)).quote, fromTokenAmount: amountIn } });
+    const r = reroute(BigInt(990));
+    quoteAndSwapSpy.mockResolvedValueOnce({ ...r, quote: { ...r.quote, fromTokenAmount: amountIn } });
     const leg = await buildBinanceLeg(args({ amountIn, usdValue: 13.37, build: false }));
     expect(leg.expectedOut).toBe(BigInt(990));
     expect(leg.swapData).toBe("0x");
@@ -554,10 +589,10 @@ describe("short-lived market makers", () => {
   it("remembers a no-fill price check for the next poll instead of asking Binance again", async () => {
     const amountIn = usdToRaw(bsc, 14.21);
     quoteSpy.mockResolvedValueOnce({ ...makerQuote, fromTokenAmount: amountIn });
-    quoteAndSwapSpy.mockRejectedValueOnce(new BinanceWeb3Error(40465, "Path not found", 200));
+    quoteAndSwapSpy.mockRejectedValue(noRoute());
     await expect(buildBinanceLeg(args({ amountIn, usdValue: 14.21, build: false }))).rejects.toMatchObject({ code: "no_fill" });
     await expect(buildBinanceLeg(args({ amountIn, usdValue: 14.21, build: false }))).rejects.toMatchObject({ code: "no_fill" });
     expect(quoteSpy).toHaveBeenCalledTimes(1);
-    expect(quoteAndSwapSpy).toHaveBeenCalledTimes(1);
+    expect(quoteAndSwapSpy).toHaveBeenCalledTimes(2);
   });
 });

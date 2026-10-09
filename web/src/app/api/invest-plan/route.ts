@@ -261,8 +261,9 @@ export async function POST(req: NextRequest) {
     // serverClient batches the per-leg pool reads into one multicall eth_call.
     let legs: Awaited<ReturnType<typeof buildLegs>>["legs"];
     let notes: string[];
+    let skipped: string[];
     try {
-      ({ legs, notes } = await buildLegs({
+      ({ legs, notes, skipped } = await buildLegs({
         chain,
         allocation,
         usdcTotal,
@@ -344,6 +345,7 @@ export async function POST(req: NextRequest) {
       executor: chain.contracts.executor,
       explorer: chain.explorer.url,
       notes,
+      ...(skipped.length > 0 ? { skipped } : {}),
       ...(dryRuns ? { dryRuns } : {}),
     };
     return Response.json(result);
