@@ -162,3 +162,22 @@ fallback for a Binance chain with no executor.
 twin issuer. Vera's BSC record needs `ETHERSCAN_API_KEY` (V2, chain 56) or a keyed BSC RPC: public
 BSC RPCs refuse `eth_getLogs`. Saved BSC Autopilots start running on the next 15:00 UTC cron after
 this ships.
+
+## ADR-0016 BSC trades avoid market makers whose quotes expire in seconds (2026-10-09)
+**Status:** accepted
+**Context:** A $10 NVDA buy reverted on chain with `RFQ_OrderExpired` (tx
+`0xda37369e1ab199a3826deb014b1515f25ac75cf054d6bc49b3425652b2942459`), and a $50 Vera plan failed
+`SwapCallFailed(1)` in the bundler's simulation. Binance's best route for most of the 42 stocks
+runs through "Rfq …" market makers (Neptunex, Halfmoon, Newworld) whose signed quotes, embedded in
+the calldata, stop filling 2-18 s after the build. A sponsored user op lands about 10 s after it.
+`enableRfq=false` is ignored everywhere; `excludeDexes` works only on `/quote-and-swap`.
+**Decision:** When a quote or a built swap names an "Rfq …" dex, the leg is rebuilt through
+`/quote-and-swap` with those dexes excluded, and accepted only within 2% of the maker's output.
+Price checks use the same route, so the reviewed price is the built price. Otherwise the leg is
+refused as `no_fill`: the trade screen offers the other issuer, a Vera plan or basket buys the
+other issuer when it is buyable, and an Autopilot rule (strict issuer) refuses.
+**Consequences:** Live on 2026-10-09, AVGO, TSM, NVDA and AAPL legs built this way still filled
+12 s after the build. Routes give up 0-0.6% against the maker on most names. 11 tickers (AAOI,
+AXTI, CBRS, CRWV, EWY, GLW, LITE, PLTR, QCOM, RKLB, WDC) had no usable route on either issuer and
+are refused until pool liquidity appears (RKLB's only other route was 84% worse). Failed user ops now show a plain sentence, not the
+bundler's calldata dump.

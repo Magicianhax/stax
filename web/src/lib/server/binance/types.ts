@@ -106,6 +106,12 @@ export interface AggQuote {
   priceImpactPercent: number;
   /** The ERC-20 spender. Always equal to the chain's Binance router; callers assert it. */
   approveTarget: `0x${string}`;
+  /**
+   * Every dex on the route (`dexRouterList[].dexProtocol.dexName`, e.g. "Rfq Neptunex",
+   * "Uniswap V4"). binanceLegs.ts reads it to keep trades off market makers whose quotes expire
+   * in seconds. Absent when the wire had no list.
+   */
+  dexNames?: string[];
   raw: unknown;
 }
 
@@ -121,6 +127,14 @@ export interface AggSwapBuild {
     gasPrice: string;
     minReceiveAmount: bigint;
   };
+  /** The dexes the built calldata routes through (`routerResult.dexRouterList`). */
+  dexNames?: string[];
+}
+
+/** One `/quote-and-swap` call: the route it priced and the calldata it built, together. */
+export interface AggQuoteAndSwap {
+  quote: { fromTokenAmount: bigint; toTokenAmount: bigint; priceImpactPercent: number; dexNames: string[] };
+  build: AggSwapBuild;
 }
 
 export interface SimulateResult {
@@ -176,6 +190,8 @@ export interface BinanceWeb3 {
   candles(addr: `0x${string}`, bar: "5m" | "1h" | "4h" | "1d", limit: number): Promise<Candle[]>;
   quote(p: QuoteParams): Promise<AggQuote>;
   buildSwap(p: QuoteParams & { quoteId: string; slippagePercent: string }): Promise<AggSwapBuild>;
+  /** Quote and build in one call, skipping the named dexes (the only endpoint that honours that). */
+  quoteAndSwap(p: QuoteParams & { slippagePercent: string; excludeDexes: string[] }): Promise<AggQuoteAndSwap>;
   simulate(tx: EvmTx): Promise<SimulateResult>;
   /** At most 20 tokens per call. */
   balances(address: `0x${string}`, tokens: `0x${string}`[]): Promise<TokenAsset[]>;

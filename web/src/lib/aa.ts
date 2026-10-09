@@ -125,6 +125,32 @@ export function getSmartAccountClient(provider: EIP1193Provider, chain: StaxChai
   return built;
 }
 
+/** The bundler refused the user op in its simulation, so it was never sent and nothing moved. */
+export const NOT_SENT_MESSAGE = "This didn't go through, and no money moved. Try again in a moment.";
+/** The user op ran and reverted. A batch is atomic, so nothing in it moved either. */
+export const REVERTED_MESSAGE = "This didn't go through on the network, so no money moved. Try again in a moment.";
+
+/**
+ * A sponsored user op that failed before or on chain. `message` is written for the person (the
+ * raw bundler error is a wall of calldata hex); `detail` keeps what went wrong for the console.
+ */
+export class SponsoredCallError extends Error {
+  constructor(
+    message: string,
+    readonly detail: unknown,
+    readonly txHash?: `0x${string}`,
+  ) {
+    super(message);
+    this.name = "SponsoredCallError";
+  }
+}
+
+/** The person said no in the wallet: their own words stand, there is nothing to re-word. */
+function isUserRejection(e: unknown): boolean {
+  const err = e as { code?: unknown; message?: unknown } | null;
+  return err?.code === 4001 || /user rejected|user denied|rejected the request/i.test(String(err?.message ?? ""));
+}
+
 /**
  * Send a batched, gas-sponsored UserOperation on `chain` and wait for it to be mined.
  * Example calls: [approve USDC -> executor, executor.investWithAI(...)].
@@ -147,22 +173,31 @@ export async function sendSponsoredCalls(
   // still costs the sponsor. The paymaster pays actual gas, not the limit, so
   // the padding is free when unused. Fees + paymaster data are re-derived for
   // the padded limits by `sendUserOperation` itself.
-  const prepared = await smartAccountClient.prepareUserOperation({ account, calls: ops });
-  const userOpHash = await smartAccountClient.sendUserOperation({
-    account,
-    calls: ops,
-    callGasLimit: (prepared.callGasLimit * CALL_GAS_PAD_BPS) / BPS,
-    verificationGasLimit: prepared.verificationGasLimit,
-    preVerificationGas: prepared.preVerificationGas,
-    paymasterVerificationGasLimit: prepared.paymasterVerificationGasLimit,
-    paymasterPostOpGasLimit: prepared.paymasterPostOpGasLimit,
-    maxFeePerGas: prepared.maxFeePerGas,
-    maxPriorityFeePerGas: prepared.maxPriorityFeePerGas,
-  });
+  let userOpHash: Hex;
+  try {
+    const prepared = await smartAccountClient.prepareUserOperation({ account, calls: ops });
+    userOpHash = await smartAccountClient.sendUserOperation({
+      account,
+      calls: ops,
+      callGasLimit: (prepared.callGasLimit * CALL_GAS_PAD_BPS) / BPS,
+      verificationGasLimit: prepared.verificationGasLimit,
+      preVerificationGas: prepared.preVerificationGas,
+      paymasterVerificationGasLimit: prepared.paymasterVerificationGasLimit,
+      paymasterPostOpGasLimit: prepared.paymasterPostOpGasLimit,
+      maxFeePerGas: prepared.maxFeePerGas,
+      maxPriorityFeePerGas: prepared.maxPriorityFeePerGas,
+    });
+  } catch (e) {
+    if (isUserRejection(e)) throw e;
+    console.error("[aa] user operation not sent", e);
+    throw new SponsoredCallError(NOT_SENT_MESSAGE, e);
+  }
 
   const receipt = await smartAccountClient.waitForUserOperationReceipt({ hash: userOpHash });
   if (!receipt.success) {
-    throw new Error(`UserOperation reverted (txHash ${receipt.receipt.transactionHash}).`);
+    const txHash = receipt.receipt.transactionHash;
+    console.error(`[aa] user operation reverted, tx ${txHash}`);
+    throw new SponsoredCallError(REVERTED_MESSAGE, receipt.reason, txHash);
   }
   return receipt;
 }

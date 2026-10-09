@@ -187,3 +187,73 @@ describe("buildLegs on BSC with the executor live: issuer-aware legs", () => {
     expect(quoteSpy).not.toHaveBeenCalled();
   });
 });
+
+// A Vera plan or basket leg whose issuer only a short-lived maker can fill ("no_fill") buys the
+// same share from the other issuer, the same switch resolveBscStockToken makes for a closed one.
+// An Autopilot rule (strictVenue) chose its issuer on purpose and refuses instead.
+describe("buildLegs on BSC: an issuer Binance can't fill", () => {
+  const noFillFor = (token: `0x${string}`) => async (p: { toToken: `0x${string}` }) => {
+    if (p.toToken.toLowerCase() === token.toLowerCase()) {
+      throw new BinanceLegRefusal("Binance can't fill NVDA right now.", "no_fill");
+    }
+    return { executionMode: "SWAP", tx: { from: EXECUTOR, to: ROUTER, data: "0xbeef", value: "0", gas: "1", gasPrice: "1", minReceiveAmount: BigInt(990) } };
+  };
+
+  it("buys the other issuer when the planned one can only be filled by a maker", async () => {
+    buildSwapSpy.mockImplementation(noFillFor(NVDA_ONDO));
+    const { legs, notes } = await buildLegs({
+      chain: bsc,
+      allocation: alloc([{ symbol: "NVDA", weightPct: 100, reason: "why", venue: "ondo" }]),
+      usdcTotal: usdToRaw(bsc, 10),
+      client: noClient,
+      nowSeconds: NOW_S,
+      bscMarket: market(),
+    });
+    expect(legs[0].tokenOut).toBe(NVDA_B);
+    expect(notes.join(" ")).toMatch(/NVDA: bought from the other issuer/);
+  });
+
+  it("refuses with 'no_fill' when neither issuer can be filled", async () => {
+    buildSwapSpy.mockImplementation(async () => {
+      throw new BinanceLegRefusal("Binance can't fill NVDA right now.", "no_fill");
+    });
+    const err = await buildLegs({
+      chain: bsc,
+      allocation: alloc([{ symbol: "NVDA", weightPct: 100, reason: "why" }]),
+      usdcTotal: usdToRaw(bsc, 10),
+      client: noClient,
+      nowSeconds: NOW_S,
+      bscMarket: market(),
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(BinanceLegRefusal);
+    expect(err.code).toBe("no_fill");
+  });
+
+  it("never switches to an issuer that is closed", async () => {
+    buildSwapSpy.mockImplementation(noFillFor(NVDA_ONDO));
+    const err = await buildLegs({
+      chain: bsc,
+      allocation: alloc([{ symbol: "NVDA", weightPct: 100, reason: "why", venue: "ondo" }]),
+      usdcTotal: usdToRaw(bsc, 10),
+      client: noClient,
+      nowSeconds: NOW_S,
+      bscMarket: market([row(NVDA_B, false), row(NVDA_ONDO)]),
+    }).catch((e) => e);
+    expect(err.code).toBe("no_fill");
+  });
+
+  it("keeps an Autopilot rule's issuer and refuses rather than switch", async () => {
+    buildSwapSpy.mockImplementation(noFillFor(NVDA_ONDO));
+    const err = await buildLegs({
+      chain: bsc,
+      allocation: alloc([{ symbol: "NVDA", weightPct: 100, reason: "why", venue: "ondo" }]),
+      usdcTotal: usdToRaw(bsc, 10),
+      client: noClient,
+      nowSeconds: NOW_S,
+      bscMarket: market(),
+      strictVenue: true,
+    }).catch((e) => e);
+    expect(err.code).toBe("no_fill");
+    expect(buildSwapSpy).toHaveBeenCalledTimes(1);
+  });
+});

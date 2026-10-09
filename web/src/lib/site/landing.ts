@@ -66,7 +66,7 @@ export const OTHER_NETWORKS_LINE = `Spare USDT can earn in Venus, a BNB Chain le
 
 /**
  * The six themed baskets the landing shows, in this order: AI chips, Magnificent 7, index
- * funds, Buffett-style, pre-IPO, stocks + Bitcoin. Six fills the 3-up grid in two rows. Each
+ * funds, Buffett-style, newly public, stocks + Bitcoin. Six fills the 3-up grid in two rows. Each
  * one still has to pass the app's own `curatedBaskets` filter (every holding buyable), so a
  * basket the app would hide never shows here either.
  */
@@ -75,7 +75,7 @@ export const LANDING_BASKET_SLUGS = [
   "magnificent-7",
   "broad-market",
   "buffett-style-value",
-  "pre-ipo",
+  "newly-public",
   "stocks-and-bitcoin",
 ] as const;
 

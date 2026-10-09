@@ -77,14 +77,16 @@ describe("BSC wave 5 themed baskets", () => {
     expect(b!.items.length).toBeGreaterThanOrEqual(3);
   });
 
-  it("has a Pre-IPO basket of SpaceX and Cerebras, flagged as higher risk", () => {
-    const b = bySlug("pre-ipo");
+  it("has a Newly Public basket of SpaceX and Circle that says the swings out loud", () => {
+    const b = bySlug("newly-public");
     expect(b).toBeDefined();
-    expect(b!.items.map((i) => i.symbol).sort()).toEqual(["CBRS", "SPCX"]);
-    // TIER_BPS.stock alone already scores "Adventurous" or higher; this just pins that a
-    // pre-IPO basket never reads as calm.
+    expect(b!.items.map((i) => i.symbol).sort()).toEqual(["CRCL", "SPCX"]);
     expect(b!.riskScore).toBeGreaterThanOrEqual(5000);
-    expect(b!.tagline + " " + b!.items.map((i) => i.reason ?? "").join(" ")).toMatch(/risk|swings|private/i);
+    expect(b!.tagline).toMatch(/swings/i);
+  });
+
+  it("no longer offers a Pre-IPO basket: SpaceX is listed, and Cerebras alone isn't a basket", () => {
+    expect(bySlug("pre-ipo")).toBeUndefined();
   });
 
   it("has a Stocks + Bitcoin basket pairing a tokenized equity leg with crypto", () => {
@@ -107,8 +109,8 @@ describe("BSC curated baskets and risk flags", () => {
   });
 
   it("says the risk out loud on any basket holding a pre-IPO share", () => {
+    // None does today (the Pre-IPO basket went when SpaceX listed); this keeps any future one honest.
     const withPreIpo = CURATED_BASKETS.bsc.filter((b) => b.items.some((i) => assetBySymbol(chain, i.symbol)?.risk === "preipo"));
-    expect(withPreIpo.length).toBeGreaterThan(0);
     for (const b of withPreIpo) expect(b.tagline.toLowerCase()).toContain("risk");
   });
 });

@@ -51,7 +51,7 @@ describe("BSC crypto assets", () => {
   });
 });
 
-// Design critique P1 #6: SOXL and TQQQ are 3x leveraged ETFs and SPCX/CBRS are pre-IPO shares,
+// Design critique P1 #6: SOXL and TQQQ are 3x leveraged ETFs and CBRS is a pre-IPO share,
 // listed like any household stock. The flag drives Market's "Riskier picks" group, their own
 // plain warning line, and keeping leveraged funds out of Vera's default picks.
 describe("BSC risk flags", () => {
@@ -62,9 +62,12 @@ describe("BSC risk flags", () => {
     expect(assetBySymbol(chain, "TQQQ")?.risk).toBe("leveraged");
   });
 
-  it("flags the pre-IPO private companies", () => {
-    expect(assetBySymbol(chain, "SPCX")?.risk).toBe("preipo");
+  it("flags the pre-IPO private company", () => {
     expect(assetBySymbol(chain, "CBRS")?.risk).toBe("preipo");
+  });
+
+  it("no longer flags SpaceX, which is listed now", () => {
+    expect(assetBySymbol(chain, "SPCX")?.risk).toBeUndefined();
   });
 
   it("leaves ordinary stocks and funds unflagged", () => {

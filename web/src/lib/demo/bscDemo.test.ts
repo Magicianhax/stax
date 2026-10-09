@@ -165,8 +165,10 @@ describe("the demo catalog", () => {
   it("gives funds and pre-IPO names no earnings date, and everyone else a future one", () => {
     const e = buildDemoEarnings(OPEN);
     expect(e.SPY.nextMs).toBeNull();
-    expect(e.SPCX.nextMs).toBeNull();
+    expect(e.CBRS.nextMs).toBeNull();
     expect(e.NVDA.nextMs).toBeGreaterThan(OPEN);
+    // SpaceX is listed now, so it reports like any other company.
+    expect(e.SPCX.nextMs).toBeGreaterThan(OPEN);
   });
 });
 
