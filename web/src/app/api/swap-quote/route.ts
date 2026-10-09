@@ -21,6 +21,7 @@
 // back to it. On BSC that "delivers back to it" is Binance's own msg.sender-only behaviour
 // (docs/BINANCE-WEB3.md §10) rather than an explicit recipient argument — either way the account
 // that calls the router is the one that receives the output.
+import { smartAccountOwnership } from "@/lib/server/accountOwnership";
 import type { NextRequest } from "next/server";
 import { isAddress } from "viem";
 import { z } from "zod";
@@ -37,7 +38,6 @@ import { resolveVenueAddress } from "@/lib/venues";
 import { requireApproved } from "@/lib/server/admin";
 import { verifyRequest } from "@/lib/server/privyAuth";
 import { rateLimit } from "@/lib/server/rateLimit";
-import { getSmartAccount } from "@/lib/server/users";
 import { unauthorized, badRequest, tooManyRequests, serverError, jsonError } from "@/lib/server/respond";
 
 export const dynamic = "force-dynamic";
@@ -146,14 +146,14 @@ export async function POST(req: NextRequest) {
   if (sender.toLowerCase() !== recipient.toLowerCase()) {
     return badRequest("sender and recipient must be the same account.");
   }
-  // …and that account must be the caller's own smart account on this chain (the one
-  // useSmartAccount() registered via /api/me/account). No row yet → allow, warn once.
-  const account = await getSmartAccount(user.userId, chain.key);
-  if (account) {
-    if (account.address.toLowerCase() !== sender.toLowerCase()) {
-      return jsonError(403, "Quote must be for your own account.");
-    }
-  } else if (!warnedNoAccount.has(user.userId)) {
+  // …and that account must be one of the caller's own smart accounts on this chain: the one
+  // useSmartAccount() registered via /api/me/account, or another linked wallet's
+  // (lib/server/accountOwnership.ts). No row yet → allow, warn once.
+  const ownership = await smartAccountOwnership(user.userId, chain, sender);
+  if (ownership === "foreign") {
+    return jsonError(403, "Quote must be for your own account.");
+  }
+  if (ownership === "unregistered" && !warnedNoAccount.has(user.userId)) {
     warnedNoAccount.add(user.userId);
     console.warn(`[swap-quote] no smart_accounts row for user ${user.userId} on ${chain.key}; sender unverified`);
   }

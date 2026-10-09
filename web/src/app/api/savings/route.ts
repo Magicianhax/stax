@@ -7,6 +7,7 @@
 //                              assertExecCallsAreSafe — see lib/execution.ts).
 //   errors  400 not on BSC / bad amount / bad ratio / no position to redeem (SavingsRefusal) ·
 //           502 Binance unavailable
+import { smartAccountOwnership } from "@/lib/server/accountOwnership";
 import type { NextRequest } from "next/server";
 import { isAddress } from "viem";
 import { z } from "zod";
@@ -15,7 +16,6 @@ import { buildSavingsDeposit, buildSavingsRedeem, getSavingsBalanceUsd, getSavin
 import { requireApproved } from "@/lib/server/admin";
 import { verifyRequest } from "@/lib/server/privyAuth";
 import { rateLimit } from "@/lib/server/rateLimit";
-import { getSmartAccount } from "@/lib/server/users";
 import { unauthorized, badRequest, tooManyRequests, serverError } from "@/lib/server/respond";
 
 export const dynamic = "force-dynamic";
@@ -80,11 +80,11 @@ export async function POST(req: NextRequest) {
     return badRequest("Invalid request body.");
   }
 
-  // The address must be the caller's own smart account on this chain — same rule
+  // The address must be one of the caller's own smart accounts on this chain — same rule
   // /api/swap-quote applies to `sender`, so a savings call can't be built for someone else's
-  // account. No row yet (brand-new wallet) is allowed through; there's nothing to protect yet.
-  const account = await getSmartAccount(user.userId, chain.key);
-  if (account && account.address.toLowerCase() !== body.address.toLowerCase()) {
+  // account. Any wallet linked to the login counts (lib/server/accountOwnership.ts); no row yet
+  // (brand-new wallet) is allowed through, there's nothing to protect yet.
+  if ((await smartAccountOwnership(user.userId, chain, body.address)) === "foreign") {
     return badRequest("Savings must be for your own account.");
   }
   const address = body.address as `0x${string}`;
