@@ -11,19 +11,21 @@ import "server-only";
 // or a `mint()` for a different amount than the user asked for. binanceLegs.ts never has this
 // problem because it never trusts Binance for an approve at all: `directCallsForLeg` builds its
 // own exact-amount approve and takes only the swap bytes from Binance. Savings now does the same:
-// `pickDepositCall`/`pickRedeemCalls` below decode every call Binance returns, drop any approve
-// leg Binance wrote (an exact one is always rebuilt here instead, to the pinned Venus address, for
-// an amount this module computed itself), and require the one remaining call to be exactly the
-// vUSDT function it claims to be, on vUSDT, carrying no native value. Anything else throws before
-// `assertSavingsCallsAreSafe`'s address check ever runs — that check stays as a second, narrower
-// layer in case a decode above has a bug, not as the only layer.
+// `pickDepositCall` below decodes every call Binance returns, drops any approve leg Binance wrote
+// (an exact one is always rebuilt here instead, to the pinned Venus address, for an amount this
+// module computed itself), and requires the one remaining call to be exactly vUSDT's `mint`, on
+// vUSDT, carrying no native value. Anything else throws before `assertSavingsCallsAreSafe`'s
+// address check ever runs — that check stays as a second, narrower layer, not as the only layer.
+//
+// Moving money out doesn't ask Binance at all (2026-10-09): its build-redeem answered 40456 "no
+// position found" for a smart account holding $25 of vUSDT, because Binance's position index
+// doesn't see it. The redeem is built here from the on-chain vUSDT balance instead.
 import { decodeFunctionData, encodeFunctionData } from "viem";
 import { ERC20_ABI } from "@/lib/abis";
 import { usdToRaw } from "@/lib/units";
 import { fromUnits } from "@/lib/format";
 import { serverClient } from "@/lib/server/chain";
-import { buildDeposit, buildRedeem, investmentDetail } from "./binance/defi";
-import { BinanceWeb3Error } from "./binance/types";
+import { buildDeposit, investmentDetail } from "./binance/defi";
 import { assertSavingsCallsAreSafe, VENUS_VUSDT_ADDRESS, type ExecCall } from "@/lib/execution";
 import type { StaxChain } from "@/lib/chains/types";
 
@@ -233,79 +235,63 @@ export async function buildSavingsDeposit(chain: StaxChain, address: `0x${string
   return assertSavingsCallsAreSafe(chain, [approveCall, depositCall]);
 }
 
-/**
- * Redeem needs no amount check the way deposit does — the ratio is of a position size this
- * module never independently reads, so there's no exact figure to compare a decoded argument
- * against. What it can still enforce structurally: exactly one non-approve call, on vUSDT, no
- * native value, calling `redeem` or `redeemUnderlying` (never a borrow, a liquidation, or any
- * other vUSDT function); and, since Venus's redeem burns the caller's own vToken balance without
- * needing an allowance (no LIVE response has ever included one — docs/BINANCE-WEB3.md's DeFi
- * section), at most one approve, which — same as deposit — is never forwarded as Binance wrote
- * it: its (spender, amount) is decoded and re-encoded here, and only accepted if the spender is
- * the pinned Venus contract and the token being approved is cash or vUSDT itself.
- */
-function pickRedeemCalls(calls: ExecCall[], cashAddress: `0x${string}`): ExecCall[] {
-  const approveLegs = calls.filter((c) => isErc20Approve(c));
-  const otherLegs = calls.filter((c) => !isErc20Approve(c));
-  if (otherLegs.length !== 1) {
-    throw new Error(`Savings: expected exactly one redeem call from Binance, got ${otherLegs.length}.`);
-  }
-  const redeemCall = otherLegs[0];
-  if (redeemCall.to.toLowerCase() !== VENUS_VUSDT_ADDRESS.toLowerCase()) {
-    throw new Error(`Savings: redeem call targeted ${redeemCall.to}, not the pinned Venus contract.`);
-  }
-  if (!isZeroValue(redeemCall)) {
-    throw new Error("Savings: redeem call carried native value.");
-  }
-  let decoded: ReturnType<typeof decodeFunctionData<typeof VTOKEN_ABI>>;
-  try {
-    decoded = decodeFunctionData({ abi: VTOKEN_ABI, data: redeemCall.data });
-  } catch {
-    throw new Error("Savings: redeem calldata didn't decode as vUSDT's redeem.");
-  }
-  if (decoded.functionName !== "redeem" && decoded.functionName !== "redeemUnderlying") {
-    throw new Error("Savings: redeem calldata called an unexpected vUSDT function.");
-  }
-  if (approveLegs.length > 1) {
-    throw new Error(`Savings: redeem response carried ${approveLegs.length} approve calls.`);
-  }
-  const out: ExecCall[] = [];
-  if (approveLegs.length === 1) {
-    const approveCall = approveLegs[0];
-    const decodedApprove = decodeFunctionData({ abi: ERC20_ABI, data: approveCall.data });
-    const [spender, amount] = decodedApprove.args as readonly [`0x${string}`, bigint];
-    if (spender.toLowerCase() !== VENUS_VUSDT_ADDRESS.toLowerCase()) {
-      throw new Error("Savings: redeem's approve targeted an unexpected spender.");
-    }
-    const token = approveCall.to.toLowerCase();
-    if (token !== cashAddress.toLowerCase() && token !== VENUS_VUSDT_ADDRESS.toLowerCase()) {
-      throw new Error("Savings: redeem's approve was on an unexpected token.");
-    }
-    out.push({ to: approveCall.to, data: encodeFunctionData({ abi: ERC20_ABI, functionName: "approve", args: [spender, amount] }) });
-  }
-  out.push(redeemCall);
-  return out;
+/** Swapped out in tests so nothing here makes a real RPC call. */
+export interface SavingsRedeemDeps {
+  vUsdtBalance: (chain: StaxChain, address: `0x${string}`) => Promise<bigint>;
+  /** vUSDT `redeem(redeemTokens)` simulated as `address`: Venus's own error code, 0 on success. */
+  simulateRedeem: (chain: StaxChain, address: `0x${string}`, redeemTokens: bigint) => Promise<bigint>;
 }
 
+async function onChainSimulateRedeem(chain: StaxChain, address: `0x${string}`, redeemTokens: bigint): Promise<bigint> {
+  const { result } = await serverClient(chain).simulateContract({
+    address: VENUS_VUSDT_ADDRESS,
+    abi: VTOKEN_ABI,
+    functionName: "redeem",
+    args: [redeemTokens],
+    account: address,
+  });
+  return result;
+}
+
+const defaultSavingsRedeemDeps: SavingsRedeemDeps = {
+  vUsdtBalance: onChainVUsdtBalance,
+  simulateRedeem: onChainSimulateRedeem,
+};
+
 /**
- * Unsigned calls to redeem `ratio` (0, 1] of the caller's Venus USDT position back to cash.
- * Binance's own "no position found" (40456 — seen LIVE for a wallet with nothing deposited)
- * becomes a plain `SavingsRefusal`, not an internal-fault 500: it's an honest, expected answer
- * for "you have nothing to move out," the same class of thing bscPlan.ts / binanceLegs.ts do for
- * a trade Binance refuses for a normal, explainable reason.
+ * Unsigned calls to move `ratio` (0, 1] of the caller's Venus USDT position back to cash: one
+ * `redeem(vTokens)` on the pinned vUSDT contract, sized from the vUSDT balance read on chain (all of
+ * it when `ratio` is 1, so nothing is left behind), with no approve (Venus burns the caller's own
+ * vTokens). Simulated as the caller first, because a Compound-style market reports some failures
+ * (not enough cash in the market, say) as a non-zero return code rather than a revert, which would
+ * otherwise land as a "successful" transaction that moved nothing.
  */
-export async function buildSavingsRedeem(chain: StaxChain, address: `0x${string}`, ratio: number): Promise<ExecCall[]> {
+export async function buildSavingsRedeem(
+  chain: StaxChain,
+  address: `0x${string}`,
+  ratio: number,
+  deps: SavingsRedeemDeps = defaultSavingsRedeemDeps,
+): Promise<ExecCall[]> {
   if (chain.key !== "bsc") throw new SavingsRefusal("Savings is only available on BNB Chain right now.");
   if (!Number.isFinite(ratio) || ratio <= 0 || ratio > 1) throw new SavingsRefusal("Enter how much to move out.");
-  let calls: ExecCall[];
+  const balance = await deps.vUsdtBalance(chain, address);
+  if (balance <= BigInt(0)) throw new SavingsRefusal("You don't have savings to move out yet.");
+  const redeemTokens = ratio >= 1 ? balance : (balance * BigInt(Math.round(ratio * 10_000))) / BigInt(10_000);
+  if (redeemTokens <= BigInt(0)) throw new SavingsRefusal("Enter how much to move out.");
+  let code: bigint;
   try {
-    calls = await buildRedeem({ address, investmentId: VENUS_USDT_INVESTMENT_ID, ratio: String(ratio) });
+    code = await deps.simulateRedeem(chain, address, redeemTokens);
   } catch (err) {
-    if (err instanceof BinanceWeb3Error && err.code === 40456) {
-      throw new SavingsRefusal("You don't have savings to move out yet.");
-    }
-    throw err;
+    console.warn("[savings] redeem simulation reverted:", err instanceof Error ? err.message : err);
+    throw new SavingsRefusal("Venus can't release your savings this minute. Try again shortly.");
   }
-  const safeCalls = pickRedeemCalls(calls, chain.usdc.address);
-  return assertSavingsCallsAreSafe(chain, safeCalls);
+  if (code !== BigInt(0)) {
+    console.warn(`[savings] redeem simulation returned Venus error code ${code}`);
+    throw new SavingsRefusal("Venus can't release your savings this minute. Try again shortly.");
+  }
+  const call: ExecCall = {
+    to: VENUS_VUSDT_ADDRESS,
+    data: encodeFunctionData({ abi: VTOKEN_ABI, functionName: "redeem", args: [redeemTokens] }),
+  };
+  return assertSavingsCallsAreSafe(chain, [call]);
 }
