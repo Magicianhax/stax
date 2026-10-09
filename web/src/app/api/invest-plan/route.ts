@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { smartAccountOwnership } from "@/lib/server/accountOwnership";
 import { isAddress } from "viem";
 import { z } from "zod";
 import { AllocationSchema } from "@/lib/allocation-schema";
@@ -12,7 +13,6 @@ import { chainFromRequest, serverClient } from "@/lib/server/chain";
 import { requireApproved } from "@/lib/server/admin";
 import { verifyRequest } from "@/lib/server/privyAuth";
 import { rateLimit } from "@/lib/server/rateLimit";
-import { getSmartAccount } from "@/lib/server/users";
 import { getBinanceWeb3 } from "@/lib/server/binance";
 import { bscCatalogSnapshot } from "@/lib/server/rwaCatalog";
 import { buildBscInvestLegs, notEnoughCashMessage, PLAN_MIN_LEG_MESSAGE } from "@/lib/server/bscPlan";
@@ -59,14 +59,16 @@ async function bscAccountGate(
   address: string,
   grossTotal: bigint,
 ): Promise<{ taker: `0x${string}` } | { refusal: Response }> {
-  const account = await getSmartAccount(userId, chain.key);
-  if (!account) {
+  const ownership = await smartAccountOwnership(userId, chain, address);
+  if (ownership === "unregistered") {
     return { refusal: badRequest("No account found for this network. Please sign in again.") };
   }
-  if (account.address.toLowerCase() !== address.toLowerCase()) {
+  if (ownership === "foreign") {
     return { refusal: jsonError(403, "Plan must be for your own account.") };
   }
-  const taker = account.address as `0x${string}`;
+  // The account the plan is for, verified above: never the registered row's address, which can
+  // belong to the person's other linked wallet.
+  const taker = address as `0x${string}`;
   try {
     const cash = (await serverClient(chain).readContract({
       address: chain.usdc.address,
